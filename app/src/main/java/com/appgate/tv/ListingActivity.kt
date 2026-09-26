@@ -30,9 +30,7 @@ class ListingActivity : AppCompatActivity() {
             .usePrivateMode(false)
             .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
             .build()
-        session = GeckoSession(sessionSettings).apply {
-            contentDelegate = object : GeckoSession.ContentDelegate {}
-            navigationDelegate = object : GeckoSession.NavigationDelegate {
+        val connectedNavigationDelegate = object : GeckoSession.NavigationDelegate {
                 override fun onCanGoBack(session: GeckoSession, value: Boolean) {
                     canGoBack = value
                 }
@@ -45,7 +43,7 @@ class ListingActivity : AppCompatActivity() {
                     // visible GeckoView so the user can complete the provider flow.
                     val child = GeckoSession(sessionSettings).apply {
                         contentDelegate = object : GeckoSession.ContentDelegate {}
-                        navigationDelegate = this@object
+                        navigationDelegate = this
                     }
                     childSessions += child
                     child.open(GeckoRuntimeProvider.get(this@ListingActivity))
@@ -57,6 +55,9 @@ class ListingActivity : AppCompatActivity() {
                     return GeckoResult.fromValue(child)
                 }
             }
+        session = GeckoSession(sessionSettings).apply {
+            contentDelegate = object : GeckoSession.ContentDelegate {}
+            navigationDelegate = connectedNavigationDelegate
             open(GeckoRuntimeProvider.get(this@ListingActivity))
         }
         activeSession = session
