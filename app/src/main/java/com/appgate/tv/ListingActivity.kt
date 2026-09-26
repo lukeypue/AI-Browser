@@ -15,6 +15,7 @@ class ListingActivity : AppCompatActivity() {
     private lateinit var geckoView: GeckoView
     private lateinit var session: GeckoSession
     private var canGoBack = false
+    private var activeSession: GeckoSession? = null
     private val childSessions = mutableListOf<GeckoSession>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,13 +38,28 @@ class ListingActivity : AppCompatActivity() {
                 }
 
                 override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession> {
-                    val child = GeckoSession(sessionSettings)
+                    // OAuth providers commonly open the account chooser in a new browsing
+                    // context. A GeckoSession returned without being attached to a GeckoView
+                    // exists but is invisible/non-interactive, which looked like a dead Google
+                    // button (TikTok) or a white page (OfferUp). Promote that child into the
+                    // visible GeckoView so the user can complete the provider flow.
+                    val child = GeckoSession(sessionSettings).apply {
+                        contentDelegate = object : GeckoSession.ContentDelegate {}
+                        navigationDelegate = this@object
+                    }
                     childSessions += child
+                    child.open(GeckoRuntimeProvider.get(this@ListingActivity))
+                    runOnUiThread {
+                        runCatching { geckoView.releaseSession() }
+                        activeSession = child
+                        geckoView.setSession(child)
+                    }
                     return GeckoResult.fromValue(child)
                 }
             }
             open(GeckoRuntimeProvider.get(this@ListingActivity))
         }
+        activeSession = session
         geckoView.setSession(session)
 
         val doneButton = Button(this).apply {
@@ -69,7 +85,8 @@ class ListingActivity : AppCompatActivity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (::session.isInitialized && canGoBack) session.goBack() else super.onBackPressed()
+        val current = activeSession
+        if (current != null && canGoBack) current.goBack() else super.onBackPressed()
     }
 
     override fun onDestroy() {
