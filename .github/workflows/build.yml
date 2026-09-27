@@ -27,9 +27,42 @@ jobs:
           mkdir claude-v3-src
           unzip -q AI-Browser-Site-Brain-v3.zip -d claude-v3-src
           sed -i 's/it.message/it?.message/g' claude-v3-src/app/src/main/java/com/appgate/tv/MainActivity.kt
-          sed -i 's#https://www.ksl.com/login#https://www.ksl.com/#g' claude-v3-src/app/src/main/java/com/appgate/tv/MainActivity.kt
-          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 71/' claude-v3-src/app/build.gradle
-          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.1-site-brain-v3"/' claude-v3-src/app/build.gradle
+          # KSL: never force the account login URL. Open KSL normally and reuse the single Gecko profile/session.
+          sed -i 's#https://www.ksl.com/login#https://www.ksl.com/#g' claude-v3-src/brain-core/src/main/kotlin/com/appgate/brain/profile/SiteProfiles.kt
+          # Overnight learner: keep the partial wake lock through a normal overnight test window.
+          sed -i 's/acquire(6 \* 60 \* 60 \* 1000L)/acquire(10 * 60 * 60 * 1000L)/' claude-v3-src/app/src/main/java/com/appgate/tv/service/BrainService.kt
+          # Circuit breaker: missing grounded targets count as failures instead of silently re-entering the same skill forever.
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("claude-v3-src/brain-core/src/main/kotlin/com/appgate/brain/engine/BrainEngine.kt")
+          x=p.read_text()
+          x=x.replace('''                if (ledger.currentProgram.isNotEmpty() && ledger.cursor < ledger.currentProgram.size) {
+                    runProgramStep(ledger, sps, site, profile, executor, effectiveMode)
+                    consecutiveNoAction = 0
+                    continue
+                }''','''                if (ledger.currentProgram.isNotEmpty() && ledger.cursor < ledger.currentProgram.size) {
+                    runProgramStep(ledger, sps, site, profile, executor, effectiveMode)
+                    consecutiveNoAction = 0
+                    if (ledger.consecutiveFailures >= 3) {
+                        events.log("warn", "circuit breaker: ${ledger.consecutiveFailures} repeated failures on ${sps.host}; escalating to planner")
+                        if (askPlanner(ledger, sps, site, profile, "repeated deterministic failures")) {
+                            ledger.consecutiveFailures = 0
+                        } else if (!exploratoryFallback(ledger, sps)) {
+                            ledger.status = if (ledger.verdicts.isNotEmpty()) TaskStatus.DONE else TaskStatus.FAILED
+                            ledger.note("circuit breaker stopped repeated failure loop")
+                        }
+                        memory.saveLedger(ledger)
+                    }
+                    continue
+                }''')
+          x=x.replace('''                events.step(ledger, "no target for ${step.describe()}", VerifyStatus.FAILED)
+                recordFailureMemory(site, sps, step, "no_target")''','''                events.step(ledger, "no target for ${step.describe()}", VerifyStatus.FAILED)
+                ledger.consecutiveFailures++
+                recordFailureMemory(site, sps, step, "no_target")''')
+          p.write_text(x)
+          PY
+          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 72/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.2-site-brain-v3"/' claude-v3-src/app/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
