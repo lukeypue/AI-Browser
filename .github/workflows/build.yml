@@ -86,9 +86,14 @@ jobs:
                     return
                 }''')
           p.write_text(x)
+          u=Path("claude-v3-src/app/src/main/java/com/appgate/tv/UpdateActivity.kt")
+          y=u.read_text()
+          y=y.replace("https://github.com/lukeypue/APPGATE/releases/download/ai-browser-latest/AI-Browser-latest.apk", "https://github.com/lukeypue/AI-Browser/releases/download/ai-browser-latest/AI-Browser-latest.apk")
+          y=y.replace("https://github.com/lukeypue/APPGATE/releases/download/ai-browser-latest/latest-version.json", "https://github.com/lukeypue/AI-Browser/releases/download/ai-browser-latest/latest-version.json")
+          u.write_text(y)
           PY
-          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 77/' claude-v3-src/app/build.gradle
-          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.7-site-brain-v3"/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 78/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.8-site-brain-v3"/' claude-v3-src/app/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
