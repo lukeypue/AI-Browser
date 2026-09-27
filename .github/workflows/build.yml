@@ -58,8 +58,9 @@ jobs:
           x=x.replace('''                events.step(ledger, "no target for ${step.describe()}", VerifyStatus.FAILED)
                 recordFailureMemory(site, sps, step, "no_target")''','''                events.step(ledger, "no target for ${step.describe()}", VerifyStatus.FAILED)
                 ledger.consecutiveFailures++
-                val repeatedNoTarget = ledger.notes.takeLast(3).count { it == "no_target:" + step.describe() }
-                ledger.note("no_target:" + step.describe())
+                val failureKey = "no_target:" + sps.host + ":" + step.describe()
+                val repeatedNoTarget = ledger.notes.takeLast(12).count { it == failureKey }
+                ledger.note(failureKey)
                 recordFailureMemory(site, sps, step, "no_target")
                 if (repeatedNoTarget >= 2) {
                     events.log("warn", "execution circuit breaker: repeated no-target " + step.describe() + "; invalidating program")
@@ -75,8 +76,8 @@ jobs:
                 }''')
           p.write_text(x)
           PY
-          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 73/' claude-v3-src/app/build.gradle
-          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.3-site-brain-v3"/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 74/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.4-site-brain-v3"/' claude-v3-src/app/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
