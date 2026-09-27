@@ -69,7 +69,10 @@ jobs:
                     if (askPlanner(ledger, sps, site, profile, "repeated no-target action: " + step.describe())) {
                         ledger.consecutiveFailures = 0
                     } else {
-                        ledger.note("planner unavailable; goal blocked for this pass; move on")
+                        ledger.note("planner unavailable; watchdog forcibly completed blocked task so overnight scheduler can move on")
+                        ledger.currentProgram = emptyList()
+                        ledger.cursor = 0
+                        ledger.status = TaskStatus.DONE
                         ledger.consecutiveFailures = 0
                     }
                     memory.saveLedger(ledger)
@@ -77,8 +80,8 @@ jobs:
                 }''')
           p.write_text(x)
           PY
-          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 75/' claude-v3-src/app/build.gradle
-          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.5-site-brain-v3"/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 76/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.6-site-brain-v3"/' claude-v3-src/app/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
