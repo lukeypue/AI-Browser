@@ -30,31 +30,30 @@ class ListingActivity : AppCompatActivity() {
             .usePrivateMode(false)
             .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
             .build()
-        val connectedNavigationDelegate = object : GeckoSession.NavigationDelegate {
-                override fun onCanGoBack(session: GeckoSession, value: Boolean) {
-                    canGoBack = value
-                }
-
-                override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession> {
-                    // OAuth providers commonly open the account chooser in a new browsing
-                    // context. A GeckoSession returned without being attached to a GeckoView
-                    // exists but is invisible/non-interactive, which looked like a dead Google
-                    // button (TikTok) or a white page (OfferUp). Promote that child into the
-                    // visible GeckoView so the user can complete the provider flow.
-                    val child = GeckoSession(sessionSettings).apply {
-                        contentDelegate = object : GeckoSession.ContentDelegate {}
-                        navigationDelegate = this
-                    }
-                    childSessions += child
-                    child.open(GeckoRuntimeProvider.get(this@ListingActivity))
-                    runOnUiThread {
-                        runCatching { geckoView.releaseSession() }
-                        activeSession = child
-                        geckoView.setSession(child)
-                    }
-                    return GeckoResult.fromValue(child)
-                }
+        lateinit var connectedNavigationDelegate: GeckoSession.NavigationDelegate
+        connectedNavigationDelegate = object : GeckoSession.NavigationDelegate {
+            override fun onCanGoBack(session: GeckoSession, value: Boolean) {
+                if (session === activeSession) canGoBack = value
             }
+
+            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession> {
+                // OAuth providers commonly open the account chooser in a new browsing
+                // context. Promote that child into the visible GeckoView.
+                val child = GeckoSession(sessionSettings).apply {
+                    contentDelegate = object : GeckoSession.ContentDelegate {}
+                    navigationDelegate = connectedNavigationDelegate
+                }
+                childSessions += child
+                child.open(GeckoRuntimeProvider.get(this@ListingActivity))
+                runOnUiThread {
+                    runCatching { geckoView.releaseSession() }
+                    activeSession = child
+                    canGoBack = false
+                    geckoView.setSession(child)
+                }
+                return GeckoResult.fromValue(child)
+            }
+        }
         session = GeckoSession(sessionSettings).apply {
             contentDelegate = object : GeckoSession.ContentDelegate {}
             navigationDelegate = connectedNavigationDelegate
