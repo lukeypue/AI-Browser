@@ -31,7 +31,7 @@ jobs:
           sed -i 's#https://www.ksl.com/login#https://www.ksl.com/#g' claude-v3-src/brain-core/src/main/kotlin/com/appgate/brain/profile/SiteProfiles.kt
           # Overnight learner: keep the partial wake lock through a normal overnight test window.
           sed -i 's/acquire(6 \* 60 \* 60 \* 1000L)/acquire(10 * 60 * 60 * 1000L)/' claude-v3-src/app/src/main/java/com/appgate/tv/service/BrainService.kt
-          # Circuit breaker: missing grounded targets count as failures instead of silently re-entering the same skill forever.
+          # Circuit breaker: stop identical no-target actions at the execution layer, including paths that bypass the outer skill counter.
           python3 - <<'PY'
           from pathlib import Path
           p=Path("claude-v3-src/brain-core/src/main/kotlin/com/appgate/brain/engine/BrainEngine.kt")
@@ -58,11 +58,25 @@ jobs:
           x=x.replace('''                events.step(ledger, "no target for ${step.describe()}", VerifyStatus.FAILED)
                 recordFailureMemory(site, sps, step, "no_target")''','''                events.step(ledger, "no target for ${step.describe()}", VerifyStatus.FAILED)
                 ledger.consecutiveFailures++
-                recordFailureMemory(site, sps, step, "no_target")''')
+                val repeatedNoTarget = ledger.notes.takeLast(3).count { it == "no_target:" + step.describe() }
+                ledger.note("no_target:" + step.describe())
+                recordFailureMemory(site, sps, step, "no_target")
+                if (repeatedNoTarget >= 2) {
+                    events.log("warn", "execution circuit breaker: repeated no-target " + step.describe() + "; invalidating program")
+                    ledger.currentProgram = emptyList()
+                    ledger.cursor = 0
+                    if (askPlanner(ledger, sps, site, profile, "repeated no-target action: " + step.describe())) {
+                        ledger.consecutiveFailures = 0
+                    } else {
+                        ledger.note("planner unavailable after execution circuit breaker")
+                    }
+                    memory.saveLedger(ledger)
+                    return
+                }''')
           p.write_text(x)
           PY
-          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 72/' claude-v3-src/app/build.gradle
-          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.2-site-brain-v3"/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 73/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.3-site-brain-v3"/' claude-v3-src/app/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
