@@ -1,0 +1,58 @@
+name: Build Claude Site Brain v3
+
+on:
+  push:
+    branches: [ai-browser-v6-deep-search]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-v3-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Extract Claude v3 source
+        run: |
+          rm -rf claude-v3-src
+          mkdir claude-v3-src
+          unzip -q AI-Browser-Site-Brain-v3.zip -d claude-v3-src
+          test -f claude-v3-src/settings.gradle
+          test -f claude-v3-src/app/build.gradle
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Run Brain core tests
+        working-directory: claude-v3-src
+        run: gradle :brain-core:test --stacktrace
+
+      - name: Run Android unit tests
+        working-directory: claude-v3-src
+        run: gradle testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        working-directory: claude-v3-src
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Browser-7.0.0-debug
+          path: claude-v3-src/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
