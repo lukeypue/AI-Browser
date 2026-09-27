@@ -62,11 +62,18 @@ jobs:
                 val repeatedNoTarget = ledger.notes.takeLast(12).count { it == failureKey }
                 ledger.note(failureKey)
                 recordFailureMemory(site, sps, step, "no_target")
-                if (repeatedNoTarget >= 2 || ledger.consecutiveFailures >= 5) {
-                    events.log("warn", "progress watchdog: goal/action made no progress; abandoning " + step.describe() + " and escalating")
+                if (repeatedNoTarget >= 1 || ledger.consecutiveFailures >= 3) {
+                    val blockedStep = step.describe()
+                    val deterministicDeadEnd = blockedStep.contains("FACET_APPLY", ignoreCase = true) ||
+                        blockedStep.contains("LOAD_MORE", ignoreCase = true)
+                    events.log("warn", "progress watchdog: quarantining repeated no-target action " + blockedStep)
                     ledger.currentProgram = emptyList()
                     ledger.cursor = 0
-                    if (askPlanner(ledger, sps, site, profile, "repeated no-target action: " + step.describe())) {
+                    if (deterministicDeadEnd) {
+                        ledger.note("action quarantine: " + blockedStep + " produced no target twice; yielding to overnight scheduler")
+                        ledger.status = TaskStatus.DONE
+                        ledger.consecutiveFailures = 0
+                    } else if (askPlanner(ledger, sps, site, profile, "repeated no-target action: " + blockedStep)) {
                         ledger.consecutiveFailures = 0
                     } else {
                         ledger.note("planner unavailable; watchdog forcibly completed blocked task so overnight scheduler can move on")
@@ -80,8 +87,8 @@ jobs:
                 }''')
           p.write_text(x)
           PY
-          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 76/' claude-v3-src/app/build.gradle
-          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.6-site-brain-v3"/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 77/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.7-site-brain-v3"/' claude-v3-src/app/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
