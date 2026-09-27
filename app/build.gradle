@@ -17,8 +17,8 @@ android {
         ndk {
             abiFilters 'arm64-v8a'
         }
-        versionCode 64
-        versionName "6.56.0-learning-stability"
+        versionCode 71
+        versionName "7.0.1-site-brain-v3"
     }
 
     signingConfigs {
