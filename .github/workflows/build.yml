@@ -184,6 +184,19 @@ jobs:
             gh release edit ai-browser-latest --title "AI Browser Latest" --notes "Update publishing is temporarily paused while persistent Android signing is being configured. Existing Site Brain data is not affected."
           fi
 
+      - name: Package full source for external AI review
+        if: github.event_name == 'push' && github.ref == 'refs/heads/ai-browser-v6-deep-search'
+        run: |
+          git archive --format=zip --output=AI-Browser-Claude-Review.zip HEAD
+
+      - name: Upload full source review ZIP
+        if: github.event_name == 'push' && github.ref == 'refs/heads/ai-browser-v6-deep-search'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Browser-Claude-Review
+          path: AI-Browser-Claude-Review.zip
+          if-no-files-found: error
+
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
