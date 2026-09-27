@@ -16,6 +16,7 @@ class ListingActivity : AppCompatActivity() {
     private lateinit var session: GeckoSession
     private var canGoBack = false
     private var activeSession: GeckoSession? = null
+    private var rootSession: GeckoSession? = null
     private val childSessions = mutableListOf<GeckoSession>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,8 +44,11 @@ class ListingActivity : AppCompatActivity() {
                     contentDelegate = object : GeckoSession.ContentDelegate {}
                     navigationDelegate = connectedNavigationDelegate
                 }
+                // Gecko owns opening the returned popup session. Opening it ourselves here
+                // races Gecko's popup lifecycle and can terminate the process on OAuth-heavy
+                // sites such as OfferUp. Only return the unopened child, then attach it to the
+                // visible view after Gecko has accepted the new-session request.
                 childSessions += child
-                child.open(GeckoRuntimeProvider.get(this@ListingActivity))
                 runOnUiThread {
                     runCatching { geckoView.releaseSession() }
                     activeSession = child
@@ -59,6 +63,7 @@ class ListingActivity : AppCompatActivity() {
             navigationDelegate = connectedNavigationDelegate
             open(GeckoRuntimeProvider.get(this@ListingActivity))
         }
+        rootSession = session
         activeSession = session
         geckoView.setSession(session)
 
