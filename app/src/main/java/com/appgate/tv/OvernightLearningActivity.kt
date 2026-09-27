@@ -322,6 +322,11 @@ class OvernightLearningActivity : AppCompatActivity() {
             settings.domStorageEnabled = true
             settings.cacheMode = WebSettings.LOAD_DEFAULT
             settings.databaseEnabled = true
+            // Keep autonomous training deterministic. Sites can otherwise persist or infer a
+            // different locale mid-run, which makes the same semantic control look unrelated.
+            // Multilingual understanding remains a Site Brain goal; English is simply the
+            // canonical overnight-training locale.
+            settings.userAgentString = settings.userAgentString
             // Avoid pre-rendering off-screen pages during long runs; it can retain large render surfaces.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) settings.offscreenPreRaster = false
             // Learning must see the same functional page the user sees. Modern marketplace
@@ -615,7 +620,9 @@ class OvernightLearningActivity : AppCompatActivity() {
         webView.stopLoading()
         webView.loadUrl("about:blank")
         handler.postDelayed({
-            if (!stopped && !userPaused && activeSessionId == session.id) webView.loadUrl(site.startUrl)
+            if (!stopped && !userPaused && activeSessionId == session.id) {
+                webView.loadUrl(site.startUrl, mapOf("Accept-Language" to "en-US,en;q=0.9"))
+            }
         }, 120L)
     }
 
