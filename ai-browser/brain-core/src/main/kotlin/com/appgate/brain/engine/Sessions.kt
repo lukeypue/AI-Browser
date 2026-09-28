@@ -84,6 +84,7 @@ class LearningSession(
         private set
     @Volatile var activeSince: Long = 0L
         private set
+    private val lessonRetryMs = 60_000L
 
     fun stop() { stopRequested = true; engine.requestStop() }
 
@@ -117,6 +118,14 @@ class LearningSession(
                 memory.saveSite(site)
             }
             if (site.challengeDay != clock() / 86_400_000L) { site.challengeDay = clock() / 86_400_000L; site.challengesToday = 0 }
+            // Upgrade the previous 30-minute lesson cooldown without shortening daily
+            // reviews, human holds, or the separate daily challenge limit.
+            val now = clock()
+            if (!site.learningNeedsHuman && site.challengesToday < 3 && !Curriculum.allLessonsComplete(site) &&
+                site.learningBlockedUntil > now + lessonRetryMs && site.learningBlockedUntil <= now + 30 * 60_000L) {
+                site.learningBlockedUntil = now + lessonRetryMs
+                memory.saveSite(site)
+            }
             if (site.challengesToday >= 3 || site.learningNeedsHuman || site.learningBlockedUntil > clock() || !Curriculum.reviewDue(site, clock())) {
                 events.status("${profile.name}: ${if (site.learningNeedsHuman) "waiting for sign-in or review" else if (Curriculum.allLessonsComplete(site)) "all lessons verified; review scheduled" else "cooling down"}")
                 memory.saveSite(site); siteIndex++; visited++; skipped++
@@ -154,7 +163,7 @@ class LearningSession(
                     TaskStatus.PAUSED -> return null
                     else -> if (out.successfulSkills.none { it !in masteredBefore }) blockedInARow++ else blockedInARow = 0
                 }
-                if (blockedInARow >= 3) { site.learningBlockedUntil = clock() + 30 * 60_000L; memory.saveSite(site); events.log("info", "${profile.name}: three blocked goals; cooling down"); break }
+                if (blockedInARow >= 3) { site.learningBlockedUntil = clock() + lessonRetryMs; memory.saveSite(site); events.log("info", "${profile.name}: three goals without a new verified skill; retry in 1 min"); break }
                 if (Curriculum.allLessonsComplete(site)) { site.learningBlockedUntil = clock() + 24 * 60 * 60_000L; memory.saveSite(site); break }
             }
             siteIndex++
@@ -177,8 +186,10 @@ class LearningSession(
                         if (site.challengesToday >= 3) (site.challengeDay + 1) * 86_400_000L else 0L)
                 }.minOrNull()
                 if (next != null && next <= now) return
+                val reviewNote = if (sites.any { memory.site(it.hosts.first()).learningNeedsHuman })
+                    " Some sites need your review; use their Review buttons." else ""
                 val status = if (next == null) "Learning is waiting for you. Open a site's Review button, complete sign-in or verification, then tap Done."
-                    else "Learning is still active; next automatic retry in ${((next - now + 59_999L) / 60_000L).coerceAtLeast(1)} min. Sites needing sign-in wait for you."
+                    else "Learning is still active; next automatic retry in ${((next - now + 59_999L) / 60_000L).coerceAtLeast(1)} min.$reviewNote"
                 if (status != lastStatus) { events.status(status); lastStatus = status }
                 Thread.sleep(if (next == null) 1_000L else (next - now).coerceIn(1L, 1_000L))
             }
