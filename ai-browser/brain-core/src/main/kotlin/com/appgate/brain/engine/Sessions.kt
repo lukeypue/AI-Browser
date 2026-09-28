@@ -80,25 +80,50 @@ class LearningSession(
     @Volatile var siteIndex: Int = 0
     @Volatile var stopRequested: Boolean = false
     @Volatile var pausedLedger: TaskLedger? = null
+    @Volatile var isWaiting: Boolean = false
+        private set
+    @Volatile var activeSince: Long = 0L
+        private set
 
     fun stop() { stopRequested = true; engine.requestStop() }
 
-    /** Runs until stopped or a site needs a human. Returns the ledger that needs attention, or null when stopped. */
+    /** Runs until stopped (or the caller's finite visit limit); blocked sites wait without ending the session. */
     fun run(maxSites: Int = Int.MAX_VALUE): TaskLedger? {
         stopRequested = false
+        activeSince = clock()
         engine.clearStop()
         var visited = 0
         var skipped = 0
         if (sites.isEmpty()) return null
+        // An explicit start may recheck the old navigation-race hold once. Genuine
+        // auth/challenge holds stay put; a fresh unrelated redirect asks again.
+        sites.forEach { profile ->
+            val site = memory.site(profile.hosts.first())
+            if (site.learningNeedsHuman && site.lastLearningStatus == "NEED_HUMAN: unexpected host") {
+                site.learningNeedsHuman = false
+                site.lastLearningStatus = "Rechecking destination after interrupted site navigation"
+                memory.saveSite(site)
+            }
+        }
         while (!stopRequested && visited < maxSites) {
             val profile = sites[siteIndex % sites.size]
             val site = memory.site(profile.hosts.first())
             Curriculum.ensure(site)
+            // 7.1.0 deferred all lessons for a day after only the basic skills verified.
+            // Keep normal failure cooldowns and every human-review hold intact.
+            if (Curriculum.isComplete(site) && !Curriculum.allLessonsComplete(site) &&
+                site.learningBlockedUntil > clock() + 30 * 60_000L) {
+                site.learningBlockedUntil = 0L
+                memory.saveSite(site)
+            }
             if (site.challengeDay != clock() / 86_400_000L) { site.challengeDay = clock() / 86_400_000L; site.challengesToday = 0 }
             if (site.challengesToday >= 3 || site.learningNeedsHuman || site.learningBlockedUntil > clock() || !Curriculum.reviewDue(site, clock())) {
-                events.status("${profile.name}: ${if (site.learningNeedsHuman) "waiting for sign-in or review" else if (Curriculum.isComplete(site)) "core lessons verified" else "cooling down"}")
+                events.status("${profile.name}: ${if (site.learningNeedsHuman) "waiting for sign-in or review" else if (Curriculum.allLessonsComplete(site)) "all lessons verified; review scheduled" else "cooling down"}")
                 memory.saveSite(site); siteIndex++; visited++; skipped++
-                if (skipped >= sites.size) return null // No runnable lessons: end cleanly, never hot-spin.
+                if (skipped >= sites.size && visited < maxSites) {
+                    waitForNextSite()
+                    skipped = 0
+                }
                 continue
             }
             skipped = 0
@@ -130,12 +155,37 @@ class LearningSession(
                     else -> if (out.successfulSkills.none { it !in masteredBefore }) blockedInARow++ else blockedInARow = 0
                 }
                 if (blockedInARow >= 3) { site.learningBlockedUntil = clock() + 30 * 60_000L; memory.saveSite(site); events.log("info", "${profile.name}: three blocked goals; cooling down"); break }
-                if (Curriculum.isComplete(site)) { site.learningBlockedUntil = clock() + 24 * 60 * 60_000L; memory.saveSite(site); break }
+                if (Curriculum.allLessonsComplete(site)) { site.learningBlockedUntil = clock() + 24 * 60 * 60_000L; memory.saveSite(site); break }
             }
             siteIndex++
             visited++
             // A bounded visit always yields to other sites before another four goals.
         }
         return null
+    }
+
+    private fun waitForNextSite() {
+        isWaiting = true
+        var lastStatus = ""
+        try {
+            while (!stopRequested) {
+                val now = clock()
+                val next = sites.mapNotNull { profile ->
+                    val site = memory.site(profile.hosts.first())
+                    if (site.learningNeedsHuman) null else maxOf(site.learningBlockedUntil,
+                        Curriculum.nextReviewAt(site),
+                        if (site.challengesToday >= 3) (site.challengeDay + 1) * 86_400_000L else 0L)
+                }.minOrNull()
+                if (next != null && next <= now) return
+                val status = if (next == null) "Learning is waiting for you. Open a site's Review button, complete sign-in or verification, then tap Done."
+                    else "Learning is still active; next automatic retry in ${((next - now + 59_999L) / 60_000L).coerceAtLeast(1)} min. Sites needing sign-in wait for you."
+                if (status != lastStatus) { events.status(status); lastStatus = status }
+                Thread.sleep(if (next == null) 1_000L else (next - now).coerceIn(1L, 1_000L))
+            }
+        } finally {
+            // Waiting is not verified progress, but must not consume the active-work watchdog.
+            activeSince = clock()
+            isWaiting = false
+        }
     }
 }

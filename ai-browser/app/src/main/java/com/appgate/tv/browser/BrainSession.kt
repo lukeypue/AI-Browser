@@ -279,7 +279,13 @@ class BrainSession(private val context: Context, private val runtime: GeckoRunti
 
     // ------------------------------------------------------------------ navigation (main thread)
 
-    fun loadUri(url: String) = main.post { runCatching { mainSession.loadUri(url) } }
+    fun loadUri(url: String) = main.post {
+        // A load is asynchronous. Never let the next observation use the outgoing document.
+        ports.remove(mainSession)?.let { old ->
+            pending.removeOwner(old).forEach { it.completeExceptionally(PortLost("navigation queued")) }
+        }
+        runCatching { mainSession.loadUri(url) }
+    }
     fun goBack() = main.post { runCatching { active().goBack() } }
     fun reload() = main.post { runCatching { active().reload() } }
     fun stop() = main.post { runCatching { active().stop() } }

@@ -89,7 +89,7 @@ class LearningActivity : ServiceBoundActivity() {
                 service?.pause()
                 startActivity(Intent(this, BrowserActivity::class.java).putExtra("url", profile.startUrl))
             })
-            c.addView(Ui.text(this, site.curriculum.joinToString("\n") { (if (it.done) "✓ " else "○ ") + it.description }, 12f, if (Curriculum.isComplete(site)) Ui.good else Ui.muted))
+            c.addView(Ui.text(this, site.curriculum.joinToString("\n") { (if (it.done) "✓ " else "○ ") + it.description }, 12f, if (Curriculum.allLessonsComplete(site)) Ui.good else Ui.muted))
             progress.addView(c, Ui.cardParams())
         }
     }

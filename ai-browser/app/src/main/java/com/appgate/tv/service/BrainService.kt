@@ -315,9 +315,10 @@ class BrainService : Service() {
         val needs = sess.run()
         getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putInt("learning_site_index", sess.siteIndex).apply()
         main.post {
+            if (learning !== sess || state.mode == Mode.BROWSING) return@post
             if (needs != null) publish(state.copy(mode = Mode.NEED_HUMAN, humanReason = needs.humanReason, host = needs.host, status = "${needs.host}: ${needs.humanReason}"))
             else if (sess.stopRequested) publish(state.copy(mode = Mode.PAUSED, status = "Learning paused"))
-            else { learning = null; publish(state.copy(mode = Mode.IDLE, status = "Learning finished for now; see each site's verified lessons and waiting status")) }
+            else { learning = null; publish(state.copy(mode = Mode.IDLE, status = "Learning session ended; verified lessons are saved")) }
         }
     }
 
@@ -407,6 +408,7 @@ class BrainService : Service() {
         lastProgressAt = System.currentTimeMillis()
         job = engineThread.submit {
             try { block() }
+            catch (t: InterruptedException) { Thread.currentThread().interrupt() }
             catch (t: Throwable) { Log.e(TAG, "job failed", t); diagnostics.event("job_error", detail = t.toString()); main.post { publish(state.copy(mode = Mode.IDLE, status = "Stopped: ${t.javaClass.simpleName}")) } }
             finally { main.post { if (job?.isDone != false) releaseWakeLock() } }
         }
@@ -415,7 +417,11 @@ class BrainService : Service() {
     private val watchdog = object : Runnable {
         override fun run() {
             val running = job?.isDone == false
-            if (running && System.currentTimeMillis() - lastProgressAt > STALL_MS) {
+            val learner = learning
+            // Read the published waiting flag before the baseline written when waiting ends.
+            val waiting = learner?.isWaiting == true
+            val activeProgressAt = maxOf(lastProgressAt, learner?.activeSince ?: 0L)
+            if (running && !waiting && System.currentTimeMillis() - activeProgressAt > STALL_MS) {
                 diagnostics.event("watchdog", detail = "no verified progress for ${STALL_MS / 1000}s; pausing work")
                 lastProgressAt = System.currentTimeMillis()
                 engine?.requestStop()

@@ -54,16 +54,24 @@ object Curriculum {
 
     fun consecutiveBlocked(site: SiteModel): Int = site.curriculum.filter { !it.done }.take(3).count { it.blocked >= 2 }
 
+    /** Basic search readiness is not completion of every available lesson. */
+    fun allLessonsComplete(site: SiteModel): Boolean {
+        ensure(site)
+        return site.curriculum.all { it.done }
+    }
+
     fun nextLesson(site: SiteModel): String {
         ensure(site)
         val order = listOf("search", "constrain_numeric", "open_item", "next_page", "load_more", "scroll_results", "select_facet", "sort_results", "expand_description", "go_back", "dismiss_dialog")
-        if (isComplete(site)) return site.curriculum.filter { it.done }.minByOrNull { it.completedAt }?.id ?: "search"
+        if (allLessonsComplete(site)) return site.curriculum.minByOrNull { it.completedAt }?.id ?: "search"
         return site.curriculum.filter { !it.done }.minWithOrNull(compareBy<CurriculumItem> { it.blocked + it.unavailable }.thenBy { order.indexOf(it.id) })?.id
             ?: order[site.lessonOrdinal % order.size]
     }
 
-    fun reviewDue(site: SiteModel, now: Long): Boolean = !isComplete(site) ||
-        now - (site.curriculum.filter { it.done }.maxOfOrNull { it.completedAt } ?: 0) >= 24 * 60 * 60_000L
+    fun nextReviewAt(site: SiteModel): Long = if (!allLessonsComplete(site)) 0L else
+        (site.curriculum.maxOfOrNull { it.completedAt } ?: 0L) + 24 * 60 * 60_000L
+
+    fun reviewDue(site: SiteModel, now: Long): Boolean = now >= nextReviewAt(site)
 
     /** Next training goal for a site: a small FIND_LISTINGS task whose steps exercise the unfinished items. */
     fun nextGoal(site: SiteModel, profile: SiteProfile, ordinal: Int): Goal {

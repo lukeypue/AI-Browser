@@ -152,13 +152,14 @@ class LearningUpgradeTest {
         assertEquals(10, task.decisionsWithoutProgress)
     }
 
-    @Test fun allCompletedSitesReturnWithoutBusyLoop() {
+    @Test fun finiteVisitLimitCanReturnWhileAllLessonsAwaitReview() {
         val fake = FakeSite(); val memory = Memory(InMemoryStorage()); val site = memory.site(fake.host)
-        listOf("search", "open_item", "next_page", "constrain_numeric").forEach { Curriculum.markSkillVerified(site, it, 1000) }
+        Curriculum.ensure(site)
+        site.curriculum.forEach { Curriculum.markSkillVerified(site, it.id, 1000) }
         val events = object : EngineEvents {}
         val profile = com.appgate.brain.profile.SiteProfile("fake", "Fake", listOf(fake.host), "https://${fake.host}/")
         val session = LearningSession(BrainEngine(fake, memory, { null }, events), memory, events, listOf(profile), clock = { 1001 })
-        session.run()
+        session.run(maxSites = 1)
         assertEquals(1, session.siteIndex)
         assertTrue(fake.log.isEmpty())
         assertFalse(Curriculum.reviewDue(site, 1001))

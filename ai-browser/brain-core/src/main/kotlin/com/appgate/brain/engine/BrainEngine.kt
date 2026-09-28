@@ -138,6 +138,8 @@ class BrainEngine(
             }
 
             var consecutiveNoAction = 0
+            var landing = target != null
+            var previousPageObservations = 0
             while (!ledger.done && !ledger.blocked) {
                 if (stopRequested.get()) { ledger.status = TaskStatus.PAUSED; ledger.note("paused by user"); memory.saveLedger(ledger); events.status("Paused"); return ledger }
                 ledger.elapsedMs = elapsedBefore + (System.nanoTime() - runStarted) / 1_000_000L
@@ -151,7 +153,20 @@ class BrainEngine(
                 ledger.decisionsWithoutProgress++
 
                 val sps = observeOrRecover(executor, ledger) ?: break
+                // A queued navigation can briefly expose the previous site's document.
+                // Wait only for that exact prior URL; other redirects still require review.
+                if (landing && !allowedUrl(ledger, sps.url, profile) && currentHost.isNotBlank() &&
+                    current == sps.url) {
+                    if (++previousPageObservations >= 8) {
+                        ledger.status = TaskStatus.FAILED
+                        ledger.terminalReason = "site transition timeout"
+                        break
+                    }
+                    Thread.sleep(config.idleSleepMs)
+                    continue
+                }
                 if (!acceptPage(ledger, sps, profile)) break
+                landing = false
                 latestPage = sps
                 site.recordPage(sps.pageType, clock())
                 trackSiteVersion(site, sps)
