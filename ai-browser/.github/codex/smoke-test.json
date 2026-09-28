@@ -1,0 +1,14 @@
+{
+  "source": "real_gap_review",
+  "observedAt": "2026-09-22T06:00:00Z",
+  "summary": "Real Site Brain logs show 18,824 events and 3,521 capability gaps. AI Teacher now answers successfully after earlier HTTP 400s, but it sometimes reports missing user intent during autonomous learning. Search actions are also falsely rejected because SafeActionExecutor returns SUBMITTED/ENTER while the controller historically only accepted CLICKED/FILLED/SELECTED/NAVIGATE. OfferUp produced excessive plateau churn and repeated safe-state retries. Review for reusable fixes only; do not add brittle site selectors.",
+  "evidence": {
+    "aiTeacherRequested": 28,
+    "aiTeacherErrors": 19,
+    "aiTeacherAnswered": 8,
+    "sitePlateaus": 2406,
+    "offerUpPlateaus": 1203,
+    "duplicateBranchesSuppressed": 31,
+    "sitePasses": 1
+  }
+}

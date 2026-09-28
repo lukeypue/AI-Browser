@@ -1,0 +1,230 @@
+name: AI Site Brain Engineer
+
+on:
+  push:
+    branches: [ai-browser-v6-deep-search]
+    paths:
+      - '.github/codex/smoke-test.json'
+  workflow_dispatch:
+    inputs:
+      gap_summary:
+        description: "Trusted capability-gap summary for the Site Brain engineer"
+        required: true
+        type: string
+  repository_dispatch:
+    types: [site-brain-capability-gap]
+
+permissions:
+  contents: read
+
+jobs:
+  engineer:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out trusted branch
+        uses: actions/checkout@v5
+        with:
+          ref: ai-browser-v6-deep-search
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify OpenAI secret is available
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY is empty for GitHub Actions. Add it under APPGATE -> Settings -> Secrets and variables -> Actions -> Repository secrets."
+            exit 1
+          fi
+          echo "OpenAI secret is available to this workflow."
+
+      - name: Prepare sanitized capability-gap input
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GAP_SUMMARY: ${{ github.event.inputs.gap_summary }}
+        run: |
+          mkdir -p .github/codex
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            jq '{source:"repository_dispatch",client_payload:.client_payload}' "$GITHUB_EVENT_PATH" > .github/codex/current-gap.json
+          elif [ "$EVENT_NAME" = "push" ]; then
+            cp .github/codex/smoke-test.json .github/codex/current-gap.json
+          else
+            python3 - <<'PY'
+          import json, os
+          with open(".github/codex/current-gap.json", "w", encoding="utf-8") as f:
+              json.dump({"source":"workflow_dispatch","summary":os.environ.get("GAP_SUMMARY","")}, f)
+          PY
+          fi
+
+      - name: Run Codex capability engineer
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/prompts/repair-capability-gap.md
+          output-file: codex-engineer-output.md
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          allow-users: lukeypue
+
+      - name: Reject forbidden AI changes and package patch
+        run: |
+          FORBIDDEN=$(git diff --name-only -- . ':!codex-engineer-output.md' | grep -E '^(signing/|\.github/workflows/|app/src/main/AndroidManifest\.xml$|app/build\.gradle$)' || true)
+          if [ -n "$FORBIDDEN" ]; then
+            echo "AI attempted forbidden paths:"
+            echo "$FORBIDDEN"
+            exit 1
+          fi
+          git add -N app brain-core 2>/dev/null || true
+          git diff --binary -- app brain-core > codex.patch
+          if [ ! -s codex.patch ]; then
+            echo "No source patch was produced."
+          fi
+
+      - name: Upload engineer patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-sitebrain-patch
+          path: |
+            codex.patch
+            codex-engineer-output.md
+          if-no-files-found: error
+
+  test_and_pr:
+    needs: engineer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      branch: ${{ steps.pr.outputs.branch }}
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      has_patch: ${{ steps.patch.outputs.has_patch }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ai-browser-v6-deep-search
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-sitebrain-patch
+
+      - name: Apply proposed patch
+        id: patch
+        run: |
+          if [ ! -s codex.patch ]; then
+            echo "has_patch=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git apply --index codex.patch
+          CHANGED=$(git diff --cached --name-only)
+          echo "$CHANGED"
+          if printf '%s\n' "$CHANGED" | grep -Eq '^(signing/|\.github/workflows/|app/src/main/AndroidManifest\.xml$|app/build\.gradle$)'; then
+            echo "Forbidden path reached validation stage."
+            exit 1
+          fi
+          echo "has_patch=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 17
+        if: steps.patch.outputs.has_patch == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        if: steps.patch.outputs.has_patch == 'true'
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Test AI patch
+        if: steps.patch.outputs.has_patch == 'true'
+        run: gradle :brain-core:test testDebugUnitTest assembleDebug --stacktrace
+
+      - name: Bump repair build version
+        if: steps.patch.outputs.has_patch == 'true'
+        run: |
+          CURRENT=$(sed -nE 's/.*versionCode[[:space:]]+([0-9]+).*/\1/p' app/build.gradle | head -1)
+          NEXT=$((CURRENT + 1))
+          NAME="6.13.${{ github.run_number }}-ai-repair"
+          sed -i -E "s/versionCode[[:space:]]+[0-9]+/versionCode $NEXT/" app/build.gradle
+          sed -i -E "s/versionName[[:space:]]+\"[^\"]+\"/versionName \"$NAME\"/" app/build.gradle
+          git add app/build.gradle
+
+      - name: Push repair branch and open PR
+        id: pr
+        if: steps.patch.outputs.has_patch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="ai-engineer/repair-${{ github.run_id }}"
+          git config user.name "AI Browser Engineer"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git commit -m "ai engineer: repair Site Brain capability gap"
+          git push origin "$BRANCH"
+          URL=$(gh pr create --base ai-browser-v6-deep-search --head "$BRANCH" --title "AI Engineer: Site Brain capability repair" --body "Generated by the guarded AI Site Brain Engineer. Android/core/lab tests passed before this PR was opened. An independent AI review and normal repository checks must pass before merge.")
+          PR=$(gh pr view "$URL" --json number --jq .number)
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR" >> "$GITHUB_OUTPUT"
+
+  review:
+    needs: test_and_pr
+    if: needs.test_and_pr.outputs.has_patch == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      verdict: ${{ steps.verdict.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.test_and_pr.outputs.branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run independent Codex review
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/prompts/review-capability-patch.md
+          output-file: codex-review-output.md
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          allow-users: lukeypue
+
+      - name: Parse review verdict
+        id: verdict
+        run: |
+          if grep -q '^VERDICT: APPROVE$' codex-review-output.md; then
+            echo "verdict=APPROVE" >> "$GITHUB_OUTPUT"
+          else
+            echo "verdict=REJECT" >> "$GITHUB_OUTPUT"
+            echo "Independent AI reviewer rejected or did not clearly approve the patch."
+          fi
+
+      - name: Upload review
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-sitebrain-review
+          path: codex-review-output.md
+
+  merge:
+    needs: [test_and_pr, review]
+    if: needs.review.outputs.verdict == 'APPROVE'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Wait for normal PR checks and merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.test_and_pr.outputs.pr_number }}
+        run: |
+          gh pr checks "$PR" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --delete-branch

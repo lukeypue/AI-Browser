@@ -1,0 +1,50 @@
+<!doctype html>
+<html><head><title>Marketplace - Ford Expedition</title>
+<style>
+body{margin:0;font-family:sans-serif}
+.drawer{position:fixed;top:0;right:0;width:85%;height:100%;background:#fff;z-index:100;padding:16px;box-sizing:border-box}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:90}
+.item{height:120px;border-bottom:1px solid #eee;padding:8px}
+.listbox{position:absolute;background:#fff;border:1px solid #999;display:none}
+.listbox.open{display:block}
+</style></head>
+<body>
+<header><div role="search"><input aria-label="Search Marketplace" placeholder="Search Marketplace" value="Ford Expedition"></div></header>
+<main>
+  <div>
+    <button type="button" aria-haspopup="dialog">Filters</button>
+    <div>
+      <button type="button" role="combobox" aria-expanded="false" aria-controls="sortlist" id="sortbtn">Sort by: Suggested</button>
+      <div id="sortlist" role="listbox" class="listbox">
+        <div role="option">Suggested</div>
+        <div role="option">Price: Lowest first</div>
+        <div role="option">Date listed: Newest first</div>
+      </div>
+    </div>
+  </div>
+  <div class="feed">
+    <div class="item"><a href="/marketplace/item/5551/"><span>2009 Ford Expedition Limited</span></a><div>$6,800</div><div>Salt Lake City · 155K miles</div></div>
+    <div class="item"><a href="/marketplace/item/5552/"><span>2013 Ford Expedition XLT</span></a><div>$9,500</div><div>Provo · 130K miles</div></div>
+    <div class="item"><a href="/marketplace/item/5553/"><span>2007 Ford Expedition Eddie Bauer</span></a><div>$5,200</div><div>Ogden · 180K miles</div></div>
+    <div class="item"><a href="/marketplace/item/5554/"><span>2011 Ford Expedition EL</span></a><div>$7,900</div><div>Sandy · 140K miles</div></div>
+  </div>
+</main>
+<div class="scrim"></div>
+<div class="drawer" role="dialog" aria-modal="true" aria-label="Filters">
+  <h2>Filters</h2>
+  <div><label for="minp">Min price</label><input id="minp" type="text" inputmode="numeric" value=""></div>
+  <div><label for="maxp">Max price</label><input id="maxp" type="text" inputmode="numeric" value=""></div>
+  <div><span>Vehicle type</span>
+    <label><input type="checkbox" name="vt" value="suv"> SUV</label>
+    <label><input type="checkbox" name="vt" value="truck"> Truck</label>
+  </div>
+  <div><label for="minyear">Min year</label><select id="minyear"><option value="">Any</option><option>2005</option><option>2010</option><option>2015</option></select></div>
+  <button type="button">Clear all</button>
+  <button type="button">Apply</button>
+  <button type="button" aria-label="Close">×</button>
+</div>
+<script>
+  document.getElementById('sortbtn').addEventListener('click', function(){ document.getElementById('sortlist').classList.toggle('open'); this.setAttribute('aria-expanded', document.getElementById('sortlist').classList.contains('open')); });
+  document.querySelectorAll('#sortlist [role=option]').forEach(function(o){ o.addEventListener('click', function(){ document.getElementById('sortbtn').textContent = 'Sort by: ' + o.textContent; document.getElementById('sortlist').classList.remove('open'); }); });
+</script>
+</body></html>

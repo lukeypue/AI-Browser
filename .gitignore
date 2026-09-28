@@ -1,0 +1,6 @@
+
+.superpowers/
+/build/
+ai-browser/.gradle/
+ai-browser/**/.gradle/
+ai-browser/**/build/

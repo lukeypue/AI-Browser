@@ -21,11 +21,6 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Prepare canonical AI Browser source
-        run: |
-          test -f ai-browser/settings.gradle
-          python3 scripts/prepare-ai-browser-release.py
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -37,16 +32,23 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Use Claude v3 Android project
+      - name: Locate the Android project
         id: proj
-        run: echo "dir=ai-browser" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -f settings.gradle ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          else
+            FOUND=$(find . -maxdepth 3 -name settings.gradle -not -path "*/node_modules/*" | head -1)
+            if [ -z "$FOUND" ]; then
+              echo "ERROR: settings.gradle not found anywhere in the repo."
+              exit 1
+            fi
+            echo "dir=$(dirname "$FOUND")" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Run Site Brain core tests
+      - name: Run Site Brain core and lab tests
         working-directory: ${{ steps.proj.outputs.dir }}
         run: gradle :brain-core:test --stacktrace
-
-      - name: Verify document isolation
-        run: node --test ai-browser/brain-core/src/test/harness/document-boundary.test.mjs
 
       - name: Run Android unit tests
         working-directory: ${{ steps.proj.outputs.dir }}

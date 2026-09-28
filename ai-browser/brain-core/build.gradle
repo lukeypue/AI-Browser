@@ -1,0 +1,20 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+// The Site Brain core: pure Kotlin, zero dependencies, identical on Android, in the JVM test
+// harness and in the offline replay lab. Everything the brain "thinks" lives here; the app
+// module only supplies the renderer (GeckoView) and the UI.
+kotlin {
+    jvmToolchain(17)
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test {
+    useJUnit()
+    // The recorded extractor observations used by the perception tests.
+    systemProperty 'brain.fixtures', file('src/test/fixtures').absolutePath
+}

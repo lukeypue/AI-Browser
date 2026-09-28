@@ -1,0 +1,63 @@
+plugins {
+    id 'com.android.application'
+}
+
+def stableKeystorePath = System.getenv('AI_BROWSER_KEYSTORE_PATH')
+def stableSigningPassword = System.getenv('AI_BROWSER_SIGNING_PASSWORD')
+def stableSigningEnabled = stableKeystorePath && stableSigningPassword
+
+android {
+    namespace 'com.appgate.tv'
+    compileSdk 37
+
+    defaultConfig {
+        applicationId "com.aibrowser.universal"
+        minSdk 26
+        targetSdk 34
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+        versionCode 70
+        versionName "7.0.0-site-brain-v3"
+    }
+
+    signingConfigs {
+        stableRelease {
+            if (stableSigningEnabled) {
+                storeFile file(stableKeystorePath)
+                storePassword stableSigningPassword
+                keyAlias 'aibrowser'
+                keyPassword stableSigningPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (stableSigningEnabled) {
+                signingConfig signingConfigs.stableRelease
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation project(':brain-core')
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'org.mozilla.geckoview:geckoview-arm64-v8a:155.0.20260903215306'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}
+
+
+configurations.configureEach {
+    resolutionStrategy.force 'org.jetbrains.kotlin:kotlin-stdlib:2.2.10'
+    resolutionStrategy.force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.10'
+    resolutionStrategy.force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.2.10'
+}
