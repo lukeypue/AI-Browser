@@ -91,8 +91,65 @@ jobs:
           y=y.replace("https://github.com/lukeypue/APPGATE/releases/download/ai-browser-latest/AI-Browser-latest.apk", "https://github.com/lukeypue/AI-Browser/releases/download/ai-browser-latest/AI-Browser-latest.apk")
           y=y.replace("https://github.com/lukeypue/APPGATE/releases/download/ai-browser-latest/latest-version.json", "https://github.com/lukeypue/AI-Browser/releases/download/ai-browser-latest/latest-version.json")
           u.write_text(y)
+
+          # Smarter learner 7.0.9: make missing targets count as real failures,
+          # persist them as ledger steps, escalate to AI earlier, and only
+          # penalize the curriculum skill that was actually attempted.
+          b=Path("claude-v3-src/brain-core/src/main/kotlin/com/appgate/brain/engine/BrainEngine.kt")
+          z=b.read_text()
+          old='''                ledger.note("cannot ground ${step.describe()}: ${g.reason}")
+                events.step(ledger, "no target for ${step.describe()}", VerifyStatus.FAILED)
+                recordFailureMemory(site, sps, step, "no_target")
+                finishProgram(ledger, sps, site, success = false)'''
+          new='''                ledger.note("cannot ground ${step.describe()}: ${g.reason}")
+                ledger.record(LedgerStep(clock(), ledger.phase, sps.hash, "no target for ${step.describe()}", VerifyStatus.FAILED, g.reason.take(300), ledger.programSource))
+                events.step(ledger, "no target for ${step.describe()}", VerifyStatus.FAILED)
+                ledger.consecutiveFailures++
+                recordFailureMemory(site, sps, step, "no_target")
+                finishProgram(ledger, sps, site, success = false)'''
+          if old not in z: raise SystemExit("BrainEngine missing-target block not found")
+          z=z.replace(old,new,1)
+          old2='''                if (ledger.consecutiveFailures >= config.maxConsecutiveFailures) {
+                    ledger.status = if (ledger.verdicts.isNotEmpty()) TaskStatus.DONE else TaskStatus.FAILED
+                    ledger.note("too many consecutive failures")
+                }'''
+          new2='''                if (ledger.consecutiveFailures >= 2 && ledger.consecutiveFailures < config.maxConsecutiveFailures && ledger.currentProgram.isEmpty() && ledger.plannerFailures < 2) {
+                    events.log("info", "AI recovery: deterministic learner stalled; asking planner after ${ledger.consecutiveFailures} failures")
+                    if (askPlanner(ledger, sps, site, profile, "recover from repeated no-progress actions")) {
+                        ledger.consecutiveFailures = 0
+                    }
+                }
+                if (ledger.consecutiveFailures >= config.maxConsecutiveFailures) {
+                    ledger.status = if (ledger.verdicts.isNotEmpty()) TaskStatus.DONE else TaskStatus.FAILED
+                    ledger.note("supervisor watchdog: no verified progress after ${ledger.consecutiveFailures} failures; yielding task")
+                    events.log("warn", "supervisor watchdog: yielding blocked task on ${ledger.host}")
+                }'''
+          if old2 not in z: raise SystemExit("BrainEngine failure threshold block not found")
+          z=z.replace(old2,new2,1)
+          b.write_text(z)
+
+          q=Path("claude-v3-src/brain-core/src/main/kotlin/com/appgate/brain/engine/Curriculum.kt")
+          v=q.read_text()
+          old3='''        val verifiedSkills = ledger.steps.filter { it.status == com.appgate.brain.model.VerifyStatus.VERIFIED && it.source.startsWith("skill:") }.map { it.source.removePrefix("skill:") }.toSet()
+        site.curriculum.forEach { item ->
+            if (item.done) return@forEach
+            item.attempts++
+            if (item.id in verifiedSkills) item.completedAt = ledger.updatedAt.takeIf { it > 0 } ?: System.currentTimeMillis()
+            else if (ledger.status == com.appgate.brain.model.TaskStatus.NEED_HUMAN || ledger.status == com.appgate.brain.model.TaskStatus.FAILED) item.blocked++
+        }'''
+          new3='''        val attemptedSkills = ledger.steps.filter { it.source.startsWith("skill:") }.map { it.source.removePrefix("skill:") }.toSet()
+        val verifiedSkills = ledger.steps.filter { it.status == com.appgate.brain.model.VerifyStatus.VERIFIED && it.source.startsWith("skill:") }.map { it.source.removePrefix("skill:") }.toSet()
+        site.curriculum.forEach { item ->
+            if (item.done || item.id !in attemptedSkills) return@forEach
+            item.attempts++
+            if (item.id in verifiedSkills) item.completedAt = ledger.updatedAt.takeIf { it > 0 } ?: System.currentTimeMillis()
+            else if (ledger.status == com.appgate.brain.model.TaskStatus.NEED_HUMAN || ledger.status == com.appgate.brain.model.TaskStatus.FAILED) item.blocked++
+        }'''
+          if old3 not in v: raise SystemExit("Curriculum recordAttempt block not found")
+          v=v.replace(old3,new3,1)
+          q.write_text(v)
           PY
-          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 78/' claude-v3-src/app/build.gradle
+          sed -i -E 's/versionCode[[:space:]]+[0-9]+/versionCode 79/' claude-v3-src/app/build.gradle
           sed -i -E 's/versionName[[:space:]]+"[^"]+"/versionName "7.0.8-site-brain-v3"/' claude-v3-src/app/build.gradle
 
       - name: Set up JDK 17
