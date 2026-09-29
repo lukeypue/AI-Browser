@@ -53,6 +53,7 @@ class Memory(private val storage: BrainStorage, private val clock: () -> Long = 
     private val siteCache = HashMap<String, SiteModel>()
     private var skillCache: MutableMap<String, Skill>? = null
     val skills: SkillLibrary by lazy { SkillLibrary(this) }
+    val teacherBudget: TeacherBudget by lazy { TeacherBudget(storage, clock) }
 
     @Synchronized
     fun site(host: String): SiteModel {

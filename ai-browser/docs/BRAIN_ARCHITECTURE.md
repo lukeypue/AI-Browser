@@ -49,7 +49,7 @@ loop until ledger.done or ledger.blocked:
   else decision = TaskPolicy.decide(goal, s, ledger)
        RunSkill  → bind params, start program
        Navigate  → one-step program
-       AskPlanner→ planner.proposeProgram (budget, cooldown, ≤2 calls per SPS hash) or exploratory fallback
+       AskPlanner→ bounded local recovery, then planner.proposeProgram (shared budget, cooldown) or bounded fallback
        EvaluateDetail → evidence extraction on a DETAIL page
        Grant     → status = NEED_GRANT (message preview)
        Finish
@@ -58,7 +58,7 @@ step execution:
   Executor.execute(action)  → interlocks → renderer.act → waitSettle → observe s'
   Verifier.verify(action, s, s')  → VERIFIED / FAILED / AMBIGUOUS (re-observe once) / HUMAN_NEEDED
   memory.record(binding, edge, calibration, episode)   # the only place stats change
-  FAILED with alternates → retry next grounding (≤2) before abandoning the program
+  FAILED → re-observe and resolve a fresh live target (≤2 retries); never replay stale alternates
 ```
 
 **TaskPolicy** (`engine/TaskPolicy.kt`) is a small phase machine for `FIND_LISTINGS`:
@@ -71,8 +71,9 @@ detail read, expand, evaluate, back) → `DONE`. `PREPARE_MESSAGE` runs open →
 required detail checks finish as PARTIAL, never as completed inspection.
 
 A model request for human help on an ordinary page ends the attempt without creating a
-permanent sign-in hold. Observed auth/challenge pages and unrelated hosts still require
-review. Explicit Start rechecks saved human-review requests through the normal landing
+permanent sign-in hold. Observed auth/challenge pages require human help; an incidental
+offsite transition during training ends that lesson without inventing a sign-in request.
+Explicit Start rechecks saved human-review requests through the normal landing
 safety checks; automatic idle retries cannot clear them. Daily challenge limits remain.
 
 `SemanticDiagnostics` exports typed failure codes, page types, control/result counts and
@@ -104,10 +105,18 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
   across task ledgers. Two unsuccessful attempts defer that shape for five minutes; changed
   controls and different procedures remain eligible. At most 64 content-free records per host.
   Site rotation still retries after one minute. A verified procedure clears its failure record.
-- `SkillCompiler` — verified planner programs → `COMPILED` skills (values → params);
+- `SkillCompiler` — verified local/planner programs → `COMPILED` skills (values → params);
   explained human demonstrations → `DEMONSTRATED` skills.
-- `Curriculum` — per-site goals with completion predicates keyed by verified skill ids;
-  rotation happens on completion or three blocked goals, never on a timer.
+- `Curriculum` — per-site goals selected from observed live opportunities. Unavailable controls
+  wait without creating a task or a success. One-minute probes continue; failed lessons back
+  off for 1/5/15/60 minutes unless relevant live controls change.
+- `SkillLibrary` — canonical program identity with independent host evidence; strong source
+  evidence can admit a compatible procedure on a new host. A target failure blocks that
+  host until an independently verified repair. Every action is grounded and verified again.
+- `TeacherBudget` — durable reservations before actual transport: 6 requests per rolling
+  hour and 24 per rolling day, shared by learning, search and demonstration explanation.
+  Failed requests consume allowance. This is a request cap, not a dollar cap. Provider usage
+  is recorded when returned; missing usage is distinguished from zero usage.
 
 ## 6. Safety model
 
@@ -140,3 +149,22 @@ Metrics to add next (the harness supports them): verified success rate per page 
 efficiency vs. oracle, transfer gain (run 2 / run 1) on a held-out profile (`craigslist`,
 `ebay`, `autotrader`, `cars_com` are seeded as candidates), planner calls per task, Brier per
 host, brittleness (randomised class names in fixtures).
+
+`LocalFirstEvaluationTest` compares focused lessons, absent controls, fresh target recovery,
+and compatible/incompatible held-out host reuse. These synthetic fixtures exercise the real
+engine/verifier but do not establish live-site success or model quality. `OpportunityCurriculumTest`
+checks that an hour of absent-control rechecks creates no lesson tasks. Provider tests use a
+fake HTTP transport and do not consume paid API credits.
+
+## 9. Optional teachers and local operation
+
+The Android app exposes OpenAI, Anthropic, Groq, Gemini and an HTTPS OpenAI-compatible
+Chat Completions endpoint. A blank model field selects an economical documented default;
+explicit model selections are retained. There are no hidden model fallbacks. Local-only
+mode prevents every model transport path through the shared observer and leaves deterministic
+execution available. Toggling it cannot cancel a request already sent to a provider.
+
+This update strengthens procedural memory, planning and verification; it does not train
+foundation-model weights. The core stays pure Kotlin. An optional on-device model remains
+a measured follow-up requiring phone memory, thermal, latency and task-success evidence.
+See [the research report](research/2026-09-29-brain-research.md) for sources and limitations.

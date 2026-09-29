@@ -1,0 +1,156 @@
+package com.appgate.brain.engine
+
+import com.appgate.brain.json.Json
+import com.appgate.brain.model.*
+import com.appgate.brain.memory.*
+import com.appgate.brain.json.JsonObject
+import com.appgate.brain.perception.SpsParser
+import com.appgate.brain.profile.SiteProfile
+import com.appgate.brain.test.FakeSite
+import org.junit.Assert.*
+import org.junit.Test
+
+class OpportunityCurriculumTest {
+    private val now = 1_800_000_000_000L
+    private fun siteOnly(vararg unfinished: String) = SiteModel("fake.market").also { site ->
+        Curriculum.ensure(site)
+        site.curriculum.filter { it.id !in unfinished }.forEach { it.completedAt = now - 1 }
+    }
+    private fun profile() = SiteProfile("fake", "Fake", listOf("fake.market"), "https://fake.market/", trainingQueries = listOf("fixture query"))
+    private fun results() = SpsParser().parse(FakeSite().apply {
+        dialogShown = false
+        navigate("https://fake.market/search?q=Ford", 1000)
+    }.observe(1000), now).copy(settle = Settle.IDLE)
+
+    private fun observe(site: SiteModel, page: SemanticPageState, at: Long = now) = Curriculum.observe(site, page, at)
+
+    @Test fun observedResultsWithoutNextDoNotScheduleAnotherGenericTask() {
+        val site = siteOnly("next_page")
+        observe(site, results().copy(affordances = emptyList()))
+        assertEquals("missing pagination waits for an opportunity", "", Curriculum.nextLesson(site))
+        assertFalse(site.curriculum.single { it.id == "next_page" }.done)
+    }
+
+    @Test fun detailPracticeDoesNotInventAnEvidenceQuestionOrUnrelatedFilters() {
+        val site = siteOnly("open_item")
+        val goal = Curriculum.nextGoal(site, profile().copy(categories = setOf("vehicles")), 1)
+        assertTrue("navigation practice must not ask for synthetic rare evidence", goal.rare.isEmpty())
+        assertTrue("opening one item does not need filtering", goal.constraints.isEmpty())
+    }
+
+    @Test fun observationsRoundTripWithoutNamesValuesOrItemKeys() {
+        val site = siteOnly("select_facet")
+        val page = results().copy(affordances = listOf(Affordance("private-control", Role.FACET, "make", "choice",
+            name = "Private Person", value = "Private Selection", choices = listOf("Private Option"))))
+        observe(site, page)
+        val serialized = site.toJson().toString()
+        assertFalse(serialized, serialized.contains("Private") || serialized.contains("private-control"))
+        assertTrue("persist canonical facet keys without their values", site.toJson().optStrings("learning_facets").contains("make"))
+        val restored = SiteModel.fromJson(Json.parseObject(serialized))
+        assertEquals("select_facet", Curriculum.nextLesson(restored))
+        assertTrue(restored.curriculum.single { it.id == "search" }.done)
+    }
+
+    @Test fun actualAuthAndUnsettledPagesDoNotEraseKnownOpportunities() {
+        val site = siteOnly("next_page")
+        val page = results().copy(affordances = listOf(Affordance("next", Role.PAGE_NEXT)))
+        observe(site, page)
+        observe(site, page.copy(pageType = PageType.AUTH_WALL, affordances = emptyList()), now + 1)
+        observe(site, page.copy(settle = Settle.BUSY, affordances = emptyList()), now + 2)
+        assertEquals("next_page", Curriculum.nextLesson(site))
+    }
+
+    @Test fun choiceLessonTargetsTheExposedFacetAndKeepsItsValueTransient() {
+        val site = siteOnly("select_facet")
+        val page = results().copy(affordances = listOf(Affordance("make-control", Role.FACET, "make", "choice",
+            value = "Current Make", choices = listOf("Current Make", "Different Make"))))
+        observe(site, page)
+        val target = LearningOpportunities.target(page, "select_facet")!!
+        assertEquals("select_facet", target.skillId)
+        assertEquals(mapOf("key" to "make", "value" to "Different Make"), target.params)
+        val goal = Curriculum.nextGoal(site, profile(), 1, page, "select_facet")
+        assertEquals(listOf("make"), goal.constraints.map { it.key })
+        assertEquals("Different Make", goal.constraints.single().value)
+        assertFalse(site.toJson().toString().contains("Different Make"))
+    }
+
+    @Test fun failedUnchangedLessonWaitsButNewControlLayoutReenablesIt() {
+        val site = siteOnly("next_page")
+        val page = results().copy(affordances = listOf(Affordance("next", Role.PAGE_NEXT)))
+        observe(site, page)
+        val goal = Curriculum.nextGoal(site, profile(), 0, page, "next_page")
+        val failed = TaskLedger("failed", goal, site.host, page.url).apply {
+            lesson = "next_page"; status = TaskStatus.FAILED; attemptedSkills += "next_page"
+        }
+        Curriculum.recordAttempt(site, failed, now)
+        observe(site, page.copy(title = "Unrelated changed listing title"), now + 1)
+        assertEquals("", Curriculum.nextLesson(site, now + 1))
+        val restored = SiteModel.fromJson(Json.parseObject(site.toJson().toString()))
+        assertEquals("", Curriculum.nextLesson(restored, now + 1))
+        observe(restored, page.copy(affordances = listOf(Affordance("new-next", Role.PAGE_NEXT, tag = "button"))), now + 2)
+        assertEquals("next_page", Curriculum.nextLesson(restored, now + 2))
+    }
+
+    @Test fun absentPaginationGetsMinuteObservationsWithoutGenericTaskChurn() {
+        var time = now
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000); page = 2 }
+        val raw = fake.observe(1000)
+        val page = SpsParser().parse(raw, now)
+        val memory = Memory(InMemoryStorage()) { time }
+        val site = memory.site(fake.host)
+        Curriculum.ensure(site)
+        site.curriculum.filter { it.id != "next_page" }.forEach { it.completedAt = now - 1 }
+        observe(site, page)
+        var observations = 0; var finished = 0
+        val renderer = object : Renderer by fake {
+            override fun observe(timeoutMs: Long): String { observations++; return raw }
+        }
+        val events = object : EngineEvents { override fun finished(ledger: TaskLedger, result: TaskResult?) { finished++ } }
+        val config = EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0)
+        val engine = BrainEngine(renderer, memory, { null }, events, config) { time }
+        val session = LearningSession(engine, memory, events, listOf(profile()), clock = { time })
+        repeat(60) { session.run(maxSites = 1); time += 60_000L }
+        assertEquals("an absent control must not launch generic learning tasks", 0, finished)
+        assertEquals(0, site.lessonOrdinal)
+        assertTrue("every minute still observes the site", observations >= 60)
+        assertFalse(site.curriculum.single { it.id == "next_page" }.done)
+    }
+
+    @Test fun reopeningTheSameFilterDrawerDoesNotResetItsFailureDelay() {
+        val site = siteOnly("select_facet")
+        val page = results().copy(affordances = listOf(Affordance("filters", Role.FACET_OPEN)))
+        observe(site, page)
+        observe(site, page.copy(pageType = PageType.FACET_PANEL, affordances = emptyList()), now + 1)
+        val failed = TaskLedger("empty-drawer", Curriculum.nextGoal(site, profile(), 0, page, "select_facet"), site.host, page.url).apply {
+            lesson = "select_facet"; status = TaskStatus.PARTIAL; attemptedSkills += "open_filters"
+        }
+        Curriculum.recordAttempt(site, failed, now + 2)
+        observe(site, page, now + 3)
+        assertEquals("changing only drawer context cannot erase the delay", "", Curriculum.nextLesson(site, now + 3))
+    }
+
+    @Test fun numericPracticePreservesTheObservedBoundAndChangesItsCurrentValue() {
+        val page = results().copy(affordances = listOf(Affordance("year-upper", Role.FACET, "year_max", "numeric_max", value = "2015")))
+        val target = LearningOpportunities.target(page, "constrain_numeric")!!
+        assertEquals("year_max", target.params["key"])
+        assertEquals(ConstraintOp.LTE, target.constraints.single().op)
+        assertNotEquals("a lesson must exercise a different bound", "2015", target.params["value"])
+    }
+
+    @Test fun numericChoiceControlUsesAnExposedDifferentValue() {
+        val page = results().copy(affordances = listOf(Affordance("price-upper", Role.FACET, "price_max", "choice",
+            value = "$5,000", choices = listOf("Any", "$5,000", "$8,000"))))
+        val target = LearningOpportunities.target(page, "constrain_numeric")
+        assertNotNull("numeric selects are valid numeric practice", target)
+        assertEquals("price_max", target!!.params["key"])
+        assertEquals("8000", target.params["value"])
+    }
+
+    @Test fun emptyUnrecognizedPageWaitsForAnObservedOpportunity() {
+        val site = SiteModel("fake.market")
+        val page = results().copy(pageType = PageType.UNKNOWN, affordances = emptyList(), collections = emptyList())
+        observe(site, page)
+        assertEquals("an empty observation must not schedule a guessed lesson", "", Curriculum.nextLesson(site, now))
+        assertEquals(0, site.curriculum.count { it.done })
+    }
+}

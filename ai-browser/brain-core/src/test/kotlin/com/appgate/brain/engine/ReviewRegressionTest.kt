@@ -48,7 +48,8 @@ class ReviewRegressionTest {
         }
         val reloaded = Memory(storage)
         Consolidation(reloaded).run(hosts.first(), 1001)
-        assertEquals(2, reloaded.skills.all().count { it.origin == SkillOrigin.COMPILED })
+        assertEquals(1, reloaded.skills.all().count { it.origin == SkillOrigin.COMPILED })
+        assertTrue(reloaded.skills.all().single { it.origin == SkillOrigin.COMPILED }.statsByHost.keys.containsAll(hosts))
         hosts.forEach { host ->
             val page = SpsParser().parse(FakeSite(host).apply { dialogShown = false }.observe(1000))
             assertNotNull(reloaded.skills.reusable(page, "search", mapOf("query" to "Toyota"), TaskLedger("reuse", GoalParser.parse("Toyota"), host, page.url)))

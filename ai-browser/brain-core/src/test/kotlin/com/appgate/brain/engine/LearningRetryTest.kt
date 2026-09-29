@@ -17,7 +17,7 @@ class LearningRetryTest {
         val events = object : EngineEvents {}
         LearningSession(BrainEngine(fake, memory, { null }, events, config, clock = { now }), memory, events,
             listOf(profile(fake.host)), clock = { now }).run(maxSites = 1)
-        assertEquals(3, memory.site(fake.host).lessonOrdinal)
+        assertEquals("one failed opportunity should defer without duplicate tasks", 1, memory.site(fake.host).lessonOrdinal)
         assertEquals(now + 60_000L, memory.site(fake.host).learningBlockedUntil)
     }
 

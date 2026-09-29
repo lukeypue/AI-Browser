@@ -362,7 +362,8 @@ object QueryKeys {
         "bedrooms" to "bedrooms", "min_bedrooms" to "bedrooms", "beds" to "bedrooms", "bathrooms" to "bathrooms", "baths" to "bathrooms", "sellertype" to "seller_type", "seller_type" to "seller_type", "titletype" to "title_status"
     )
 
-    fun canonical(key: String): String? = table[key.lowercase()]
+    private val canonicalKeys = table.values.toSet()
+    fun canonical(key: String): String? = key.lowercase().let { table[it] ?: it.takeIf { candidate -> candidate in canonicalKeys } }
 }
 
 object AuthHosts {

@@ -48,6 +48,12 @@ jobs:
       - name: Verify document isolation
         run: node --test ai-browser/brain-core/src/test/harness/document-boundary.test.mjs
 
+      - name: Run browser perception fixtures
+        run: |
+          npm install --prefix "$RUNNER_TEMP/brain-browser-tests" playwright@1.62.1
+          "$RUNNER_TEMP/brain-browser-tests/node_modules/.bin/playwright" install --with-deps chromium
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/brain-browser-tests/node_modules/playwright" node --test ai-browser/brain-core/src/test/harness/learning-perception.test.mjs
+
       - name: Run Android unit tests
         working-directory: ${{ steps.proj.outputs.dir }}
         run: gradle testDebugUnitTest --stacktrace
@@ -185,7 +191,7 @@ jobs:
       - name: Package full source for external AI review
         if: github.event_name == 'push' && github.ref == 'refs/heads/ai-browser-v6-deep-search'
         run: |
-          git archive --format=zip --output=AI-Browser-Claude-Review.zip HEAD
+          git archive --format=zip --output=AI-Browser-Claude-Review.zip HEAD ai-browser/AGENTS.md ai-browser/README.md ai-browser/app/src ai-browser/brain-core/src ai-browser/docs ai-browser/app/build.gradle ai-browser/brain-core/build.gradle ai-browser/brain-core/settings.gradle ai-browser/build.gradle ai-browser/settings.gradle ai-browser/gradle.properties ai-browser-release.json scripts/prepare-ai-browser-release.py
 
       - name: Upload full source review ZIP
         if: github.event_name == 'push' && github.ref == 'refs/heads/ai-browser-v6-deep-search'

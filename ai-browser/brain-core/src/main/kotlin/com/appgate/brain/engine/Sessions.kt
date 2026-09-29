@@ -142,14 +142,28 @@ class LearningSession(
             var blockedInARow = 0
             events.status("Learning ${profile.name} — ${Curriculum.progress(site)}")
             while (!stopRequested && clock() - startedAt < perSiteChunkMs && goalsThisVisit < 4) {
-                val lesson = Curriculum.nextLesson(site)
-                val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal++)
+                // A minute recheck is an observation, not a new generic finding task.
+                val page = engine.probeLearning(profile)
+                if (page != null) Curriculum.observe(site, page, clock())
+                val lesson = if (page == null || site.learningNeedsHuman) "" else Curriculum.nextLesson(site, clock(), page)
+                if (lesson.isBlank()) {
+                    site.learningBlockedUntil = clock() + lessonRetryMs
+                    if (!site.learningNeedsHuman) site.lastLearningStatus = "Waiting for an observed lesson opportunity"
+                    events.diagnostic(site.host, "learning_recheck", com.appgate.brain.json.JsonObject()
+                        .put("available", false).put("human_hold", site.learningNeedsHuman))
+                    memory.saveSite(site)
+                    break
+                }
+                val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal++, page, lesson)
                 goalsThisVisit++
-                val ledger = TaskLedger(Hashing.short("learn" + System.nanoTime()), goal, profile.hosts.first(), profile.startUrl)
+                val ledger = TaskLedger(Hashing.short("learn" + System.nanoTime()), goal, profile.hosts.first(), page!!.url)
                 ledger.lesson = lesson
+                // Keep the observed drawer/results state instead of reloading its URL.
+                ledger.lastCheckpointUrl = page.url
+                if (page.pageType == com.appgate.brain.model.PageType.RESULTS) ledger.resultsUrl = page.url
                 val masteredBefore = site.curriculum.filter { it.done }.map { it.id }.toSet()
                 val out = engine.runTask(ledger, EngineMode.TRAIN)
-                Curriculum.recordAttempt(site, out)
+                Curriculum.recordAttempt(site, out, clock())
                 site.lastLearningStatus = "${out.status}: ${out.terminalReason.ifBlank { out.humanReason }}"
                 memory.saveSite(site)
                 if (out.done) memory.deleteLedger(out.id)

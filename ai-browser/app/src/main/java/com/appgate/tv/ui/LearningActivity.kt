@@ -21,6 +21,7 @@ class LearningActivity : ServiceBoundActivity() {
     private lateinit var stepsView: TextView
     private lateinit var progress: LinearLayout
     private lateinit var humanButton: android.widget.Button
+    private lateinit var usageView: TextView
     private val recent = ArrayDeque<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,6 +38,17 @@ class LearningActivity : ServiceBoundActivity() {
             Ui.button(this, "PAUSE") { service?.pause() },
             Ui.button(this, "STOP") { service?.stopLearning() }
         ))
+        column.addView(android.widget.CheckBox(this).apply {
+            text = "Allow AI help: up to 6 requests/hour and 24/day. Off = local only."
+            setTextColor(Ui.text)
+            isChecked = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this@LearningActivity)
+            setOnCheckedChangeListener { _, checked ->
+                com.appgate.tv.store.PlannerKeyStore.setTeacherEnabled(this@LearningActivity, checked)
+                refreshProgress()
+            }
+        })
+        usageView = Ui.text(this, "", 12f, Ui.muted)
+        column.addView(usageView)
         column.addView(android.widget.CheckBox(this).apply {
             text = "Include sites that need my account (Facebook Marketplace). Slower pacing; use a test account if you can."
             setTextColor(Ui.text)
@@ -77,6 +89,14 @@ class LearningActivity : ServiceBoundActivity() {
 
     private fun refreshProgress() {
         val s = service ?: return
+        val usage = s.memory.teacherBudget.snapshot()
+        val enabled = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this)
+        usageView.text = buildString {
+            append(if (enabled) "AI requests: ${usage.requests24h}/24 in the last 24 hours · ${usage.requestsHour}/6 in the last hour" else "Local-only mode · no new AI API calls")
+            append("\nReported tokens: ${usage.inputTokens} in / ${usage.outputTokens} out (${usage.reportedRequests} responses)")
+            if (usage.lastModel.isNotBlank()) append("\nLast model: ${usage.lastModel}")
+            if (enabled && !usage.allowed) append("\n${usage.reason}")
+        }
         progress.removeAllViews()
         SiteProfiles.training.forEach { profile ->
             val site = s.memory.site(profile.hosts.first())
@@ -89,7 +109,9 @@ class LearningActivity : ServiceBoundActivity() {
                 service?.pause()
                 startActivity(Intent(this, BrowserActivity::class.java).putExtra("url", profile.startUrl))
             })
-            c.addView(Ui.text(this, site.curriculum.joinToString("\n") { (if (it.done) "✓ " else "○ ") + it.description }, 12f, if (Curriculum.allLessonsComplete(site)) Ui.good else Ui.muted))
+            c.addView(Ui.text(this, site.curriculum.joinToString("\n") {
+                (if (it.done) "✓ " else "○ ") + it.description + if (!it.done && it.opportunity == "ABSENT") " — waiting for this control" else ""
+            }, 12f, if (Curriculum.allLessonsComplete(site)) Ui.good else Ui.muted))
             progress.addView(c, Ui.cardParams())
         }
     }

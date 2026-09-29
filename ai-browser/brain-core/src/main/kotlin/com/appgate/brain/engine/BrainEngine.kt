@@ -98,6 +98,58 @@ class BrainEngine(
 
     // ------------------------------------------------------------------ public entry points
 
+    /** One bounded, model-free opportunity check. No task or success credit is created. */
+    fun probeLearning(profile: SiteProfile): SemanticPageState? {
+        if (stopRequested.get()) return null
+        val host = profile.hosts.first()
+        val site = memory.site(host)
+        val executor = Executor(renderer, { SpsParser(site.facetVocabulary + profile.facetVocabulary) })
+        renderer.setNetworkMode(EngineMode.TRAIN.name,
+            site.endpointEffects.filterValues { it == com.appgate.brain.model.EffectClass.READ }.keys.toList(),
+            site.endpointEffects.filterValues { it == com.appgate.brain.model.EffectClass.COMMIT_EXTERNAL }.keys.toList())
+        val query = profile.trainingQueries.firstOrNull() ?: "mountain bike"
+        val goal = Goal("probe", GoalIntent.LEARN_SITE, "learning opportunity check", query, emptyList())
+        val knownSearch = profile.searchUrlFor(goal) ?: site.searchUrlTemplate?.let {
+            profile.copy(searchUrl = it).searchUrlFor(goal)
+        }
+        val probe = TaskLedger("probe", goal, host, profile.startUrl)
+        return runCatching {
+            val current = renderer.currentUrl()
+            var page = if (allowedUrl(probe, current, profile)) executor.observe(clock()) else null
+            // Always observe an already open auth/challenge before navigating elsewhere.
+            if (page?.isHumanOnly != true && (page == null || page.pageType == PageType.DETAIL ||
+                    (page.pageType in setOf(PageType.HOME, PageType.UNKNOWN) && knownSearch != null))) {
+                val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }
+                    ?: profile.startUrl.takeIf { allowedUrl(probe, it, profile) } ?: return@runCatching null
+                val outcome = executor.execute(Action(ActionKind.NAVIGATE, url = target,
+                    effect = com.appgate.brain.model.EffectClass.NAVIGATE), emptySps(host), EngineMode.TRAIN, emptyList(), null, clock())
+                page = (outcome as? ExecOutcome.Done)?.after ?: return@runCatching null
+            }
+            val observed = page ?: return@runCatching null
+            if (!allowedUrl(probe, observed.url, profile) || UrlPatterns.host(observed.url).removePrefix("www.") != observed.host.removePrefix("www.")) {
+                if (observed.isHumanOnly) {
+                    site.learningNeedsHuman = true
+                    site.lastLearningStatus = "NEED_HUMAN: Sign-in or verification required"
+                } else site.lastLearningStatus = "Waiting: site navigation did not reach this source"
+                memory.saveSite(site)
+                return@runCatching null
+            }
+            if (observed.isHumanOnly) {
+                if (observed.challenge) site.recordChallenge(clock())
+                site.learningNeedsHuman = true
+                site.lastLearningStatus = "NEED_HUMAN: " + if (observed.challenge) "Human verification required" else "Sign-in required"
+                memory.saveSite(site)
+                return@runCatching null
+            }
+            Curriculum.observe(site, observed, clock())
+            memory.saveSite(site)
+            observed
+        }.getOrElse {
+            events.log("warn", "learning observation unavailable: ${it.javaClass.simpleName}")
+            null
+        }
+    }
+
     fun runTask(ledger: TaskLedger, mode: EngineMode = EngineMode.ASSIST): TaskLedger {
         if (ledger.done) return ledger
         stopRequested.set(false)
@@ -137,6 +189,11 @@ class BrainEngine(
                 else -> null
             }
             if (target != null) {
+                if (!allowedUrl(ledger, target, profile)) {
+                    ledger.status = TaskStatus.FAILED
+                    ledger.terminalReason = "start page is outside this source"
+                    return finish(ledger, site)
+                }
                 val outcome = executor.execute(Action(ActionKind.NAVIGATE, url = target, expect = emptyList(), effect = com.appgate.brain.model.EffectClass.NAVIGATE), emptySps(ledger.host), effectiveMode, ledger.grants, null, clock())
                 if (outcome is ExecOutcome.Failed) { handleRendererFailure(ledger, outcome.reason, outcome.timeout); if (ledger.done) return finish(ledger, site) }
             }
@@ -174,6 +231,7 @@ class BrainEngine(
                 latestPage = sps
                 site.recordPage(sps.pageType, clock())
                 trackSiteVersion(site, sps)
+                if (!sps.isHumanOnly && ledger.goal.intent == GoalIntent.LEARN_SITE) Curriculum.observe(site, sps, clock())
                 collectCards(ledger, sps)
                 ledger.lastSpsHash = sps.hash
                 if (sps.pageType != PageType.ERROR && !sps.isHumanOnly) ledger.lastCheckpointUrl = sps.url
@@ -204,8 +262,9 @@ class BrainEngine(
                     continue
                 }
                 if (ledger.currentProgram.isNotEmpty()) finishProgram(ledger, sps, site, success = true)
+                if (ledger.repairReason.isNotBlank()) continue
 
-                when (val decision = policy.decide(ledger.goal, sps, ledger)) {
+                when (val decision = learningDecision(ledger, sps) ?: policy.decide(ledger.goal, sps, ledger)) {
                     is PolicyDecision.RunSkill -> {
                         val learned = memory.skills.reusable(sps, decision.skillId, skillParams(ledger) + decision.params, ledger)
                         val params = skillParams(ledger) + decision.params
@@ -346,7 +405,7 @@ class BrainEngine(
             return
         }
         val grounder = StepGrounder(site)
-        when (val g = grounder.ground(step, emptyMap(), sps, ledger.visited)) {
+        when (val g = grounder.ground(step, emptyMap(), sps, ledger.visited, strict = strictGrounding(ledger))) {
             is GroundingOutcome.Skip -> { ledger.cursor++; events.log("debug", "skip ${step.describe()}: ${g.reason}"); memory.saveLedger(ledger) }
             is GroundingOutcome.Missing -> {
                 missingStep(ledger, sps, site, step, "no_target")
@@ -355,7 +414,16 @@ class BrainEngine(
         }
     }
 
-    private fun executeGrounded(ledger: TaskLedger, before: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode, grounded: GroundedStep, retriesLeft: Int) {
+    /** Learned contracts and finite local recipes cannot fall back to a different role/facet. */
+    private fun strictGrounding(ledger: TaskLedger): Boolean {
+        if (ledger.programSource == "local") return true
+        if (!ledger.programSource.startsWith("skill:")) return false
+        // A persisted program keeps its contract even after its source skill is retired.
+        val skill = memory.skills.get(ledger.programSource.removePrefix("skill:")) ?: return true
+        return skill.origin != com.appgate.brain.model.SkillOrigin.BUILTIN && "verified_v2" in skill.tags
+    }
+
+    private fun executeGrounded(ledger: TaskLedger, before: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode, grounded: GroundedStep, retriesLeft: Int, excludedIds: Set<String> = emptySet()) {
         if (ledger.actions >= ledger.goal.budget.actions || stopRequested.get()) return
         val action = grounded.action
         if (action.url != null && !allowedUrl(ledger, action.url, profile)) {
@@ -429,14 +497,15 @@ class BrainEngine(
                     afterVerified(ledger, before, after, grounded, site)
                 } else if (grounded.step.optional) {
                     ledger.cursor++            // optional steps may fail silently
-                } else if (retriesLeft > 0 && grounded.alternates.isNotEmpty() && after.pageType == before.pageType && !after.dialogOpen) {
-                    // Try the next grounding before re-planning.
-                    val alt = grounded.alternates.first()
-                    val altAction = action.copy(target = action.target?.copy(affordanceId = alt.affordance.id, nameHint = alt.affordance.name, role = alt.affordance.role))
-                    events.log("debug", "retrying ${grounded.step.describe()} with alternate '${alt.affordance.name}'")
-                    executeGrounded(ledger, after, site, profile, executor, mode, GroundedStep(grounded.step, altAction, alt, grounded.alternates.drop(1), grounded.predictedP * 0.8), retriesLeft - 1)
-                    return
                 } else {
+                    // DOM and effects can change during an action. Resolve a NEW live target.
+                    val excluded = excludedIds + listOfNotNull(grounded.chosen?.affordance?.id)
+                    val fresh = if (retriesLeft > 0 && grounded.chosen != null && after.pageType == before.pageType && !after.dialogOpen)
+                        StepGrounder(site).ground(grounded.step, emptyMap(), after, ledger.visited, excluded, strict = strictGrounding(ledger)) else null
+                    if (fresh is GroundingOutcome.Ready && fresh.grounded.chosen != null) {
+                        executeGrounded(ledger, after, site, profile, executor, mode, fresh.grounded, retriesLeft - 1, excluded)
+                        return
+                    }
                     if (grounded.action.kind == ActionKind.SCROLL) ledger.scrollRoundsWithoutNew++   // exploration, not a failure
                     else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "unverified") }
                     finishProgram(ledger, after, site, success = false)
@@ -480,8 +549,16 @@ class BrainEngine(
             "search" -> TaskPolicy(profileFor(ledger), site).queryApplied(ledger.goal, sps) && sps.pageType == PageType.RESULTS
             "constrain_numeric", "select_facet" -> {
                 val facets = ledger.currentProgram.filter { it.role == Role.FACET && it.facetKey != null && it.arg != null }
-                sps.pageType != PageType.FACET_PANEL && !sps.dialogOpen && facets.isNotEmpty() && facets.all { step ->
-                    sps.constraintsActive[step.facetKey]?.let { Verifier.valuesMatch(step.arg!!, it) } == true
+                // An apply-only repair still carries the original typed constraint contract.
+                fun constraints(p: Postcondition): List<Pair<String, String>> = when (p) {
+                    is Postcondition.ConstraintApplied -> p.value?.let { listOf(p.key to it) }.orEmpty()
+                    is Postcondition.ValueIs -> listOf(p.facetKey to p.value)
+                    is Postcondition.AnyOf -> p.alternatives.flatMap { constraints(it) }
+                    else -> emptyList()
+                }
+                val expected = (facets.map { it.facetKey!! to it.arg!! } + ledger.programPost.flatMap { constraints(it) }).distinct()
+                sps.pageType != PageType.FACET_PANEL && !sps.dialogOpen && expected.isNotEmpty() && expected.all { (key, value) ->
+                    sps.constraintsActive[key]?.let { Verifier.valuesMatch(value, it) } == true
                 }
             }
             "open_item" -> sps.pageType == PageType.DETAIL
@@ -504,18 +581,24 @@ class BrainEngine(
                 ledger.successfulSkills += ledger.programCapability
                 Curriculum.markSkillVerified(site, ledger.programCapability, clock())
             }
-        } else if (source == "planner" && verified) {
-            SkillCompiler.compileFromPlanner(memory, ledger, ledger.currentProgram, clock())
+        } else if (source in setOf("planner", "local") && verified) {
+            SkillCompiler.compileVerified(memory, ledger, ledger.currentProgram, clock())
             ledger.successfulSkills += ledger.programCapability
             Curriculum.markSkillVerified(site, ledger.programCapability, clock())
         }
         if (!verified && success) ledger.consecutiveFailures++
-        if (!verified && source.startsWith("skill:") && !ledger.blocked)
+        if (!verified && (source.startsWith("skill:") || source == "local") && !ledger.blocked)
             ledger.repairReason = "repair failed ${ledger.programCapability} procedure"
         if (!verified && source == "planner") ledger.plannerFailures++
         ledger.currentProgram = emptyList()
         ledger.cursor = 0
         ledger.programSource = ""
+        val discoveryKey = ledger.constraintAttempts.keys.firstOrNull { it.startsWith("__discovery:") }
+        if (source == "local" && discoveryKey != null) {
+            ledger.programCapability = discoveryKey.removePrefix("__discovery:")
+            ledger.repairReason = if (verified) "continue after opening controls" else "local discovery did not reveal controls"
+            ledger.constraintAttempts.remove(discoveryKey)
+        }
         programBefore = null
         memory.saveLedger(ledger)
         memory.saveSite(site)
@@ -601,7 +684,7 @@ class BrainEngine(
     private fun evaluateDetail(ledger: TaskLedger, sps: SemanticPageState, itemKey: String) {
         val v = ledger.verdicts[itemKey] ?: run { ledger.currentItem = null; return }
         var updated = ConstraintEvaluator.withDetail(ledger.goal, v, sps.detailText, sps.url)
-        val planner = plannerFactory()
+        val planner = if (ledger.goal.intent == GoalIntent.LEARN_SITE) null else plannerFactory()
         for (c in ledger.goal.rare) {
             if (updated.perConstraint[c.key] == Verdict.UNKNOWN && planner != null && ledger.llmCalls < ledger.goal.budget.llmCalls && sps.detailText.length > 80) {
                 ledger.llmCalls++
@@ -627,10 +710,15 @@ class BrainEngine(
     // ------------------------------------------------------------------ planner
 
     private fun askPlanner(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, profile: SiteProfile, reason: String, repairCapability: String? = null): Boolean {
+        val capability = repairCapability ?: capabilityFor(ledger)
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.effectiveGoal.filterable.isEmpty()) {
+            // A resumed drawer discovery can arrive here before the next lesson decision.
+            ledger.learningConstraints = LearningOpportunities.target(sps, ledger.lesson)?.constraints.orEmpty()
+        }
+        if (tryLocalRepair(ledger, sps, site, capability)) return true
         val planner = plannerFactory() ?: run { events.log("info", "planner unavailable: $reason"); return false }
         if (ledger.llmCalls >= ledger.goal.budget.llmCalls) { ledger.note("planner budget exhausted"); return false }
         if (ledger.lastPlannerStateHash == sps.hash && ledger.plannerCallsOnSameState >= config.maxPlannerCallsSameState) { ledger.note("planner already tried this state twice"); return false }
-        val capability = repairCapability ?: capabilityFor(ledger)
         val plannerKey = FailedStrategies.key(sps, capability)
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && !FailedStrategies.allowed(site, plannerKey, clock())) {
             ledger.note("recent AI repairs failed on this page; waiting for a changed page or cooldown")
@@ -650,7 +738,7 @@ class BrainEngine(
         events.status("Thinking about this page…")
         val failuresHere = site.failures.values.filter { it.pageType == sps.pageType }.sortedByDescending { it.lastAt }.take(3).map { "${it.role}${it.facetKey?.let { k -> "[$k]" } ?: ""}: ${it.reason}" }
         val program = try {
-            planner.proposeProgram(ledger.goal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks)
+            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks)
         } catch (e: PlannerRefused) {
             events.log("warn", "planner refused: ${e.message}"); return false
         } catch (e: Exception) {
@@ -746,10 +834,48 @@ class BrainEngine(
         put("query", ledger.goal.query)
         ledger.currentItem?.let { put("item", it) }
         val policy = TaskPolicy(SiteProfiles.generic(ledger.host), memory.site(ledger.host))
-        ledger.goal.constraints.forEach { c -> policy.facetKeyFor(c)?.let { put(it, c.value) } }
+        ledger.effectiveGoal.constraints.forEach { c -> policy.facetKeyFor(c)?.let { put(it, c.value) } }
     }
 
     private fun profileFor(ledger: TaskLedger) = SiteProfiles.forHost(ledger.host) ?: SiteProfiles.generic(ledger.host)
+
+    private fun learningDecision(ledger: TaskLedger, sps: SemanticPageState): PolicyDecision? {
+        if (ledger.goal.intent != GoalIntent.LEARN_SITE || ledger.lesson.isBlank()) return null
+        if (ledger.lesson in ledger.successfulSkills) return PolicyDecision.Finish(TaskStatus.DONE, "lesson verified: ${ledger.lesson}")
+        val target = LearningOpportunities.target(sps, ledger.lesson)
+            ?: return PolicyDecision.Finish(TaskStatus.PARTIAL, "lesson control not available on this page; waiting for an opportunity")
+        if (target.constraints.isNotEmpty() && ledger.effectiveGoal.filterable.isEmpty()) ledger.learningConstraints = target.constraints
+        val key = "__lesson_target:${target.skillId}"
+        if ((ledger.constraintAttempts[key] ?: 0) >= 2) return PolicyDecision.Finish(TaskStatus.PARTIAL, "lesson attempt complete; no new verified result")
+        ledger.constraintAttempts[key] = (ledger.constraintAttempts[key] ?: 0) + 1
+        if (target.skillId == "open_item" && sps.pageType == PageType.RESULTS) ledger.resultsUrl = sps.url
+        if (target.skillId == "go_back" && ledger.resultsUrl.isBlank())
+            return PolicyDecision.Finish(TaskStatus.PARTIAL, "return lesson needs a known results page")
+        // Keep an already-chosen bound while a drawer is pending; do not choose a new
+        // numeric value merely because typing changed the control before Apply verified.
+        val params = target.params.toMutableMap()
+        target.constraints.firstOrNull()?.let { proposed ->
+            ledger.effectiveGoal.filterable.firstOrNull { it.key == proposed.key && it.op == proposed.op }?.let { requested ->
+                params["value"] = requested.value
+            }
+        }
+        return PolicyDecision.RunSkill(target.skillId, skillParams(ledger) + params, "practice ${ledger.lesson}")
+    }
+
+    private fun tryLocalRepair(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, capability: String): Boolean {
+        val plan = LocalRecoveryPlanner.propose(ledger, sps, site, capability) ?: return false
+        val key = FailedStrategies.key(sps, capability, plan.steps, plan.params)
+        val attempt = "__local:$key"
+        if ((ledger.constraintAttempts[attempt] ?: 0) >= 1 || !FailedStrategies.allowed(site, key, clock())) return false
+        ledger.constraintAttempts[attempt] = 1
+        ledger.constraintAttempts.keys.removeAll { it.startsWith("__discovery:") }
+        // A canonical continuation survives pause/process resume without persisting page values.
+        if (!plan.completesCapability) ledger.constraintAttempts["__discovery:$capability"] = 1
+        val actualCapability = if (plan.completesCapability) capability else "open_filters"
+        ledger.attemptedSkills += actualCapability
+        startProgram(ledger, plan.steps, skillParams(ledger) + plan.params, "local", "local repair: $capability", actualCapability, plan.postconditions)
+        return true
+    }
 
     /** Cheap exploration when no planner is available: scroll, close dialogs, or return to results. */
     private fun exploratoryFallback(ledger: TaskLedger, sps: SemanticPageState): Boolean {

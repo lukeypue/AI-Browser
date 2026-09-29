@@ -58,12 +58,21 @@ data class CurriculumItem(
     var completedAt: Long = 0L,
     var attempts: Int = 0,
     var blocked: Int = 0,
-    var unavailable: Int = 0
+    var unavailable: Int = 0,
+    var opportunity: String = "UNKNOWN",
+    var opportunityShape: String = "",
+    var observedAt: Long = 0L,
+    var retryAt: Long = 0L,
+    var observedPage: String = ""
 ) {
     val done: Boolean get() = completedAt > 0L
     fun toJson(): JsonObject = JsonObject().put("id", id).put("desc", description).put("done", completedAt).put("attempts", attempts).put("blocked", blocked).put("unavailable", unavailable)
+        .put("opportunity", opportunity).put("shape", opportunityShape).put("observed_at", observedAt).put("retry_at", retryAt).put("observed_page", observedPage)
     companion object {
-        fun fromJson(o: JsonObject) = CurriculumItem(o.optString("id"), o.optString("desc"), o.optLong("done"), o.optInt("attempts"), o.optInt("blocked"), o.optInt("unavailable"))
+        fun fromJson(o: JsonObject) = CurriculumItem(o.optString("id"), o.optString("desc"), o.optLong("done"), o.optInt("attempts"), o.optInt("blocked"), o.optInt("unavailable"),
+            o.optString("opportunity").takeIf { it in setOf("AVAILABLE", "ABSENT") } ?: "UNKNOWN",
+            o.optString("shape").takeIf { it.matches(Regex("[a-f0-9]{8,64}")) }.orEmpty(), o.optLong("observed_at"), o.optLong("retry_at"),
+            o.optString("observed_page").takeIf { p -> PageType.values().any { it.name == p } }.orEmpty())
     }
 }
 
@@ -87,6 +96,7 @@ class SiteModel(val host: String) {
     var learningBlockedUntil: Long = 0L
     var learningNeedsHuman: Boolean = false
     var lastLearningStatus: String = ""
+    var learningObservedAt: Long = 0L
     var searchUrlTemplate: String? = null
     var startUrl: String? = null
     var loginUrl: String? = null
@@ -98,6 +108,7 @@ class SiteModel(val host: String) {
     val failures: MutableMap<String, FailureRecord> = linkedMapOf()
     val strategyFailures: MutableMap<String, StrategyFailure> = linkedMapOf()
     val curriculum: MutableList<CurriculumItem> = mutableListOf()
+    val learningFacetKeys: MutableSet<String> = linkedSetOf()
     val quirks: MutableSet<String> = linkedSetOf()
     var verifiedActions: Int = 0
     var failedActions: Int = 0
@@ -149,6 +160,7 @@ class SiteModel(val host: String) {
         .put("consolidated", lastConsolidatedAt).put("challenges", challengesToday).put("challenge_day", challengeDay)
         .put("lesson_ordinal", lessonOrdinal).put("learning_blocked_until", learningBlockedUntil)
         .put("learning_needs_human", learningNeedsHuman).put("learning_status", lastLearningStatus)
+        .put("learning_observed_at", learningObservedAt)
         .put("search_url", searchUrlTemplate).put("start_url", startUrl).put("login_url", loginUrl)
         .put("pages", JsonObject().also { j -> pageTypesSeen.forEach { (k, v) -> j.put(k.name, v) } })
         .put("edges", JsonArray(edges.values.map { it.toJson() }))
@@ -158,11 +170,15 @@ class SiteModel(val host: String) {
         .put("failures", JsonArray(failures.values.map { it.toJson() }))
         .put("strategy_failures", JsonArray(strategyFailures.values.map { it.toJson() }))
         .put("curriculum", JsonArray(curriculum.map { it.toJson() }))
+        .putStrings("learning_facets", learningFacetKeys.filter { it in LEARNING_FACET_KEYS })
         .putStrings("quirks", quirks)
         .put("verified", verifiedActions).put("failed", failedActions)
         .put("brier_sum", brierSum).put("brier_n", brierCount)
 
     companion object {
+        private val LEARNING_FACET_KEYS = (setOf("make", "model", "condition", "fuel", "transmission", "body_style", "drivetrain", "color") +
+            setOf("price", "mileage", "year", "distance", "bedrooms", "bathrooms").flatMap { listOf(it, "${it}_min", "${it}_max") }).toSet()
+
         fun fromJson(o: JsonObject): SiteModel {
             val m = SiteModel(o.optString("host"))
             m.siteVersion = o.optString("version")
@@ -175,6 +191,7 @@ class SiteModel(val host: String) {
             m.learningBlockedUntil = o.optLong("learning_blocked_until")
             m.learningNeedsHuman = o.optBoolean("learning_needs_human")
             m.lastLearningStatus = o.optString("learning_status")
+            m.learningObservedAt = o.optLong("learning_observed_at")
             m.searchUrlTemplate = o.optStringOrNull("search_url")
             m.startUrl = o.optStringOrNull("start_url")
             m.loginUrl = o.optStringOrNull("login_url")
@@ -189,6 +206,7 @@ class SiteModel(val host: String) {
                 if (key.matches(Regex("[a-f0-9]{8,64}"))) m.strategyFailures[key] = StrategyFailure(key, f.optInt("count").coerceIn(0, 2), f.optLong("at"))
             }
             o.optArray("curriculum")?.objects()?.forEach { c -> m.curriculum += CurriculumItem.fromJson(c) }
+            m.learningFacetKeys += o.optStrings("learning_facets").filter { it in LEARNING_FACET_KEYS }
             m.quirks += o.optStrings("quirks")
             m.verifiedActions = o.optInt("verified")
             m.failedActions = o.optInt("failed")

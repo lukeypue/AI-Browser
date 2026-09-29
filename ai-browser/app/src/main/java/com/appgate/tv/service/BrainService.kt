@@ -399,8 +399,16 @@ class BrainService : Service() {
     // ------------------------------------------------------------------ internals
 
     private fun plannerOrNull(): Planner? {
+        if (!PlannerKeyStore.teacherEnabled(this) || !memory.teacherBudget.snapshot().allowed) return null
         val config = PlannerKeyStore.config(this) ?: return null
-        return Planner(PlannerClients.create(config))
+        val observer = com.appgate.brain.planner.BudgetedTeacher(memory.teacherBudget, { PlannerKeyStore.teacherEnabled(this) }) { usage ->
+            diagnostics.event("teacher_usage", "", "AI requests=${usage.requests24h} reported=${usage.reportedRequests}",
+                JsonObject().put("requests_24h", usage.requests24h).put("requests_hour", usage.requestsHour)
+                    .put("input_tokens", usage.inputTokens).put("output_tokens", usage.outputTokens)
+                    .put("reported_requests", usage.reportedRequests).put("model", usage.lastModel))
+            main.post { publish(state.copy()) }
+        }
+        return Planner(PlannerClients.create(config, observer))
     }
 
     private fun runJob(block: () -> Unit) {

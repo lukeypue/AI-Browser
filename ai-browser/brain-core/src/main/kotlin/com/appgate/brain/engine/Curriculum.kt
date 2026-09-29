@@ -2,13 +2,13 @@ package com.appgate.brain.engine
 
 import com.appgate.brain.model.Budget
 import com.appgate.brain.model.Constraint
-import com.appgate.brain.model.ConstraintClass
 import com.appgate.brain.model.ConstraintOp
 import com.appgate.brain.model.ConstraintSource
 import com.appgate.brain.model.CurriculumItem
 import com.appgate.brain.model.Goal
 import com.appgate.brain.model.GoalIntent
 import com.appgate.brain.model.SiteModel
+import com.appgate.brain.model.SemanticPageState
 import com.appgate.brain.model.TaskLedger
 import com.appgate.brain.profile.SiteProfile
 import com.appgate.brain.util.Hashing
@@ -60,12 +60,16 @@ object Curriculum {
         return site.curriculum.all { it.done }
     }
 
-    fun nextLesson(site: SiteModel): String {
+    /** Empty means recheck later; a live page also guards against stale opportunities. */
+    fun nextLesson(site: SiteModel, now: Long = System.currentTimeMillis(), page: SemanticPageState? = null): String {
         ensure(site)
         val order = listOf("search", "constrain_numeric", "open_item", "next_page", "load_more", "scroll_results", "select_facet", "sort_results", "expand_description", "go_back", "dismiss_dialog")
-        if (allLessonsComplete(site)) return site.curriculum.minByOrNull { it.completedAt }?.id ?: "search"
-        return site.curriculum.filter { !it.done }.minWithOrNull(compareBy<CurriculumItem> { it.blocked + it.unavailable }.thenBy { order.indexOf(it.id) })?.id
-            ?: order[site.lessonOrdinal % order.size]
+        val eligible = site.curriculum.filter {
+            it.retryAt <= now && (it.opportunity == "AVAILABLE" || (site.learningObservedAt == 0L && it.opportunity == "UNKNOWN")) &&
+                (page == null || LearningOpportunities.target(page, it.id) != null)
+        }
+        if (allLessonsComplete(site)) return eligible.minByOrNull { it.completedAt }?.id.orEmpty()
+        return eligible.filter { !it.done }.minWithOrNull(compareBy<CurriculumItem> { it.blocked + it.unavailable }.thenBy { order.indexOf(it.id) })?.id.orEmpty()
     }
 
     fun nextReviewAt(site: SiteModel): Long = if (!allLessonsComplete(site)) 0L else
@@ -73,25 +77,23 @@ object Curriculum {
 
     fun reviewDue(site: SiteModel, now: Long): Boolean = now >= nextReviewAt(site)
 
-    /** Next training goal for a site: a small FIND_LISTINGS task whose steps exercise the unfinished items. */
-    fun nextGoal(site: SiteModel, profile: SiteProfile, ordinal: Int): Goal {
+    /** Record structural opportunities only; option values stay in the live task. */
+    fun observe(site: SiteModel, sps: SemanticPageState, now: Long) {
+        ensure(site)
+        LearningOpportunities.observe(site, sps, now)
+    }
+
+    /** A lesson names one verified capability. Its query is only a search prerequisite. */
+    fun nextGoal(site: SiteModel, profile: SiteProfile, ordinal: Int, page: SemanticPageState? = null,
+                 lesson: String = nextLesson(site)): Goal {
         ensure(site)
         val queries = profile.trainingQueries.ifEmpty { listOf("mountain bike", "coffee table", "cordless drill") }
-        val query = queries[ordinal % queries.size]
-        val constraints = mutableListOf<Constraint>()
-        val lesson = nextLesson(site)
-        val wantNumeric = lesson == "constrain_numeric"
-        if (wantNumeric) constraints += Constraint("price", ConstraintOp.LTE, listOf("8000", "10000", "5000")[ordinal % 3], sources = setOf(ConstraintSource.FILTERABLE, ConstraintSource.CARD_CHECK))
-        // Combine independent filters only after both basic search and numeric lessons verify.
-        if ("vehicles" in profile.categories && isComplete(site) && ordinal % 3 == 1) constraints += Constraint("mileage", ConstraintOp.LTE, "150000", sources = setOf(ConstraintSource.FILTERABLE, ConstraintSource.CARD_CHECK))
-        if (lesson == "select_facet") constraints += Constraint("condition", ConstraintOp.EQ, "used", sources = setOf(ConstraintSource.FILTERABLE, ConstraintSource.CARD_CHECK))
-        constraints += Constraint("keyword", ConstraintOp.CONTAINS, query, sources = setOf(ConstraintSource.CARD_CHECK), synonyms = query.lowercase().split(' '))
-        val wantDetail = lesson in setOf("open_item", "expand_description", "go_back")
-        val inspect = if (wantDetail) 2 else 0
-        if (wantDetail) {
-            // A text-evidence constraint forces the detail phase (open item, expand, read, back) to be exercised.
-            constraints += Constraint("feature_learning_detail", ConstraintOp.CONTAINS, "condition described", cls = ConstraintClass.RARE,
-                sources = setOf(ConstraintSource.TEXT_EVIDENCE, ConstraintSource.DETAIL_CHECK), synonyms = listOf("condition"))
+        val query = queries[Math.floorMod(ordinal, queries.size)]
+        val live = page?.let { LearningOpportunities.target(it, lesson) }
+        val constraints = live?.constraints.orEmpty().ifEmpty {
+            // Old callers without a live observation retain numeric practice compatibility.
+            if (page == null && lesson == "constrain_numeric") listOf(Constraint("price", ConstraintOp.LTE, "8000",
+                sources = setOf(ConstraintSource.FILTERABLE))) else emptyList()
         }
         return Goal(
             id = Hashing.short("learn|${site.host}|$ordinal|${System.nanoTime()}"),
@@ -99,24 +101,26 @@ object Curriculum {
             rawText = "learn: $query",
             query = query,
             constraints = constraints,
-            budget = Budget(itemsInspected = inspect.coerceAtLeast(1), llmCalls = 4, actions = 40, wallMs = 8 * 60_000L),
+            budget = Budget(itemsInspected = 1, llmCalls = 4, actions = 20, wallMs = 4 * 60_000L),
             category = profile.categories.firstOrNull()
         )
     }
 
-    fun recordAttempt(site: SiteModel, ledger: TaskLedger) {
+    fun recordAttempt(site: SiteModel, ledger: TaskLedger, now: Long = System.currentTimeMillis()) {
         ensure(site)
         val verifiedSkills = ledger.successfulSkills
         if (ledger.done && ledger.lesson.isNotBlank() && ledger.lesson !in ledger.attemptedSkills) {
-            site.curriculum.firstOrNull { it.id == ledger.lesson && !it.done }?.let { it.unavailable++ }
+            site.curriculum.firstOrNull { it.id == ledger.lesson && !it.done }?.let { it.unavailable++; it.retryAt = now + retryDelay(it.unavailable) }
         }
         site.curriculum.forEach { item ->
             if (item.done || item.id !in ledger.attemptedSkills) return@forEach
             item.attempts++
-            if (item.id in verifiedSkills) item.completedAt = ledger.updatedAt.takeIf { it > 0 } ?: System.currentTimeMillis()
-            else item.blocked++
+            if (item.id in verifiedSkills) { item.completedAt = ledger.updatedAt.takeIf { it > 0 } ?: now; item.retryAt = 0L }
+            else { item.blocked++; item.retryAt = now + retryDelay(item.blocked) }
         }
     }
+
+    private fun retryDelay(attempts: Int): Long = listOf(60_000L, 5 * 60_000L, 15 * 60_000L, 60 * 60_000L)[(attempts - 1).coerceIn(0, 3)]
 
     fun progress(site: SiteModel): String {
         ensure(site)

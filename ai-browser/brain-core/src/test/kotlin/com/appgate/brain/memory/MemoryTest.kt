@@ -108,7 +108,7 @@ class MemoryTest {
     @Test
     fun skillLibraryMergesBuiltinsWithPersistedStats() {
         val storage = InMemoryStorage()
-        val memory = Memory(storage)
+        val memory = Memory(storage) { 1000L }
         memory.skills.recordOutcome("search", "x.test", true)
         memory.skills.recordOutcome("search", "x.test", true)
         val reloaded = Memory(storage)

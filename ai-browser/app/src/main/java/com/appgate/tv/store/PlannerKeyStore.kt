@@ -56,20 +56,28 @@ object PlannerKeyStore {
     }.getOrDefault(PlannerProvider.OPENAI)
 
     fun model(context: Context): String = context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).getString("model", "").orEmpty()
+    fun endpoint(context: Context): String = context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).getString("endpoint", "").orEmpty()
+    fun teacherEnabled(context: Context): Boolean = context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).getBoolean("teacher_enabled", true)
+    fun setTeacherEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putBoolean("teacher_enabled", enabled).apply()
+    }
 
-    fun saveSettings(context: Context, provider: PlannerProvider, model: String) {
-        context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putString("provider", provider.name).putString("model", model.trim()).apply()
+    fun saveSettings(context: Context, provider: PlannerProvider, model: String, endpoint: String = "") {
+        context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putString("provider", provider.name).putString("model", model.trim())
+            .putString("endpoint", endpoint.trim()).apply()
     }
 
     /** Guess the provider from the key shape so most people never have to pick one. */
     fun guessProvider(apiKey: String): PlannerProvider = when {
         apiKey.startsWith("sk-ant-") -> PlannerProvider.ANTHROPIC
+        apiKey.startsWith("gsk_") -> PlannerProvider.GROQ
+        apiKey.startsWith("AIza") -> PlannerProvider.GEMINI
         else -> PlannerProvider.OPENAI
     }
 
     fun config(context: Context): PlannerConfig? {
         val key = load(context) ?: return null
-        return PlannerConfig(provider = provider(context), apiKey = key, model = model(context))
+        return PlannerConfig(provider = provider(context), apiKey = key, model = model(context), endpoint = endpoint(context))
     }
 
     private fun getOrCreateKey(): SecretKey {

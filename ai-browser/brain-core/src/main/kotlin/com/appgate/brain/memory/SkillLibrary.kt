@@ -7,7 +7,12 @@ import com.appgate.brain.model.SemanticPageState
 import com.appgate.brain.model.Skill
 import com.appgate.brain.model.SkillOrigin
 import com.appgate.brain.model.TaskLedger
+import com.appgate.brain.model.EffectClass
+import com.appgate.brain.model.StepKind
+import com.appgate.brain.model.Postcondition
 import com.appgate.brain.engine.StepGrounder
+import com.appgate.brain.engine.GroundingOutcome
+import com.appgate.brain.skills.PortableSkills
 import com.appgate.brain.util.Hashing
 import com.appgate.brain.util.Text
 
@@ -32,7 +37,10 @@ class SkillLibrary(private val memory: Memory) {
     fun recordOutcome(skillId: String, host: String, success: Boolean) {
         val map = memory.loadSkills()
         val s = map[skillId] ?: return
-        map[skillId] = s.withOutcome(host, success, memory.now())
+        val updated = s.withOutcome(host, success, memory.now())
+        // Keep a failed learned procedure on hold until independent verified recompilation.
+        map[skillId] = if (!success && s.origin != SkillOrigin.BUILTIN)
+            updated.copy(tags = updated.tags + PortableSkills.failureTag(host)) else updated
         memory.saveSkills(map)
     }
 
@@ -42,26 +50,75 @@ class SkillLibrary(private val memory: Memory) {
         .filter { s -> preconditionsHold(s, sps) }
         .sortedByDescending { s -> score(s, sps.host) }
 
-    fun preconditionsHold(skill: Skill, sps: SemanticPageState): Boolean = skill.pre.all { pre ->
+    fun preconditionsHold(skill: Skill, sps: SemanticPageState, params: Map<String, String> = emptyMap()): Boolean = skill.pre.all { pre ->
         when (pre) {
             is Precondition.PageTypeIn -> sps.pageType in pre.types
-            is Precondition.HasRole -> sps.affordances.any { it.visible && it.enabled && it.role == pre.role && (pre.facetKey == null || it.facetKey == pre.facetKey) }
+            is Precondition.HasRole -> sps.affordances.any { it.visible && it.enabled && it.role == pre.role &&
+                (pre.facetKey == null || it.facetKey == StepGrounder.substitute(pre.facetKey, params)) }
         }
     }
 
-    /** Only evidence-backed, same-host procedures for this capability may run without a model. */
-    fun reusable(sps: SemanticPageState, capability: String, params: Map<String, String>, ledger: TaskLedger): Skill? =
-        applicable(sps, setOf("capability:$capability")).firstOrNull { skill ->
-            skill.origin != SkillOrigin.BUILTIN && "verified_v2" in skill.tags &&
+    /** Prefer verified local procedures; strong source evidence can admit one safe probation on a new host. */
+    fun reusable(sps: SemanticPageState, capability: String, params: Map<String, String>, ledger: TaskLedger): Skill? {
+        if (sps.isHumanOnly || sps.pageType !in PortableSkills.pages) return null
+        // The engine validates live URL/profile aliases. Outcomes use the task's site identity.
+        val host = ledger.host
+        val candidates = all().filter { skill ->
+            skill.origin != SkillOrigin.BUILTIN && "verified_v2" in skill.tags && "capability:$capability" in skill.tags &&
+                PortableSkills.failureTag(host) !in skill.tags && PortableSkills.safeProgram(skill.body, skill.post) &&
+                (capability == "custom" || PortableSkills.compatible(capability, skill.body, skill.post)) &&
+                (skill.params + PortableSkills.parameters(skill.body, skill.post)).all {
+                    params[it]?.let { value -> value.isNotBlank() && !PortableSkills.isParameter(value) } == true
+                } && boundKeysValid(skill, capability, params) &&
+                preconditionsHold(skill, sps, params) && entryMatches(skill, sps, params, ledger) &&
                 (ledger.goal.intent != com.appgate.brain.model.GoalIntent.LEARN_SITE ||
-                    FailedStrategies.allowed(memory.site(ledger.host), FailedStrategies.key(sps, capability, skill.body, params), memory.now())) &&
-                skill.stat(ledger.host).successes > 0 && skill.stat(ledger.host).p >= 0.5 &&
-                skill.params.all { params[it]?.isNotBlank() == true } &&
-                skill.body.firstOrNull()?.let { step ->
-                    val bound = step.copy(arg = step.arg?.let { StepGrounder.substitute(it, params) }, facetKey = step.facetKey?.let { StepGrounder.substitute(it, params) })
-                    (ledger.actionStates[Hashing.short("${sps.hash}|${bound.toJson()}")] ?: 0) < 2
-                } == true
+                    FailedStrategies.allowed(memory.site(ledger.host), FailedStrategies.key(sps, capability, skill.body, params), memory.now()))
         }
+        candidates.filter { it.stat(host).let { local -> local.successes > 0 && local.p >= 0.5 } }
+            .maxByOrNull { score(it, host) }?.let { return it }
+        if (capability !in PortableSkills.capabilities) return null
+        return candidates.filter { skill ->
+            skill.stat(host).failures == 0.0 &&
+                skill.pre.any { it is Precondition.PageTypeIn && sps.pageType in it.types && it.types.all { page -> page in PortableSkills.pages } } &&
+                skill.statsByHost.any { (sourceHost, stats) -> sourceHost != host && PortableSkills.failureTag(sourceHost) !in skill.tags &&
+                    stats.decayed(memory.now()).let { source -> source.successes >= 2.0 - 1e-6 && source.p >= 0.75 - 1e-6 } }
+        }.maxByOrNull { score(it, host) }
+    }
+
+    private fun boundKeysValid(skill: Skill, capability: String, params: Map<String, String>): Boolean {
+        fun key(value: String) = StepGrounder.substitute(value, params)
+        fun stateKey(value: String) = key(value).let { it == "query" || PortableSkills.canonicalFacet(it) }
+        fun post(p: Postcondition): Boolean = when (p) {
+            is Postcondition.AnyOf -> p.alternatives.all(::post)
+            is Postcondition.ValueIs -> stateKey(p.facetKey)
+            is Postcondition.ConstraintApplied -> stateKey(p.key)
+            is Postcondition.UrlQueryHas -> key(p.key) in setOf("q", "query", "search", "keyword", "sort", "order", "page", "offset")
+            else -> true
+        }
+        return skill.post.all(::post) && skill.body.all { step ->
+            (step.facetKey == null || PortableSkills.canonicalFacet(key(step.facetKey))) && step.expect.all(::post) &&
+                (capability != "constrain_numeric" || step.role != Role.FACET || step.facetKey != null &&
+                    PortableSkills.numericFacet(key(step.facetKey)) && step.arg != null && Text.parseAmount(key(step.arg)) != null)
+        }
+    }
+
+    private fun entryMatches(skill: Skill, sps: SemanticPageState, params: Map<String, String>, ledger: TaskLedger): Boolean {
+        val step = PortableSkills.entry(skill.body) ?: return false
+        val bound = step.copy(arg = step.arg?.let { StepGrounder.substitute(it, params) },
+            facetKey = step.facetKey?.let { StepGrounder.substitute(it, params) })
+        if ((ledger.actionStates[Hashing.short("${sps.hash}|${bound.toJson()}")] ?: 0) >= 2) return false
+        if (bound.facetKey != null && !PortableSkills.canonicalFacet(bound.facetKey)) return false
+        if (bound.kind == StepKind.SCROLL) return sps.pageType == PageType.RESULTS
+        if (bound.kind == StepKind.BACK) return true
+        if (bound.role == Role.RESULT_ITEM && bound.arg !in sps.resultKeys) return false
+        // Validate the actual ranked choice, not just the existence of an exact candidate.
+        val ready = StepGrounder(memory.site(ledger.host)).ground(step, params, sps, ledger.visited) as? GroundingOutcome.Ready ?: return false
+        val a = ready.grounded.chosen?.affordance ?: return false
+        return a.visible && a.enabled && a.role == bound.role &&
+            a.effect != EffectClass.COMMIT_EXTERNAL && a.sameSite &&
+            (bound.facetKey == null || a.facetKey == bound.facetKey) &&
+            (bound.role != Role.RESULT_ITEM || a.itemKey == bound.arg)
+    }
 
     fun score(skill: Skill, host: String): Double {
         val local = skill.stat(host)

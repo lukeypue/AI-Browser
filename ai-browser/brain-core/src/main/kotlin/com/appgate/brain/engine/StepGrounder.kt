@@ -13,6 +13,7 @@ import com.appgate.brain.model.Step
 import com.appgate.brain.model.StepKind
 import com.appgate.brain.skills.Grounder
 import com.appgate.brain.skills.Grounding
+import com.appgate.brain.perception.Vocabulary
 import com.appgate.brain.util.Text
 import com.appgate.brain.verify.Verifier
 
@@ -38,7 +39,7 @@ sealed class GroundingOutcome {
 class StepGrounder(private val site: SiteModel?) {
     private val grounder = Grounder(site)
 
-    fun ground(step: Step, params: Map<String, String>, sps: SemanticPageState, visited: Set<String>): GroundingOutcome {
+    fun ground(step: Step, params: Map<String, String>, sps: SemanticPageState, visited: Set<String>, excludedIds: Set<String> = emptySet(), strict: Boolean = false): GroundingOutcome {
         val facetKey = step.facetKey?.let { substitute(it, params) }?.takeIf { it.isNotBlank() && !it.startsWith("$") }
         val arg = step.arg?.let { substitute(it, params) }?.takeIf { !it.startsWith("$") }
         val expect = step.expect.map { bind(it, params) }
@@ -55,14 +56,20 @@ class StepGrounder(private val site: SiteModel?) {
         }
 
         val role = step.role ?: return GroundingOutcome.Missing("step has no role")
+        if (strict && step.facetKey != null && facetKey == null) return GroundingOutcome.Missing("strict target has no resolved facet")
         if (role == Role.RESULT_ITEM && arg != null && arg !in sps.resultKeys) return GroundingOutcome.Missing("expected item is not on this page")
         val itemKey = if (role == Role.RESULT_ITEM) arg?.takeIf { key -> sps.results?.itemKeys?.contains(key) == true } else null
+        if (strict && role == Role.RESULT_ITEM && itemKey == null) return GroundingOutcome.Missing("strict target has no expected item")
         val nameHint = step.nameHint ?: (if (role == Role.CATEGORY_LINK || role == Role.NAV_LINK || role == Role.TAB) arg else null)
 
         // Opt steps whose expectation already holds are skipped (e.g. filters already open).
         if (step.optional && expect.isNotEmpty() && alreadyHolds(expect, sps)) return GroundingOutcome.Skip("expectation already holds")
 
-        val candidates = grounder.candidates(sps, role, facetKey, nameHint, itemKey)
+        val candidates = grounder.candidates(sps, role, facetKey, nameHint, itemKey, allowFallbackRoles = !strict).filter {
+            val a = it.affordance
+            a.id !in excludedIds && (!strict || a.role == role && a.sameSite && !a.isCommit && !a.role.isCommit &&
+                (facetKey == null || a.facetKey == facetKey) && (role != Role.RESULT_ITEM || a.itemKey == itemKey))
+        }
         val best = candidates.firstOrNull()
         val threshold = if (step.optional) 1.2 else 0.9
         if (best == null || best.score < threshold) {
@@ -76,16 +83,16 @@ class StepGrounder(private val site: SiteModel?) {
     }
 
     private fun actionFor(step: Step, role: Role, facetKey: String?, arg: String?, a: Affordance, expect: List<Postcondition>, sps: SemanticPageState): Action? {
-        val ref = AffordanceRef(role = a.role, facetKey = a.facetKey ?: facetKey, nameHint = a.name.takeIf { it.isNotBlank() }, affordanceId = a.id, itemKey = a.itemKey)
+        val ref = AffordanceRef(role = a.role, facetKey = a.facetKey, nameHint = a.name.takeIf { it.isNotBlank() }, affordanceId = a.id, itemKey = a.itemKey)
         val defaults = { k: ActionKind -> Verifier.defaultExpectations(Action(k, ref, text = arg, submit = step.submit), sps) }
         return when (step.kind) {
             StepKind.CLICK -> Action(ActionKind.CLICK, ref, expect = expect.ifEmpty { defaults(ActionKind.CLICK) }, effect = a.effect)
-            StepKind.DISMISS -> Action(ActionKind.DISMISS, ref, expect = expect.ifEmpty { listOf(Postcondition.DialogClosed) }, effect = EffectClass.MUTATE_LOCAL)
+            StepKind.DISMISS -> Action(ActionKind.DISMISS, ref, expect = expect.ifEmpty { listOf(Postcondition.DialogClosed) }, effect = a.effect)
             StepKind.TYPE -> {
                 val text = arg ?: return null
                 if (a.tag == "select") return Action(ActionKind.SELECT, ref, text = text, expect = expect.ifEmpty { defaults(ActionKind.SELECT) }, effect = a.effect)
                 if (a.role == Role.FACET_OPEN || (a.tag == "button" || a.tag == "a") && a.role != Role.SEARCH_BOX) return Action(ActionKind.CLICK, ref, expect = listOf(Postcondition.anyOf(Postcondition.DialogOpened, Postcondition.RoleAppeared(Role.FACET), Postcondition.RoleAppeared(Role.SEARCH_BOX))), effect = a.effect)
-                Action(ActionKind.TYPE, ref, text = text, submit = step.submit, expect = expect.ifEmpty { defaults(ActionKind.TYPE) }, effect = if (step.submit && a.role == Role.SEARCH_BOX) EffectClass.NAVIGATE else a.effect)
+                Action(ActionKind.TYPE, ref, text = text, submit = step.submit, expect = expect.ifEmpty { defaults(ActionKind.TYPE) }, effect = a.effect)
             }
             StepKind.SELECT -> {
                 val text = arg ?: return null
@@ -144,6 +151,7 @@ class StepGrounder(private val site: SiteModel?) {
 
         fun closestOption(choices: List<String>, wanted: String): String? {
             if (choices.isEmpty()) return null
+            choices.firstOrNull { Vocabulary.normalize(it) == Vocabulary.normalize(wanted) }?.let { return it }
             val w = wanted.lowercase().trim()
             choices.firstOrNull { it.lowercase().trim() == w }?.let { return it }
             choices.firstOrNull { Text.containsAll(it.lowercase(), w) }?.let { return it }

@@ -36,7 +36,7 @@ class LearningReliabilityTest {
         val config = EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0)
         val profile = SiteProfile("fake", "Fake", listOf(fake.host), "https://${fake.host}/", trainingQueries = listOf("Ford Expedition"))
         LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events, listOf(profile), perSiteChunkMs = 100).run(maxSites = 1)
-        assertTrue("Start must re-observe a stale review request", fake.log.any { it.startsWith("navigate ") })
+        assertTrue("Start must re-observe a stale review request", fake.log.any { it.startsWith("observe ") })
         assertFalse(site.learningNeedsHuman)
     }
 

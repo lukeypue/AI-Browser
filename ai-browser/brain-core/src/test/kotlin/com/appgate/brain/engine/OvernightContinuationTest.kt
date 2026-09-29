@@ -80,7 +80,8 @@ class OvernightContinuationTest {
         val events = object : EngineEvents {}
         LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events, listOf(profile(fake.host))).run(maxSites = 1)
         assertTrue(site.learningNeedsHuman)
-        assertTrue("the current page must be checked", site.lessonOrdinal > 0)
+        assertTrue("the current page must be checked without creating a task", fake.log.any { it.startsWith("observe ") })
+        assertEquals(0, site.lessonOrdinal)
         assertTrue(fake.log.none { it.startsWith("act ") })
     }
 
@@ -91,7 +92,8 @@ class OvernightContinuationTest {
         val events = object : EngineEvents {}
         val session = LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events, listOf(profile(fake.host)), perSiteChunkMs = 100)
         session.run(maxSites = 1)
-        assertTrue("the 7.1.0 core-only deferral must not suppress unfinished lessons", site.lessonOrdinal > 0)
+        assertTrue("the old deferral must not suppress opportunity checks", fake.log.any { it.startsWith("observe ") })
+        assertTrue("one-minute checks remain scheduled", site.learningBlockedUntil <= System.currentTimeMillis() + 61_000L)
     }
 
     @Test fun previousSiteDuringNavigationDoesNotBecomeAReviewHold() {

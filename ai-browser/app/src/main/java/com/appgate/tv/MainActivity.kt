@@ -80,7 +80,7 @@ class MainActivity : AppCompatActivity() {
 
         column.addView(Ui.text(this, "AI PLANNER", 18f, Ui.text, true).apply { setPadding(0, 22, 0, 4) })
         val keyButton = Button(this)
-        keyButton.text = if (PlannerKeyStore.isConfigured(this)) "AI PLANNER KEY: SET" else "SET AI PLANNER KEY"
+        keyButton.text = if (!PlannerKeyStore.teacherEnabled(this)) "AI HELP: LOCAL ONLY" else if (PlannerKeyStore.isConfigured(this)) "AI PLANNER KEY: SET" else "SET AI PLANNER KEY"
         keyButton.setOnClickListener { showPlannerDialog(keyButton) }
         column.addView(keyButton)
         column.addView(Ui.text(this, "Optional. Used only when the deterministic brain is stuck or a description needs reading for a rare detail. The key is encrypted with Android Keystore and stays on this phone. Sign-in and verification pages are never sent to the model.", 12f, Ui.muted).apply { setPadding(0, 2, 0, 8) })
@@ -130,21 +130,41 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPlannerDialog(button: Button) {
         val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 10, 40, 0) }
-        val input = EditText(this).apply { hint = "API key (OpenAI sk-… or Anthropic sk-ant-…)"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setSingleLine(true) }
-        val model = EditText(this).apply { hint = "Model (blank = default)"; setText(PlannerKeyStore.model(this@MainActivity)); setSingleLine(true) }
-        container.addView(input); container.addView(model)
+        val providers = com.appgate.brain.planner.PlannerProvider.values()
+        val oldProvider = PlannerKeyStore.provider(this)
+        val oldEndpoint = PlannerKeyStore.endpoint(this)
+        val provider = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("OpenAI", "Anthropic / Claude", "Compatible API", "Groq", "Google / Gemini"))
+            setSelection(providers.indexOf(oldProvider))
+        }
+        val enabled = CheckBox(this).apply { text = "Allow AI help when local procedures need repair"; isChecked = PlannerKeyStore.teacherEnabled(this@MainActivity) }
+        val input = EditText(this).apply { hint = "Key for the selected provider (blank keeps current key)"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setSingleLine(true) }
+        val model = EditText(this).apply { hint = "Model (blank uses economical default)"; setText(PlannerKeyStore.model(this@MainActivity)); setSingleLine(true) }
+        val endpoint = EditText(this).apply { hint = "Custom HTTPS operation URL (optional)"; setText(oldEndpoint); setSingleLine(true) }
+        container.addView(provider); container.addView(enabled); container.addView(input); container.addView(model); container.addView(endpoint)
         val builder = AlertDialog.Builder(this).setTitle("AI planner")
-            .setMessage("Paste your key. It is encrypted with Android Keystore and never leaves this phone except to call the model's API. The provider is detected from the key.")
+            .setMessage("Local skills run first. AI help is limited to 6 requests per hour and 24 per 24 hours, shared across searches and learning. Turn help off for zero API calls. Keys are stored encrypted. Each provider has its own billing and data terms.")
             .setView(container)
-            .setPositiveButton("SAVE") { _, _ ->
+            .setPositiveButton("SAVE") save@ { _, _ ->
                 val key = input.text?.toString().orEmpty().trim()
-                if (key.isNotBlank()) {
-                    runCatching { PlannerKeyStore.save(this, key); PlannerKeyStore.saveSettings(this, PlannerKeyStore.guessProvider(key), model.text.toString()) }
-                        .onSuccess { button.text = "AI PLANNER KEY: SET"; Toast.makeText(this, "Planner enabled.", Toast.LENGTH_SHORT).show() }
-                        .onFailure { Toast.makeText(this, "Could not save the key.", Toast.LENGTH_LONG).show() }
-                } else if (model.text.toString().isNotBlank()) {
-                    PlannerKeyStore.saveSettings(this, PlannerKeyStore.provider(this), model.text.toString())
+                val selected = providers[provider.selectedItemPosition]
+                val url = endpoint.text.toString().trim()
+                if (url.isNotBlank() && runCatching { java.net.URI(url).let { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null && it.query == null && it.fragment == null } }.getOrDefault(false).not()) {
+                    Toast.makeText(this, "Use a complete HTTPS API URL without credentials or query parameters.", Toast.LENGTH_LONG).show(); return@save
                 }
+                if (key.isBlank() && PlannerKeyStore.isConfigured(this) && (selected != oldProvider || url != oldEndpoint)) {
+                    Toast.makeText(this, "Paste the key for the new provider or endpoint.", Toast.LENGTH_LONG).show(); return@save
+                }
+                if (key.isNotBlank()) {
+                    if (runCatching { PlannerKeyStore.save(this, key) }.isFailure) {
+                        Toast.makeText(this, "Could not save the key.", Toast.LENGTH_LONG).show(); return@save
+                    }
+                }
+                PlannerKeyStore.saveSettings(this, selected, model.text.toString(), url)
+                PlannerKeyStore.setTeacherEnabled(this, enabled.isChecked)
+                button.text = if (!enabled.isChecked) "AI HELP: LOCAL ONLY" else if (PlannerKeyStore.isConfigured(this)) "AI PLANNER KEY: SET" else "SET AI PLANNER KEY"
+                Toast.makeText(this, if (enabled.isChecked) "AI settings saved." else "Local-only mode enabled.", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("CANCEL", null)
         if (PlannerKeyStore.isConfigured(this)) builder.setNeutralButton("CLEAR KEY") { _, _ -> PlannerKeyStore.clear(this); button.text = "SET AI PLANNER KEY" }

@@ -89,6 +89,28 @@ data class TaskLedger(
     var lesson: String = "",
     var repairReason: String = ""
 ) {
+    /** One late-discovered practice target. Values are task-local and never serialized. */
+    var learningConstraints: List<Constraint> = emptyList()
+        set(value) {
+            field = if (goal.intent == GoalIntent.LEARN_SITE) value.mapNotNull { learningConstraint(it.key, it.op, it.value) }.take(1) else emptyList()
+        }
+
+    /** Recover an already-bound resumed intent from typed expectations, never from page text. */
+    val effectiveGoal: Goal get() {
+        if (goal.intent != GoalIntent.LEARN_SITE) return goal
+        fun fromPost(post: Postcondition, depth: Int = 0): List<Constraint> = when {
+            depth > 2 -> emptyList()
+            post is Postcondition.AnyOf -> post.alternatives.take(8).flatMap { fromPost(it, depth + 1) }
+            post is Postcondition.ConstraintApplied && post.value != null -> listOfNotNull(learningConstraint(post.key, null, post.value))
+            post is Postcondition.ValueIs -> listOfNotNull(learningConstraint(post.facetKey, null, post.value))
+            else -> emptyList()
+        }
+        val bindings = learningConstraints.ifEmpty { programPost.take(8).flatMap { fromPost(it) }.distinct().take(1) }
+        return if (bindings.isEmpty()) goal else goal.copy(constraints = goal.constraints.filterNot { original ->
+            bindings.any { it.key == original.key && it.op == original.op }
+        } + bindings)
+    }
+
     val done: Boolean get() = status in setOf(TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.ABANDONED, TaskStatus.PARTIAL, TaskStatus.BUDGET_EXHAUSTED)
     val blocked: Boolean get() = status == TaskStatus.NEED_HUMAN || status == TaskStatus.NEED_GRANT || status == TaskStatus.PAUSED
 
@@ -131,6 +153,19 @@ data class TaskLedger(
         .put("repair_reason", repairReason)
 
     companion object {
+        private val learningNumeric = setOf("price", "mileage", "year", "distance", "bedrooms", "bathrooms")
+        private val learningChoice = setOf("make", "model", "condition", "fuel", "transmission", "body_style", "drivetrain", "color", "sort")
+
+        private fun learningConstraint(key: String, operation: ConstraintOp?, value: String): Constraint? {
+            if (value.isBlank() || value.length > 120 || value.startsWith("$")) return null
+            val base = key.removeSuffix("_min").removeSuffix("_max")
+            val op = operation ?: when { key.endsWith("_min") -> ConstraintOp.GTE; key.endsWith("_max") -> ConstraintOp.LTE; else -> ConstraintOp.EQ }
+            if (base in learningNumeric) {
+                if (op !in setOf(ConstraintOp.GTE, ConstraintOp.LTE) || value.replace(",", "").toDoubleOrNull()?.isFinite() != true) return null
+            } else if (base !in learningChoice || key != base || op != ConstraintOp.EQ) return null
+            return Constraint(base, op, value, sources = setOf(ConstraintSource.FILTERABLE))
+        }
+
         fun fromJson(o: JsonObject): TaskLedger {
             val ledger = TaskLedger(
                 id = o.optString("id"),
