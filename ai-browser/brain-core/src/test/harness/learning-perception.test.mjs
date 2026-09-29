@@ -10,10 +10,10 @@ let browser;
 before(async () => { browser = await chromium.launch({executablePath: process.env.CHROMIUM || undefined}); });
 after(async () => { await browser?.close(); });
 
-async function fixture(html) {
+async function fixture(html, url = 'https://fixtures.test/search') {
   const page = await browser.newPage({viewport: {width: 412, height: 915}});
   await page.route('**/*', route => route.fulfill({contentType: 'text/html', body: html}));
-  await page.goto('https://fixtures.test/search');
+  await page.goto(url);
   await page.evaluate(source);
   return page;
 }
@@ -44,6 +44,38 @@ test('a two-card results grid remains recognizable without mistaking navigation 
   } finally { await page.close(); }
 });
 
+test('paired image and title links do not hide the enclosing listing cards', async () => {
+  const listings = Array.from({length: 3}, (_, i) => `<article class="listing"><div class="links"><a href="/item/${100001 + i}">Photo</a><a href="/item/${100001 + i}">Mountain bike ${i + 1}</a></div><p>$${100 + i}</p></article>`).join('');
+  const page = await fixture('<style>.listing{height:220px;width:300px}.links a{display:block;height:60px}</style><main><section>' + listings + '</section></main>');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    assert.equal(obs.items.length, 3);
+    assert.ok(obs.items.every(item => item.aff && item.price && item.href.includes('/item/')));
+  } finally { await page.close(); }
+});
+
+test('recommended cards do not turn a detail page into search results or supply its description', async () => {
+  const page = await fixture(style + '<main><h1>Primary bicycle</h1><p>$500</p><p>Description: ' + 'The bicycle is in good condition. '.repeat(12) + '</p><section><h2>Similar items</h2>' + cards(2) + '</section></main>', 'https://fixtures.test/item/900001');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    assert.equal(obs.signals.detailHint, true);
+    assert.equal(obs.signals.resultsHint, false);
+    assert.ok(obs.detailText.includes('Primary bicycle'));
+    assert.ok(!obs.detailText.includes('Mountain bike'), 'recommendation descriptions belong to other listings');
+  } finally { await page.close(); }
+});
+
+test('two results with long snippets still provide results evidence', async () => {
+  const longCards = cards(2).replaceAll('</a>', '<span>Description: ' + 'Used bicycle in good condition. '.repeat(10) + '</span></a>');
+  const page = await fixture(style + '<main><h1>Search results</h1><section>' + longCards + '</section></main>');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    assert.equal(obs.items.length, 2);
+    assert.equal(obs.signals.detailHint, false);
+    assert.equal(obs.signals.resultsHint, true);
+  } finally { await page.close(); }
+});
+
 test('nested filter regions do not hide dialog membership of the close control', async () => {
   const page = await fixture(style + '<main><button>Close</button></main><div role="dialog"><aside class="filters"><button id="dismiss" aria-label="Close" onclick="this.closest(\'[role=dialog]\').remove()">×</button><p>Browse nearby items</p></aside></div>');
   try {
@@ -53,4 +85,17 @@ test('nested filter regions do not hide dialog membership of the close control',
     await page.evaluate(({obs, close}) => window.__brainExecute({cmd: 'dismiss', id: close.id, expectedDocumentId: obs.documentId, expectedUrl: obs.url}), {obs, close});
     assert.equal((await page.evaluate(() => window.__brainObserve())).signals.dialog, false);
   } finally { await page.close(); }
+});
+
+test('existing standalone and modal detail fixtures retain their own readable descriptions', async () => {
+  for (const name of ['detail_page', 'modal_detail_page']) {
+    const html = readFileSync(new URL(`../fixtures/${name}.html`, import.meta.url), 'utf8');
+    const page = await fixture(html, `https://fixtures.test/${name}.html`);
+    try {
+      const obs = await page.evaluate(() => window.__brainObserve());
+      assert.equal(obs.signals.detailHint, true, name);
+      assert.ok(obs.detailText.includes('3.73'), name);
+      assert.ok(obs.detailText.length > 150, name);
+    } finally { await page.close(); }
+  }
 });

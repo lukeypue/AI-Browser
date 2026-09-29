@@ -86,6 +86,30 @@
     return clean(parts.join(" ")).slice(0, max);
   }
 
+  // Primary listing evidence excludes recommendation cards and controls. Their prices
+  // and descriptions belong to other items and cannot verify this listing's details.
+  function primaryText(scope, cards, max) {
+    const excluded = new Set(cards);
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null);
+    const parts = [];
+    let total = 0, visited = 0;
+    while (walker.nextNode() && visited++ < 6000) {
+      const node = walker.currentNode, parent = node.parentElement;
+      if (!parent || !visible(parent) || parent.closest('script, style, noscript, template, select, button, form, nav, header, footer, [role=navigation]')) continue;
+      let inCard = false;
+      for (let n = parent; n && scope.contains(n); n = n.parentElement) {
+        if (excluded.has(n)) { inCard = true; break; }
+        if (n === scope) break;
+      }
+      if (inCard) continue;
+      const text = clean(node.nodeValue);
+      if (!text) continue;
+      parts.push(text); total += text.length + 1;
+      if (total >= max) break;
+    }
+    return clean(parts.join(" ")).slice(0, max);
+  }
+
   // Label text without the text of the control it wraps (a <label> around a <select> would
   // otherwise include every option).
   function labelText(label, control, max) {
@@ -280,7 +304,8 @@
         if (!parent) break;
         const sig = classSig(card);
         const siblings = Array.from(parent.children).filter((c) => classSig(c) === sig);
-        if (siblings.length >= 2 && card.getBoundingClientRect().height >= 40) { found = { card, parent }; break; }
+        const repeated = siblings.length >= 3 || (siblings.length === 2 && siblings.every((c) => priceRe.test(textOf(c, 400))));
+        if (repeated && card.getBoundingClientRect().height >= 40) { found = { card, parent }; break; }
         card = parent;
       }
       if (!found) continue;
@@ -361,11 +386,10 @@
     const h1 = scope.querySelector("h1, h2, [role=heading][aria-level=\"1\"]") || document.querySelector("h1");
     const scopeText = textOf(scope, 60000);
     const priceCount = (scopeText.match(/\$\s?[0-9][0-9,]{2,}/g) || []).length;
-    const mainLen = scopeText.length;
-    const scopeLower = scopeText.toLowerCase();
-    const detailHint = !!h1 && scopedCards.length < 2 && priceCount >= 1 && mainLen > 150 &&
-      (/(description|details|about this|condition|seller|posted|listed|mileage|contact|message)/i.test(scopeLower));
-    const resultsHint = cards.length >= 2 || (resultsTextRe.test(bodyText.slice(0, 4000)) && cards.length >= 1);
+    const primary = primaryText(scope, scopedCards, DETAIL_TEXT_MAX);
+    const detailHint = !!h1 && !scopedCards.some((c) => c.contains(h1)) && priceRe.test(primary) && primary.length > 150 &&
+      (/(description|details|about this|condition|seller|posted|listed|mileage|contact|message)/i.test(primary));
+    const resultsHint = !detailHint && (cards.length >= 2 || (resultsTextRe.test(bodyText.slice(0, 4000)) && cards.length >= 1));
     const loginLinks = elements.filter((e) => /\b(log ?in|sign ?in|sign ?up)\b/i.test(e.name)).length;
     const sparse = elements.length < 18 && bodyText.length < 3500;
     return {
@@ -509,7 +533,7 @@
     const authOrChallenge = signals.challengeWidget || (signals.passwordFields > 0 && (signals.sparse || signals.authPath || signals.authPhrases)) || authy;
     const items = authOrChallenge ? [] : cardInfos.map((c) => ({ key: c.key, title: c.title, price: c.price, href: c.href, text: c.text, aff: c.link && idOf.get(c.link) ? idOf.get(c.link) : null }));
     const scripts = Array.from(document.scripts).map((s) => s.src).filter(Boolean).map((s) => s.replace(/^https?:\/\/[^/]+/, "").split("?")[0]).filter((p) => /\.(m?js)$/.test(p)).slice(0, 25);
-    const detailText = signals.detailHint && !authOrChallenge ? redact(textOf(detailScope(dialogs), DETAIL_TEXT_MAX), DETAIL_TEXT_MAX) : "";
+    const detailText = signals.detailHint && !authOrChallenge ? redact(primaryText(detailScope(dialogs), cards, DETAIL_TEXT_MAX), DETAIL_TEXT_MAX) : "";
     return {
       v: 3,
       documentId,

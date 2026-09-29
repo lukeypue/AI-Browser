@@ -7,6 +7,8 @@ import com.appgate.brain.perception.SpsParser
 import com.appgate.brain.profile.SiteProfiles
 import com.appgate.brain.profile.SiteProfile
 import com.appgate.brain.json.JsonObject
+import com.appgate.brain.json.JsonArray
+import com.appgate.brain.test.Fixtures
 import com.appgate.brain.planner.Planner
 import com.appgate.brain.planner.PlannerClient
 import com.appgate.brain.test.FakeSite
@@ -14,6 +16,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LearningReliabilityTest {
+    @Test fun primaryDetailEvidenceWinsOverRecommendedListingCollections() {
+        val recommendations = Fixtures.observation("results_page").optArray("items")!!.objects().take(3)
+        for (count in listOf(2, 3)) {
+            val detail = Fixtures.observation("detail_page")
+            detail.put("items", JsonArray(recommendations.take(count)))
+            detail.optObject("signals")!!.put("detailHint", true).put("resultsHint", false)
+            assertEquals("recommendations must not prevent detail inspection", PageType.DETAIL, SpsParser().parse(detail).pageType)
+        }
+    }
+
     @Test fun explicitStartRechecksAnOldModelReviewRequest() {
         val fake = FakeSite().apply { dialogShown = false }
         val memory = Memory(InMemoryStorage())
