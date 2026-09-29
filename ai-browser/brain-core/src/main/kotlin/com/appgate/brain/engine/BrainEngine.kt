@@ -712,12 +712,20 @@ class BrainEngine(
         val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
         if (uri.scheme !in setOf("http", "https")) return false
         val host = uri.host?.lowercase()?.removePrefix("www.") ?: return false
-        val allowed = (profile.hosts + ledger.host).map { it.lowercase().removePrefix("www.") }
+        val allowed = (profile.hosts + profile.navigationHosts + ledger.host).map { it.lowercase().removePrefix("www.") }
         return allowed.any { host == it || host.endsWith(".$it") }
     }
 
     private fun acceptPage(ledger: TaskLedger, sps: SemanticPageState, profile: SiteProfile): Boolean {
         if (allowedUrl(ledger, sps.url, profile) && UrlPatterns.host(sps.url).removePrefix("www.") == sps.host.removePrefix("www.")) return true
+        // An incidental click or Back during training can leave the task site. There is
+        // nothing for the user to solve there; stop this lesson without exploring it.
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && (ledger.actions > 0 || !sps.isHumanOnly)) {
+            diagnostic(ledger, latestPage ?: emptySps(ledger.host), sps, ledger.currentProgram.getOrNull(ledger.cursor), VerifyStatus.FAILED, DiagnosticCode.UNEXPECTED_HOST)
+            ledger.status = if (ledger.verdicts.isNotEmpty()) TaskStatus.PARTIAL else TaskStatus.FAILED
+            ledger.terminalReason = "left task site during training"
+            return false
+        }
         diagnostic(ledger, latestPage ?: emptySps(ledger.host), sps, ledger.currentProgram.getOrNull(ledger.cursor), VerifyStatus.HUMAN_NEEDED, DiagnosticCode.UNEXPECTED_HOST)
         ledger.status = TaskStatus.NEED_HUMAN
         ledger.terminalReason = "unexpected host"

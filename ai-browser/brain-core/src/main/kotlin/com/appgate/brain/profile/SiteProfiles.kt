@@ -24,7 +24,8 @@ data class SiteProfile(
     val minActionIntervalMs: Long = 1200L,
     val categories: Set<String> = setOf("general"),
     val requiresLogin: Boolean = false,
-    val trainingQueries: List<String> = emptyList()
+    val trainingQueries: List<String> = emptyList(),
+    val navigationHosts: List<String> = emptyList() // Content pages reached from results; not profile aliases.
 ) {
     fun accepts(host: String): Boolean {
         val h = host.lowercase().removePrefix("www.")
@@ -85,7 +86,8 @@ object SiteProfiles {
         facetVocabulary = mapOf("price from" to "price", "price to" to "price", "mileage from" to "mileage", "mileage to" to "mileage", "year from" to "year", "year to" to "year", "make" to "make", "model" to "model", "trim" to "trim", "body" to "body_style", "sort by" to "sort"),
         quirks = setOf("path_encoded_facets", "select_facets", "make_model_cascade"),
         categories = setOf("vehicles"),
-        trainingQueries = vehicleQueries
+        trainingQueries = vehicleQueries,
+        navigationHosts = listOf("classifieds.ksl.com")
     )
 
     val facebookMarketplace = SiteProfile(
