@@ -271,7 +271,7 @@ class SpsParser(private val siteFacetVocabulary: Map<String, String> = emptyMap(
         }
         if (Regex("(^|/)(messages|inbox|chat|conversations)(/|$)").containsMatchIn(path) || (hasComposer && items.isEmpty() && !sig.detailHint)) return PageType.MESSAGES
         if (Regex("(^|/)(profile|user|users|u|member|members|seller|account|my)(/|$)").containsMatchIn(path) && items.size < 3) return PageType.PROFILE
-        if (items.size >= 3) return PageType.RESULTS
+        if (items.size >= 3 || (items.size >= 2 && sig.resultsHint)) return PageType.RESULTS
         if (sig.detailHint || aff.any { it.role == Role.MESSAGE_SELLER } || (sig.priceCount in 1..3 && sig.h1.isNotBlank() && items.size < 2 && sig.textLength > 300)) return PageType.DETAIL
         if (sig.resultsHint && items.isNotEmpty()) return PageType.RESULTS
         if (sig.resultsHint) return PageType.RESULTS

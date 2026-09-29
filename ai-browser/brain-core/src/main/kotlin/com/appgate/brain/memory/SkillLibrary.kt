@@ -53,6 +53,8 @@ class SkillLibrary(private val memory: Memory) {
     fun reusable(sps: SemanticPageState, capability: String, params: Map<String, String>, ledger: TaskLedger): Skill? =
         applicable(sps, setOf("capability:$capability")).firstOrNull { skill ->
             skill.origin != SkillOrigin.BUILTIN && "verified_v2" in skill.tags &&
+                (ledger.goal.intent != com.appgate.brain.model.GoalIntent.LEARN_SITE ||
+                    FailedStrategies.allowed(memory.site(ledger.host), FailedStrategies.key(sps, capability, skill.body, params), memory.now())) &&
                 skill.stat(ledger.host).successes > 0 && skill.stat(ledger.host).p >= 0.5 &&
                 skill.params.all { params[it]?.isNotBlank() == true } &&
                 skill.body.firstOrNull()?.let { step ->

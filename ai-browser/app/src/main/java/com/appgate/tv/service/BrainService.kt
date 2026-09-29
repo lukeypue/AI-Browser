@@ -435,6 +435,7 @@ class BrainService : Service() {
     }
 
     private val engineEvents = object : EngineEvents {
+        override fun diagnostic(host: String, kind: String, data: JsonObject) { diagnostics.event(kind, host, extra = data) }
         override fun progress(ledger: TaskLedger, reason: String) {
             lastProgressAt = System.currentTimeMillis()
             diagnostics.event("verified_progress", ledger.host, reason)

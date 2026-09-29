@@ -72,6 +72,10 @@ data class CurriculumItem(
  * DOM: page types seen, the affordance graph, facet vocabulary, endpoint effect classes,
  * bindings, failures, curriculum progress. Contains no page content and no user data.
  */
+data class StrategyFailure(val key: String, val count: Int, val at: Long) {
+    fun toJson() = JsonObject().put("key", key).put("count", count).put("at", at)
+}
+
 class SiteModel(val host: String) {
     var siteVersion: String = ""
     var versionChangedAt: Long = 0L
@@ -92,6 +96,7 @@ class SiteModel(val host: String) {
     val endpointEffects: MutableMap<String, EffectClass> = linkedMapOf() // "POST /api/messages" -> COMMIT_EXTERNAL
     val bindings: MutableMap<String, Binding> = linkedMapOf()
     val failures: MutableMap<String, FailureRecord> = linkedMapOf()
+    val strategyFailures: MutableMap<String, StrategyFailure> = linkedMapOf()
     val curriculum: MutableList<CurriculumItem> = mutableListOf()
     val quirks: MutableSet<String> = linkedSetOf()
     var verifiedActions: Int = 0
@@ -151,6 +156,7 @@ class SiteModel(val host: String) {
         .put("endpoints", JsonObject().also { j -> endpointEffects.forEach { (k, v) -> j.put(k, v.name) } })
         .put("bindings", JsonArray(bindings.values.map { it.toJson() }))
         .put("failures", JsonArray(failures.values.map { it.toJson() }))
+        .put("strategy_failures", JsonArray(strategyFailures.values.map { it.toJson() }))
         .put("curriculum", JsonArray(curriculum.map { it.toJson() }))
         .putStrings("quirks", quirks)
         .put("verified", verifiedActions).put("failed", failedActions)
@@ -178,6 +184,10 @@ class SiteModel(val host: String) {
             o.optObject("endpoints")?.entries()?.forEach { (k, v) -> m.endpointEffects[k] = EffectClass.parse(v.asStringOrNull()) }
             o.optArray("bindings")?.objects()?.forEach { b -> Binding.fromJson(b).let { m.bindings[it.key] = it } }
             o.optArray("failures")?.objects()?.forEach { f -> FailureRecord.fromJson(f).let { m.failures[it.key] = it } }
+            o.optArray("strategy_failures")?.objects()?.takeLast(64)?.forEach { f ->
+                val key = f.optString("key")
+                if (key.matches(Regex("[a-f0-9]{8,64}"))) m.strategyFailures[key] = StrategyFailure(key, f.optInt("count").coerceIn(0, 2), f.optLong("at"))
+            }
             o.optArray("curriculum")?.objects()?.forEach { c -> m.curriculum += CurriculumItem.fromJson(c) }
             m.quirks += o.optStrings("quirks")
             m.verifiedActions = o.optInt("verified")

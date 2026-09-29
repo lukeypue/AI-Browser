@@ -34,7 +34,7 @@ success/failure into memory.
 | **Postcondition** | `ResultsChanged`, `NewResults`, `EndOfResults`, `ConstraintApplied(k,v)`, `PageTypeIs`, `DetailMatches`, `TextExpanded`, `DialogClosed`… and `AnyOf` | The only reward. "Clicked" is never an outcome. |
 | **Skill** (`model/Skills.kt`, `skills/BuiltinSkills.kt`) | program of `Step`s over roles + canonical facet keys, with `Opt` steps, params, pre/post, per-host Beta stats | Selectors never appear in skills; one skill serves inline facets and drawer facets. |
 | **Binding** | (host, page type, role, facet key) → feature vector + name hints + Beta stats + site version | The per-site answer to "which element plays that role". A bounded bonus for grounding, never a short-circuit. |
-| **Site model** (`model/SiteModel.kt`) | page types seen, affordance graph edges with verified counts, facet vocabulary, endpoint effect classes, bindings, failures, curriculum, calibration (Brier) | The semantic world model; survives layout changes (version drift shadows bindings). |
+| **Site model** (`model/SiteModel.kt`) | page types seen, affordance graph edges with verified counts, facet vocabulary, endpoint effect classes, bindings, failures, curriculum, calibration (Brier) | The semantic world model; survives ordinary page changes; verified failures retire or quarantine bindings. |
 | **Site profile** (`profile/SiteProfiles.kt`) | data: hosts, start/login/search URL templates, vocabulary seeds, quirks, pacing | Replaces per-site "mini brain" code. |
 | **Task ledger** (`model/Ledger.kt`) | goal, phase, program cursor, verdicts with evidence, visited keys, grants, checkpoints | Persisted before every action and after every verification; survives renderer and process death. |
 
@@ -67,7 +67,17 @@ skill, else a category link) → `CONSTRAIN` (one filterable constraint at a tim
 each; choice facets accept the closest available option) → `COLLECT` (scroll / load more /
 next page until enough candidates or `EndOfResults`) → `INSPECT` (open items that need a
 detail read, expand, evaluate, back) → `DONE`. `PREPARE_MESSAGE` runs open → composer → fill →
-`NEED_GRANT` → `commit_send` only with a grant.
+`NEED_GRANT` → `commit_send` only with a grant. Zero recognized listings and unresolved
+required detail checks finish as PARTIAL, never as completed inspection.
+
+A model request for human help on an ordinary page ends the attempt without creating a
+permanent sign-in hold. Observed auth/challenge pages and unrelated hosts still require
+review. Explicit Start rechecks saved human-review requests through the normal landing
+safety checks; automatic idle retries cannot clear them. Daily challenge limits remain.
+
+`SemanticDiagnostics` exports typed failure codes, page types, control/result counts and
+expected/observed hosts. It excludes URLs, query values, names and page text. Task summaries
+separate newly completed lessons from repeated verified skills.
 
 ## 4. Perception (`perception/`)
 
@@ -76,7 +86,9 @@ settle state) and redacts PII at the source. `SpsParser` assigns semantics in Ko
 are testable on the JVM: `RoleClassifier` (rule table over tag/ARIA/lexicon/region/context),
 `Vocabulary` (canonical facet keys), page type classification, active constraints from facet
 values, URL query keys and path-encoded facets, the semantic hash, and the site version
-signature (hash of script bundle paths).
+signature (hash of visible control roles, facet keys and tags). This signature describes a
+page shape, not a deployment: a drawer opening or the last page losing its Next button
+must not invalidate unrelated working bindings.
 
 Privacy rules enforced here: no password/hidden/file inputs; on auth walls and challenges no
 names, values, titles or items; emails/phones/VINs/addresses/long digit runs redacted in
@@ -87,8 +99,11 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
 - `Memory` — facade over `BrainStorage` (atomic file writes). Tiers: `site/<host>`,
   `skills`, `episodes/<host>` (≤2000, content-free), `ledger/<id>`, `labels/<host>`.
 - `BetaStat` — Beta(α, β) with daily decay 0.98; routing uses posterior mean *and* count.
-- `Consolidation` — retire bindings (p<0.3 after 5 trials, 60 days unseen), shadow on version
-  drift, prune failures/edges, dedupe compiled skills, budgets, **Brier > 0.25 ⇒ quarantine**.
+- `Consolidation` — retire bindings (p<0.3 after 5 trials, 60 days unseen), shadow weak legacy version bindings, prune failures/edges, dedupe compiled skills, budgets, **Brier > 0.25 ⇒ quarantine**.
+- `FailedStrategies` — overnight practice remembers failed procedure shapes and AI repair attempts
+  across task ledgers. Two unsuccessful attempts defer that shape for five minutes; changed
+  controls and different procedures remain eligible. At most 64 content-free records per host.
+  Site rotation still retries after one minute. A verified procedure clears its failure record.
 - `SkillCompiler` — verified planner programs → `COMPILED` skills (values → params);
   explained human demonstrations → `DEMONSTRATED` skills.
 - `Curriculum` — per-site goals with completion predicates keyed by verified skill ids;

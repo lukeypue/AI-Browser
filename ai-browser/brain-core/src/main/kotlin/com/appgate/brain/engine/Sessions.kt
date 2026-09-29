@@ -96,13 +96,14 @@ class LearningSession(
         var visited = 0
         var skipped = 0
         if (sites.isEmpty()) return null
-        // An explicit start may recheck the old navigation-race hold once. Genuine
-        // auth/challenge holds stay put; a fresh unrelated redirect asks again.
+        // An explicit Start revalidates saved human-review requests once. The normal
+        // landing check observes the current page before any action; actual auth walls,
+        // challenges and unrelated redirects still stop. Idle retries never clear holds.
         sites.forEach { profile ->
             val site = memory.site(profile.hosts.first())
-            if (site.learningNeedsHuman && site.lastLearningStatus == "NEED_HUMAN: unexpected host") {
+            if (site.learningNeedsHuman && site.lastLearningStatus.startsWith("NEED_HUMAN:")) {
                 site.learningNeedsHuman = false
-                site.lastLearningStatus = "Rechecking destination after interrupted site navigation"
+                site.lastLearningStatus = "Rechecking the current page after Start"
                 memory.saveSite(site)
             }
         }

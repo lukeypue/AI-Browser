@@ -243,6 +243,9 @@
   }
 
   function regionFor(el, map, dialogs) {
+    // A nested main/filter region must not erase ownership by a modal overlay.
+    const dialog = dialogs.find((d) => d.contains(el) && !dialogs.some((inner) => inner !== d && d.contains(inner) && inner.contains(el)));
+    if (dialog) return { id: map.get(dialog), inDialog: true };
     for (let n = el; n && n !== document.body; n = n.parentElement) {
       if (map.has(n)) return { id: map.get(n), inDialog: dialogs.includes(n) };
     }
@@ -265,7 +268,8 @@
   function findCards() {
     const links = Array.from(document.querySelectorAll("a[href]")).slice(0, 600).filter((a) => {
       const u = samePath(a.getAttribute("href"));
-      return u && /^https?:$/.test(u.protocol) && baseDomain(u.hostname) === ownBase && visible(a);
+      return u && /^https?:$/.test(u.protocol) && baseDomain(u.hostname) === ownBase && visible(a) &&
+        !a.closest('nav, header, footer, [role=navigation], [role=banner], [role=contentinfo]');
     });
     const containers = new Map(); // container -> Map(card -> sig)
     for (const a of links) {
@@ -276,7 +280,7 @@
         if (!parent) break;
         const sig = classSig(card);
         const siblings = Array.from(parent.children).filter((c) => classSig(c) === sig);
-        if (siblings.length >= 3 && card.getBoundingClientRect().height >= 40) { found = { card, parent }; break; }
+        if (siblings.length >= 2 && card.getBoundingClientRect().height >= 40) { found = { card, parent }; break; }
         card = parent;
       }
       if (!found) continue;
@@ -286,9 +290,10 @@
     }
     let best = null, bestScore = -1;
     for (const [parent, cards] of containers) {
-      if (cards.size < 3) continue;
+      if (cards.size < 2) continue;
       let withPrice = 0;
       for (const [card] of cards) if (priceRe.test(textOf(card, 400))) withPrice++;
+      if (cards.size < 3 && withPrice < 2) continue;
       const score = cards.size + withPrice * 3;
       if (score > bestScore) { bestScore = score; best = { parent, cards, withPrice }; }
     }
@@ -298,9 +303,10 @@
 
   function cardInfo(card) {
     const text = spacedText(card, 500);
-    const primary = Array.from(card.querySelectorAll("a[href]")).filter((a) => {
+    // querySelectorAll excludes the root itself; whole-card anchors are common.
+    const primary = (card.matches("a[href]") ? [card] : Array.from(card.querySelectorAll("a[href]"))).filter((a) => {
       const u = samePath(a.getAttribute("href"));
-      return u && baseDomain(u.hostname) === ownBase;
+      return u && /^https?:$/.test(u.protocol) && baseDomain(u.hostname) === ownBase && visible(a);
     });
     let link = null, linkText = "";
     for (const a of primary) {
@@ -316,7 +322,8 @@
     const href = link ? (samePath(link.getAttribute("href")) || {}).href || "" : "";
     const path = href ? href.replace(/^https?:\/\/[^/]+/, "").split("#")[0] : "";
     const key = hash32(lower(title) + "|" + (priceMatch ? priceMatch[0] : "") + "|" + path.split("?")[0]);
-    return { key, title: redact(title, 160), price: priceMatch ? priceMatch[0] : null, href, text: redact(text, 400), link };
+    const links = primary.filter((a) => (samePath(a.getAttribute("href")) || {}).href === href);
+    return { key, title: redact(title, 160), price: priceMatch ? priceMatch[0] : null, href, text: redact(text, 400), link, links };
   }
 
   // ------------------------------------------------------------------ page signals
@@ -356,9 +363,9 @@
     const priceCount = (scopeText.match(/\$\s?[0-9][0-9,]{2,}/g) || []).length;
     const mainLen = scopeText.length;
     const scopeLower = scopeText.toLowerCase();
-    const detailHint = !!h1 && scopedCards.length < 3 && priceCount >= 1 && mainLen > 150 &&
+    const detailHint = !!h1 && scopedCards.length < 2 && priceCount >= 1 && mainLen > 150 &&
       (/(description|details|about this|condition|seller|posted|listed|mileage|contact|message)/i.test(scopeLower));
-    const resultsHint = cards.length >= 3 || (resultsTextRe.test(bodyText.slice(0, 4000)) && cards.length >= 1);
+    const resultsHint = cards.length >= 2 || (resultsTextRe.test(bodyText.slice(0, 4000)) && cards.length >= 1);
     const loginLinks = elements.filter((e) => /\b(log ?in|sign ?in|sign ?up)\b/i.test(e.name)).length;
     const sparse = elements.length < 18 && bodyText.length < 3500;
     return {
@@ -399,7 +406,7 @@
     const cardSet = new Set(cards);
     const cardInfos = cards.slice(0, MAX_ITEMS).map(cardInfo);
     const cardByLink = new Map();
-    cardInfos.forEach((c) => { if (c.link) cardByLink.set(c.link, c); });
+    cardInfos.forEach((c) => { c.links.forEach((a) => cardByLink.set(a, c)); });
 
     let nodes = [];
     try { nodes = Array.from(document.querySelectorAll(CANDIDATE_SELECTOR)); } catch (e) { nodes = []; }

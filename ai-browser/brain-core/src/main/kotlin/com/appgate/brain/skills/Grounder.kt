@@ -26,8 +26,13 @@ class Grounder(private val site: SiteModel?) {
     ): List<Grounding> {
         val out = ArrayList<Grounding>()
         val binding = site?.binding(sps.pageType, role, facetKey)
+        val dialogClosers = if (role == Role.CLOSE && sps.dialogOpen) sps.affordances.filter {
+            it.visible && it.enabled && it.role == Role.CLOSE &&
+                (it.regionRole == com.appgate.brain.model.RegionRole.DIALOG || it.features["in_dialog"] > 0)
+        }.map { it.id }.toSet() else emptySet()
         for (a in sps.affordances) {
             if (!a.visible || !a.enabled) continue
+            if (dialogClosers.isNotEmpty() && a.id !in dialogClosers) continue
             val reasons = ArrayList<String>(4)
             var s = 0.0
             when {

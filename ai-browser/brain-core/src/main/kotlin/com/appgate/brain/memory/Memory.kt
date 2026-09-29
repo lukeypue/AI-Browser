@@ -60,12 +60,16 @@ class Memory(private val storage: BrainStorage, private val clock: () -> Long = 
         siteCache[key]?.let { return it }
         val raw = storage.read("site/$key")
         val model = Json.parseObjectOrNull(raw)?.let { runCatching { SiteModel.fromJson(it) }.getOrNull() } ?: SiteModel(key)
+        val hadListingText = model.bindings.values.any { it != structuralBinding(it) }
+        model.bindings.replaceAll { _, binding -> structuralBinding(binding) }
+        if (hadListingText) storage.write("site/$key", model.toJson().toString())
         siteCache[key] = model
         return model
     }
 
     @Synchronized
     fun saveSite(model: SiteModel) {
+        model.bindings.replaceAll { _, binding -> structuralBinding(binding) }
         siteCache[model.host] = model
         storage.write("site/${model.host}", model.toJson().toString())
     }
@@ -126,7 +130,8 @@ class Memory(private val storage: BrainStorage, private val clock: () -> Long = 
 
     // ---- bindings ----
     @Synchronized
-    fun recordBinding(host: String, binding: Binding, success: Boolean) {
+    fun recordBinding(host: String, rawBinding: Binding, success: Boolean) {
+        val binding = structuralBinding(rawBinding)
         val site = site(host)
         val now = clock()
         val existing = site.bindings[binding.key]
@@ -137,11 +142,16 @@ class Memory(private val storage: BrainStorage, private val clock: () -> Long = 
             stats = existing.stats.record(success, now),
             lastVerifiedAt = if (success) now else existing.lastVerifiedAt,
             siteVersion = if (success) binding.siteVersion else existing.siteVersion,
-            shadowed = false
+            shadowed = if (success) false else existing.shadowed
         )
         site.bindings[binding.key] = merged
         saveSite(site)
     }
+
+    private fun structuralBinding(binding: Binding): Binding =
+        if (binding.role in setOf(Role.RESULT_ITEM, Role.DETAIL_TITLE)) binding.copy(nameHints = emptyList(),
+            features = com.appgate.brain.model.FeatureVec(binding.features.values.filterKeys { !it.startsWith("w:") && !it.startsWith("c:") }))
+        else binding
 
     private fun blend(a: com.appgate.brain.model.FeatureVec, b: com.appgate.brain.model.FeatureVec): com.appgate.brain.model.FeatureVec {
         val keys = a.values.keys + b.values.keys

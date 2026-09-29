@@ -36,7 +36,7 @@ class Consolidation(private val memory: Memory) {
         }
 
         // 2. Version drift: bindings verified under a different site version get shadowed, not deleted.
-        if (site.siteVersion.isNotBlank()) {
+        if (site.siteVersion.isNotBlank() && !site.siteVersion.startsWith("semantic:")) {
             site.bindings.replaceAll { _, b ->
                 if (b.siteVersion.isNotBlank() && b.siteVersion != site.siteVersion && !b.shadowed && b.stats.decayed(now).p < 0.6) { shadowed++; b.copy(shadowed = true) } else b
             }

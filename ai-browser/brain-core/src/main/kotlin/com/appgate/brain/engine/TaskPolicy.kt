@@ -160,6 +160,7 @@ class TaskPolicy(private val profile: SiteProfile, private val site: SiteModel) 
             return if (ledger.resultsUrl.isNotBlank() && sps.url != ledger.resultsUrl && ledger.consecutiveFailures < 3) PolicyDecision.Navigate(ledger.resultsUrl, "return to results")
             else PolicyDecision.AskPlanner("no results collected")
         }
+        if (ledger.verdicts.isEmpty()) return PolicyDecision.Finish(TaskStatus.PARTIAL, "no listings recognized; inspection could not start")
         ledger.phase = TaskPhase.INSPECT
         ledger.inspectQueue = ConstraintEvaluator.rank(goal, ledger.verdicts.values).filter { ConstraintEvaluator.needsDetail(goal, it) }.map { it.itemKey }.toMutableList()
         return inspectPhase(goal, sps, ledger)
@@ -193,6 +194,9 @@ class TaskPolicy(private val profile: SiteProfile, private val site: SiteModel) 
             else if (v.url != null) PolicyDecision.Navigate(v.url, "open listing url for detail check")
             else { ledger.inspectQueue.removeAt(0); continue }
         }
+        if (ledger.verdicts.isEmpty()) return PolicyDecision.Finish(TaskStatus.PARTIAL, "no listings recognized; inspection could not start")
+        val unresolved = ledger.verdicts.values.any { !it.inspectedDetail && ConstraintEvaluator.needsDetail(goal, it) }
+        if (unresolved && ledger.itemsInspected < limit) return PolicyDecision.Finish(TaskStatus.PARTIAL, "some listing details could not be inspected")
         ledger.phase = TaskPhase.DONE
         return PolicyDecision.Finish(TaskStatus.DONE, "inspection complete")
     }

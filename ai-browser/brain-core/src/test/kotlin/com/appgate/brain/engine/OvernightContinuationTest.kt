@@ -72,16 +72,16 @@ class OvernightContinuationTest {
         assertFalse(site.learningNeedsHuman)
     }
 
-    @Test fun explicitStartPreservesSignInAndChallengeHolds() {
-        val fake = FakeSite(); val memory = Memory(InMemoryStorage())
+    @Test fun explicitStartRechecksSignInButNeverActsOnAnActualAuthWall() {
+        val fake = FakeSite().apply { loginWall = true }; val memory = Memory(InMemoryStorage())
         val site = memory.site(fake.host)
         site.learningNeedsHuman = true
         site.lastLearningStatus = "NEED_HUMAN: This site needs you to sign in."
         val events = object : EngineEvents {}
         LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events, listOf(profile(fake.host))).run(maxSites = 1)
         assertTrue(site.learningNeedsHuman)
-        assertEquals(0, site.lessonOrdinal)
-        assertTrue(fake.log.isEmpty())
+        assertTrue("the current page must be checked", site.lessonOrdinal > 0)
+        assertTrue(fake.log.none { it.startsWith("act ") })
     }
 
     @Test fun legacyDayLongCoreDeferralDoesNotHideRemainingLessons() {

@@ -4,6 +4,7 @@ import com.appgate.brain.goal.ConstraintEvaluator
 import com.appgate.brain.json.JsonObject
 import com.appgate.brain.memory.Episode
 import com.appgate.brain.memory.Memory
+import com.appgate.brain.memory.FailedStrategies
 import com.appgate.brain.model.Action
 import com.appgate.brain.model.ActionKind
 import com.appgate.brain.model.Binding
@@ -38,6 +39,7 @@ import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicBoolean
 
 interface EngineEvents {
+    fun diagnostic(host: String, kind: String, data: JsonObject) {}
     fun progress(ledger: TaskLedger, reason: String) {}
     fun status(text: String) {}
     fun step(ledger: TaskLedger, description: String, status: VerifyStatus?) {}
@@ -80,6 +82,7 @@ class BrainEngine(
     private var lastPlannerCallAt = 0L
     private var latestPage: SemanticPageState? = null
     private var programBefore: SemanticPageState? = null
+    private var lessonsBefore: Set<String> = emptySet()
 
     fun requestStop() { stopRequested.set(true) }
     fun clearStop() { stopRequested.set(false) }
@@ -109,6 +112,7 @@ class BrainEngine(
         val elapsedBefore = ledger.elapsedMs
         val profile = SiteProfiles.forHost(ledger.host) ?: SiteProfiles.generic(ledger.host)
         val site = memory.site(ledger.host)
+        lessonsBefore = site.curriculum.filter { it.done }.map { it.id }.toSet()
         val parserFactory = { SpsParser(site.facetVocabulary + profile.facetVocabulary) }
         val executor = Executor(renderer, parserFactory)
         val policy = TaskPolicy(profile, site)
@@ -175,6 +179,7 @@ class BrainEngine(
                 if (sps.pageType != PageType.ERROR && !sps.isHumanOnly) ledger.lastCheckpointUrl = sps.url
 
                 if (sps.isHumanOnly) {
+                    diagnostic(ledger, sps, null, null, VerifyStatus.HUMAN_NEEDED, if (sps.challenge) DiagnosticCode.CHALLENGE else DiagnosticCode.AUTH_WALL)
                     if (sps.challenge) site.recordChallenge(clock())
                     memory.saveSite(site)
                     val reason = if (sps.challenge) "This site is asking for a human verification step." else "This site needs you to sign in."
@@ -203,8 +208,18 @@ class BrainEngine(
                 when (val decision = policy.decide(ledger.goal, sps, ledger)) {
                     is PolicyDecision.RunSkill -> {
                         val learned = memory.skills.reusable(sps, decision.skillId, skillParams(ledger) + decision.params, ledger)
-                        val skill = learned ?: memory.skills.get(decision.skillId)
-                        if (skill == null) { ledger.note("unknown skill ${decision.skillId}"); ledger.consecutiveFailures++; continue }
+                        val params = skillParams(ledger) + decision.params
+                        val skill = listOfNotNull(learned, memory.skills.get(decision.skillId)).firstOrNull {
+                            ledger.goal.intent != GoalIntent.LEARN_SITE || FailedStrategies.allowed(site, FailedStrategies.key(sps, decision.skillId, it.body, params), clock())
+                        }
+                        if (skill == null) {
+                            ledger.attemptedSkills += decision.skillId
+                            if (!askPlanner(ledger, sps, site, profile, "recently failed procedure; try another approach", decision.skillId)) {
+                                ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
+                                ledger.terminalReason = "recently failed approaches; retry after page change or cooldown"
+                            }
+                            continue
+                        }
                         startProgram(ledger, skill.body, skillParams(ledger) + decision.params, "skill:${skill.id}", decision.reason, decision.skillId, skill.post)
                         consecutiveNoAction = 0
                     }
@@ -269,6 +284,10 @@ class BrainEngine(
         memory.saveLedger(ledger)
         memory.saveSite(site)
         val result = if (ledger.goal.intent == GoalIntent.FIND_LISTINGS || ledger.goal.intent == GoalIntent.LEARN_SITE) resultFor(ledger) else null
+        events.diagnostic(ledger.host, "learning_outcome", JsonObject().put("status", ledger.status.name)
+            .put("lesson", SemanticDiagnostics.capability(ledger.lesson)).put("items", ledger.verdicts.size).put("inspected", ledger.itemsInspected)
+            .put("verified_skills", ledger.successfulSkills.size).put("new_lessons", site.curriculum.count { it.done && it.id !in lessonsBefore })
+            .put("lessons_complete", site.curriculum.count { it.done }).put("lessons_total", site.curriculum.size))
         events.finished(ledger, result)
         currentLedger = null
         return ledger
@@ -285,6 +304,15 @@ class BrainEngine(
         ledger.currentProgram = steps.map { s ->
             s.copy(facetKey = s.facetKey?.let { StepGrounder.substitute(it, params) }, arg = s.arg?.let { StepGrounder.substitute(it, params) },
                 expect = s.expect.map { bindExpect(it, params) })
+        }
+        val page = latestPage
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && page != null &&
+            !FailedStrategies.allowed(memory.site(ledger.host), FailedStrategies.key(page, capability, ledger.currentProgram), clock())) {
+            ledger.currentProgram = emptyList()
+            ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
+            ledger.terminalReason = "recently failed approaches; retry after page change or cooldown"
+            memory.saveLedger(ledger)
+            return
         }
         ledger.cursor = 0
         programBefore = latestPage
@@ -347,6 +375,7 @@ class BrainEngine(
                     ledger.status = TaskStatus.NEED_GRANT; memory.saveLedger(ledger)
                     events.needGrant(ledger, ledger.previewText, ledger.previewHash)
                 } else {
+                    diagnostic(ledger, before, null, grounded.step, VerifyStatus.FAILED, DiagnosticCode.INTERLOCK_BLOCKED)
                     ledger.consecutiveFailures++
                     ledger.note("blocked: ${outcome.reason}")
                     events.step(ledger, "$stepDesc blocked: ${outcome.reason}", VerifyStatus.FAILED)
@@ -354,6 +383,8 @@ class BrainEngine(
                 }
             }
             is ExecOutcome.Failed -> {
+                val code = when { outcome.timeout -> DiagnosticCode.RENDERER_TIMEOUT; outcome.reason.contains("STALE_DOCUMENT") -> DiagnosticCode.STALE_DOCUMENT; else -> DiagnosticCode.ACTION_REJECTED }
+                diagnostic(ledger, before, null, grounded.step, VerifyStatus.FAILED, code)
                 ledger.record(LedgerStep(clock(), ledger.phase, before.hash, stepDesc, VerifyStatus.FAILED, outcome.reason, ledger.programSource))
                 events.step(ledger, stepDesc, VerifyStatus.FAILED)
                 recordEpisode(site, before, grounded, VerifyStatus.FAILED, before.pageType, clock() - started)
@@ -371,6 +402,12 @@ class BrainEngine(
                 }
                 if (!acceptPage(ledger, after, profile)) return
                 latestPage = after
+                diagnostic(ledger, before, after, grounded.step, result.status, when (result.status) {
+                    VerifyStatus.VERIFIED -> DiagnosticCode.VERIFIED
+                    VerifyStatus.HUMAN_NEEDED -> if (after.challenge) DiagnosticCode.CHALLENGE else DiagnosticCode.AUTH_WALL
+                    VerifyStatus.AMBIGUOUS -> if (after.settle != com.appgate.brain.model.Settle.IDLE) DiagnosticCode.PAGE_UNSETTLED else DiagnosticCode.UNMET_EXPECTATION
+                    else -> DiagnosticCode.UNMET_EXPECTATION
+                })
                 if (result.status == VerifyStatus.HUMAN_NEEDED) {
                     ledger.record(LedgerStep(clock(), ledger.phase, before.hash, stepDesc, VerifyStatus.HUMAN_NEEDED, result.evidence.joinToString("; "), ledger.programSource))
                     ledger.currentProgram = emptyList(); ledger.cursor = 0
@@ -456,6 +493,10 @@ class BrainEngine(
             }
         ledger.programCompleted = verified
         val source = ledger.programSource
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked) {
+            FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability, ledger.currentProgram), verified, clock())
+            if (verified) FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability), true, clock())
+        }
         if (source.startsWith("skill:")) {
             val id = source.removePrefix("skill:")
             memory.skills.recordOutcome(id, ledger.host, verified)
@@ -513,11 +554,11 @@ class BrainEngine(
         if (sps.siteVersion.isBlank()) return
         if (site.siteVersion.isBlank()) { site.siteVersion = sps.siteVersion; site.versionChangedAt = clock(); return }
         if (site.siteVersion != sps.siteVersion) {
-            // A redesign (or A/B test) — shadow, never delete.
-            site.bindings.replaceAll { _, b -> if (b.pageType == sps.pageType && b.siteVersion.startsWith("semantic:") && b.siteVersion != sps.siteVersion) b.copy(shadowed = true) else b }
+            // This is a visible page shape, not a deployment version. Pagination, drawers
+            // and dialogs change it routinely. Live role/feature grounding and verified
+            // failures decide whether a binding is useful; a shape change alone cannot.
             site.siteVersion = sps.siteVersion
             site.versionChangedAt = clock()
-            events.log("info", "site version changed on ${site.host}; old bindings shadowed")
         }
     }
 
@@ -589,9 +630,21 @@ class BrainEngine(
         val planner = plannerFactory() ?: run { events.log("info", "planner unavailable: $reason"); return false }
         if (ledger.llmCalls >= ledger.goal.budget.llmCalls) { ledger.note("planner budget exhausted"); return false }
         if (ledger.lastPlannerStateHash == sps.hash && ledger.plannerCallsOnSameState >= config.maxPlannerCallsSameState) { ledger.note("planner already tried this state twice"); return false }
+        val capability = repairCapability ?: capabilityFor(ledger)
+        val plannerKey = FailedStrategies.key(sps, capability)
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && !FailedStrategies.allowed(site, plannerKey, clock())) {
+            ledger.note("recent AI repairs failed on this page; waiting for a changed page or cooldown")
+            return false
+        }
         if (clock() - lastPlannerCallAt < config.plannerCooldownMs) Thread.sleep((config.plannerCooldownMs - (clock() - lastPlannerCallAt)).coerceAtLeast(0L))
         lastPlannerCallAt = clock()
         ledger.llmCalls++
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE) {
+            // Reserve the attempt before calling the model; a crash cannot reset the quota.
+            // A verified procedure clears it; an unverified answer never does.
+            FailedStrategies.record(site, plannerKey, false, clock())
+            memory.saveSite(site)
+        }
         ledger.plannerCallsOnSameState = if (ledger.lastPlannerStateHash == sps.hash) ledger.plannerCallsOnSameState + 1 else 1
         ledger.lastPlannerStateHash = sps.hash
         events.status("Thinking about this page…")
@@ -605,15 +658,29 @@ class BrainEngine(
         }
         if (program.vocabulary.isNotEmpty()) { site.facetVocabulary.putAll(program.vocabulary); memory.saveSite(site) }
         memory.recordPlannerLabel(site.host, JsonObject().put("page", sps.pageType.name).put("reason", reason.take(80)).put("steps", program.steps.size).put("conf", program.confidence).put("at", clock()))
-        if (program.needsHuman != null) { ledger.status = TaskStatus.NEED_HUMAN; ledger.humanReason = program.needsHuman; memory.saveLedger(ledger); events.needHuman(ledger, program.needsHuman, sps.url); return true }
+        if (program.needsHuman != null) {
+            diagnostic(ledger, sps, null, null, null, DiagnosticCode.MODEL_UNCERTAIN)
+            // Human-only pages are stopped before the planner is called. Its uncertainty
+            // on an ordinary page is not proof of a sign-in wall and must not create an
+            // indefinite account hold. End this attempt; the learner can retry later.
+            ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
+            ledger.terminalReason = "planner could not interpret page; automatic learning retry available"
+            ledger.humanReason = ""
+            memory.saveLedger(ledger)
+            return true
+        }
         if (program.giveUp || program.steps.isEmpty() || program.confidence < config.plannerConfidenceFloor) { ledger.note("planner: ${program.rationale}"); return false }
-        val capability = repairCapability ?: capabilityFor(ledger)
         ledger.attemptedSkills += capability
         startProgram(ledger, program.steps, skillParams(ledger), "planner", program.rationale.ifBlank { "planner program" }, capability)
         return true
     }
 
     private fun missingStep(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, step: Step, reason: String) {
+        diagnostic(ledger, sps, null, step, VerifyStatus.FAILED, when (reason) {
+            "repeat_state_limit" -> DiagnosticCode.REPEAT_STATE_LIMIT
+            "outside_task_host" -> DiagnosticCode.OUTSIDE_TASK_HOST
+            else -> DiagnosticCode.NO_TARGET
+        })
         ledger.actions++
         ledger.consecutiveFailures++
         ledger.record(LedgerStep(clock(), ledger.phase, sps.hash, step.describe(), VerifyStatus.FAILED, reason, ledger.programSource))
@@ -624,6 +691,10 @@ class BrainEngine(
 
     private fun progress(ledger: TaskLedger, key: String, reason: String) {
         if (ProgressSupervisor.evidence(ledger, key)) events.progress(ledger, reason)
+    }
+
+    private fun diagnostic(ledger: TaskLedger, before: SemanticPageState, after: SemanticPageState?, step: Step?, status: VerifyStatus?, code: DiagnosticCode) {
+        events.diagnostic(ledger.host, "action_outcome", SemanticDiagnostics.action(ledger, before, after, step, status, code))
     }
 
     private fun verifiedChange(action: Action, before: SemanticPageState, after: SemanticPageState): Boolean {
@@ -647,6 +718,7 @@ class BrainEngine(
 
     private fun acceptPage(ledger: TaskLedger, sps: SemanticPageState, profile: SiteProfile): Boolean {
         if (allowedUrl(ledger, sps.url, profile) && UrlPatterns.host(sps.url).removePrefix("www.") == sps.host.removePrefix("www.")) return true
+        diagnostic(ledger, latestPage ?: emptySps(ledger.host), sps, ledger.currentProgram.getOrNull(ledger.cursor), VerifyStatus.HUMAN_NEEDED, DiagnosticCode.UNEXPECTED_HOST)
         ledger.status = TaskStatus.NEED_HUMAN
         ledger.terminalReason = "unexpected host"
         ledger.humanReason = "The browser left this task's site. Review the page before continuing."

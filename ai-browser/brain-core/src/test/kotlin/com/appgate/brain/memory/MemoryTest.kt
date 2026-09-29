@@ -18,6 +18,21 @@ import java.io.File
 class MemoryTest {
     private val day = 86_400_000L
 
+    @Test fun rememberedListingControlsKeepStructureWithoutListingNames() {
+        val storage = InMemoryStorage()
+        val binding = Binding("fake.market", PageType.RESULTS, Role.RESULT_ITEM, null, "semantic:page",
+            FeatureVec(mapOf("tag:a" to 1.0, "w:private-title" to 1.0, "c:private-class" to 0.5)), listOf("Private listing title"), BetaStat(), 1L)
+        val legacy = SiteModel(binding.host).apply { bindings[binding.key] = binding }
+        storage.write("site/${binding.host}", legacy.toJson().toString())
+        val memory = Memory(storage) { 1000L }
+        assertFalse("old listing names are removed on load", memory.site(binding.host).toJson().toString().contains("Private listing"))
+        memory.recordBinding(binding.host, binding, true)
+        val remembered = Memory(storage).site(binding.host).binding(PageType.RESULTS, Role.RESULT_ITEM, null)!!
+        assertTrue(remembered.nameHints.isEmpty())
+        assertEquals(setOf("tag:a"), remembered.features.values.keys)
+        assertEquals(1.0, remembered.stats.successes, 0.0)
+    }
+
     @Test
     fun betaStatsDecayAndCalibrate() {
         var s = BetaStat()
