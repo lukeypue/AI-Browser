@@ -28,4 +28,10 @@ class LearningNavigationTest {
         assertEquals(TaskStatus.FAILED, engine.runTask(ledger).status)
         assertFalse(fake.log.any { it.startsWith("navigate ") })
     }
+    @Test fun kslCarsDoesNotTreatClassifiedsAsItsOwnLearningSource() {
+        val cars = com.appgate.brain.profile.SiteProfiles.kslCars
+        assertTrue(cars.accepts("cars.ksl.com"))
+        assertFalse(cars.accepts("classifieds.ksl.com"))
+        assertFalse("classifieds.ksl.com" in cars.navigationHosts)
+    }
 }
