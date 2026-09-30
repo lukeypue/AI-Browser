@@ -165,4 +165,14 @@ class LearningUpgradeTest {
         assertFalse(Curriculum.reviewDue(site, 1001))
         assertTrue(Curriculum.reviewDue(site, 1001 + 24 * 60 * 60_000L))
     }
+    @Test fun learningGoalAllowsOnlyOneRemoteRepairBeforeRotation() {
+        val site = SiteModel("fake.market")
+        val profile = SiteProfile("fake", "Fake", listOf(site.host), "https://fake.market/",
+            trainingQueries = listOf("Ford Expedition"))
+        val goal = Curriculum.nextGoal(site, profile, 0, null, "constrain_numeric")
+        assertEquals(1, goal.budget.llmCalls)
+        assertTrue(goal.budget.actions <= 16)
+        assertTrue(goal.budget.wallMs <= 3 * 60_000L)
+    }
+
 }
