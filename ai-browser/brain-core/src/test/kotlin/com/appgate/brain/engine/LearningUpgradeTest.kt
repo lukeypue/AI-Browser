@@ -4,6 +4,7 @@ import com.appgate.brain.goal.GoalParser
 import com.appgate.brain.json.*
 import com.appgate.brain.memory.*
 import com.appgate.brain.model.*
+import com.appgate.brain.profile.SiteProfile
 import com.appgate.brain.perception.SpsParser
 import com.appgate.brain.planner.*
 import com.appgate.brain.skills.SkillCompiler
