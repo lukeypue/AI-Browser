@@ -4,6 +4,7 @@ import com.appgate.brain.goal.GoalParser
 import com.appgate.brain.json.*
 import com.appgate.brain.memory.*
 import com.appgate.brain.model.*
+import com.appgate.brain.profile.SiteProfile
 import com.appgate.brain.perception.SpsParser
 import com.appgate.brain.planner.*
 import com.appgate.brain.skills.SkillCompiler
@@ -165,4 +166,14 @@ class LearningUpgradeTest {
         assertFalse(Curriculum.reviewDue(site, 1001))
         assertTrue(Curriculum.reviewDue(site, 1001 + 24 * 60 * 60_000L))
     }
+    @Test fun learningGoalAllowsOnlyOneRemoteRepairBeforeRotation() {
+        val site = SiteModel("fake.market")
+        val profile = SiteProfile("fake", "Fake", listOf(site.host), "https://fake.market/",
+            trainingQueries = listOf("Ford Expedition"))
+        val goal = Curriculum.nextGoal(site, profile, 0, null, "constrain_numeric")
+        assertEquals(1, goal.budget.llmCalls)
+        assertTrue(goal.budget.actions <= 16)
+        assertTrue(goal.budget.wallMs <= 3 * 60_000L)
+    }
+
 }

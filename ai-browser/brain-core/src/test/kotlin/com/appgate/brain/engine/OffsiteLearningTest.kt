@@ -48,10 +48,10 @@ class OffsiteLearningTest {
         assertEquals(0, humanRequests)
     }
 
-    @Test fun carsListingOnClassifiedsIsStillPartOfTheCarsTask() {
+    @Test fun carsTaskRejectsClassifiedsIdentityLeak() {
         val task = ledger("cars.ksl.com")
-        assertTrue(accept(task, "classifieds.ksl.com", PageType.DETAIL, SiteProfiles.kslCars))
-        assertEquals(TaskStatus.RUNNING, task.status)
+        assertFalse(accept(task, "classifieds.ksl.com", PageType.DETAIL, SiteProfiles.kslCars))
+        assertEquals(TaskStatus.FAILED, task.status)
         assertEquals(0, humanRequests)
     }
 
