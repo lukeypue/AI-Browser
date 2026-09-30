@@ -430,13 +430,32 @@ class BrainService : Service() {
             val waiting = learner?.isWaiting == true
             val activeProgressAt = maxOf(lastProgressAt, learner?.activeSince ?: 0L)
             if (running && !waiting && System.currentTimeMillis() - activeProgressAt > STALL_MS) {
-                diagnostics.event("watchdog", detail = "no verified progress for ${STALL_MS / 1000}s; pausing work")
                 lastProgressAt = System.currentTimeMillis()
-                engine?.requestStop()
-                learning?.stop()
-                job?.cancel(true)
-                session?.recover()
-                publish(state.copy(mode = Mode.PAUSED, status = "Paused after four minutes without new verified progress. You can review the page and resume."))
+                if (learner != null && state.mode == Mode.LEARNING) {
+                    // Overnight learning must be self-healing. Abort only the wedged lesson,
+                    // recover the renderer, and immediately continue with the next source.
+                    // Do not stop the LearningSession: its siteIndex is the durable rotation cursor.
+                    diagnostics.event("watchdog", detail = "no verified progress for ${STALL_MS / 1000}s; recovering learner and rotating source")
+                    engine?.requestStop()
+                    job?.cancel(true)
+                    session?.recover()
+                    learner.siteIndex++
+                    getSharedPreferences("brain_jobs", MODE_PRIVATE).edit()
+                        .putInt("learning_site_index", learner.siteIndex).apply()
+                    publish(state.copy(mode = Mode.LEARNING, status = "Recovered a stalled lesson; moving to the next site…"))
+                    main.postDelayed({
+                        if (learning === learner && state.mode == Mode.LEARNING && job?.isDone != false) {
+                            engine?.clearStop()
+                            runJob { runLearningLoop() }
+                        }
+                    }, 1_500L)
+                } else {
+                    diagnostics.event("watchdog", detail = "no verified progress for ${STALL_MS / 1000}s; pausing work")
+                    engine?.requestStop()
+                    job?.cancel(true)
+                    session?.recover()
+                    publish(state.copy(mode = Mode.PAUSED, status = "Paused after four minutes without new verified progress. You can review the page and resume."))
+                }
             }
             main.postDelayed(this, WATCHDOG_MS)
         }
