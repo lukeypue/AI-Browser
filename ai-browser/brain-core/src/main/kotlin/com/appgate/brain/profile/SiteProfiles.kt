@@ -87,7 +87,7 @@ object SiteProfiles {
         quirks = setOf("path_encoded_facets", "select_facets", "make_model_cascade"),
         categories = setOf("vehicles"),
         trainingQueries = vehicleQueries,
-        navigationHosts = listOf("classifieds.ksl.com")
+        navigationHosts = emptyList()
     )
 
     val facebookMarketplace = SiteProfile(
