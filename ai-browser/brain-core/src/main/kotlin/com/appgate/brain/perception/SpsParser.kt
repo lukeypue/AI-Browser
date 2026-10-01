@@ -358,7 +358,7 @@ object QueryKeys {
         "page" to "page", "p" to "page", "pg" to "page", "offset" to "page", "start" to "page",
         "zip" to "zip", "postal" to "zip", "postal_code" to "zip", "zipcode" to "zip", "location" to "location", "city" to "location", "distance" to "distance", "radius" to "distance", "search_distance" to "distance",
         "category" to "category", "cat" to "category", "categoryid" to "category", "category_id" to "category",
-        "condition" to "condition", "transmission" to "transmission", "drivetrain" to "drivetrain", "fuel" to "fuel", "color" to "color", "body" to "body_style", "bodystyle" to "body_style", "body_style" to "body_style",
+        "condition" to "condition", "newused" to "condition", "transmission" to "transmission", "drivetrain" to "drivetrain", "fuel" to "fuel", "color" to "color", "body" to "body_style", "bodystyle" to "body_style", "body_style" to "body_style",
         "bedrooms" to "bedrooms", "min_bedrooms" to "bedrooms", "beds" to "bedrooms", "bathrooms" to "bathrooms", "baths" to "bathrooms", "sellertype" to "seller_type", "seller_type" to "seller_type", "titletype" to "title_status"
     )
 

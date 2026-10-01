@@ -22,19 +22,19 @@
 ### Task 1: Targets, prerequisites and planner contracts
 **Files:** RoleClassifier.kt, LearningOpportunities.kt, Curriculum.kt, Planner.kt, BrainEngine.kt, SemanticDiagnostics.kt, content.js and regression tests.
 **Interfaces:** Existing raw observations -> SemanticPageState; Planner.proposeProgram adds optional requested capability.
-- [ ] Write regressions for the five corresponding target/contract scenarios.
-- [ ] Run targeted Kotlin tests and confirm expected failures.
-- [ ] Restrict listing roles; allow named accordion helpers on results; enforce safe global opener targeting; admit bounded search prerequisites; validate teacher capability.
-- [ ] Run brain-core suite and document-boundary suite; commit passing changes.
+- [x] Write regressions for the five corresponding target/contract scenarios.
+- [x] Run targeted Kotlin tests and confirm expected failures.
+- [x] Restrict listing roles; allow named accordion helpers on results; enforce safe global opener targeting; admit bounded search prerequisites; validate teacher capability.
+- [x] Run brain-core suite and document-boundary suite; commit passing changes.
 
 ### Task 2: Temporary stronger teacher
 **Files:** TemporaryTeacher.kt (new), PlannerClient.kt, PlannerKeyStore.kt, LearningActivity.kt, policy/wire tests.
 **Interfaces:** TemporaryTeacher.apply(config, until, now) -> PlannerConfig; settings persist expiry only.
-- [ ] Test expiry, providers/endpoints, unchanged saved config, reasoning and token ceiling sent to fake transport.
-- [ ] Confirm failure, implement pure policy plus explicit dashboard control.
-- [ ] Run core suite, update release version to 88 / 7.2.3-site-brain (bridge unchanged: no extension code changes); commit.
+- [x] Test expiry, providers/endpoints, unchanged saved config, reasoning and token ceiling sent to fake transport.
+- [x] Confirm failure, implement pure policy plus explicit dashboard control.
+- [x] Run core suite, update release version to 88 / 7.2.3-site-brain (bridge unchanged: no extension code changes); commit.
 
 ### Task 3: Review and release
-- [ ] One independent whole-branch review; fix important findings with reproductions.
+- [x] One independent whole-branch review; fix important findings with reproductions.
 - [ ] Push feature via GitHub connector; verify CI core/browser/Android gates.
 - [ ] Publish authorized release branch via existing workflow; verify live updater version and commit.

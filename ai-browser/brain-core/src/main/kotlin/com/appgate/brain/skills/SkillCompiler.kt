@@ -148,7 +148,7 @@ object SkillCompiler {
 /** Structural checks shared by compilation and probationary reuse, including legacy persisted skills. */
 internal object PortableSkills {
     val pages = setOf(PageType.HOME, PageType.SEARCH, PageType.RESULTS, PageType.FACET_PANEL, PageType.DETAIL, PageType.DIALOG, PageType.UNKNOWN)
-    val capabilities = setOf("search", "constrain_numeric", "select_facet", "open_filters", "apply_filters", "sort_results",
+    val capabilities = setOf("search", "constrain_numeric", "select_facet", "open_filters", "open_facet", "apply_filters", "sort_results",
         "next_page", "load_more", "scroll_results", "open_item", "expand_description", "go_back", "dismiss_dialog", "open_category")
     private val safeRoles = setOf(Role.SEARCH_BOX, Role.SUBMIT, Role.FACET, Role.FACET_OPEN, Role.FACET_APPLY, Role.FACET_CLEAR,
         Role.SORT, Role.PAGE_NEXT, Role.PAGE_PREV, Role.LOAD_MORE, Role.RESULT_ITEM, Role.EXPAND_TEXT, Role.CATEGORY_LINK,
@@ -222,7 +222,7 @@ internal object PortableSkills {
         val roles = when (capability) {
             "search" -> setOf(Role.SEARCH_BOX, Role.SUBMIT, Role.TAB)
             "constrain_numeric", "select_facet" -> setOf(Role.FACET, Role.FACET_OPEN, Role.FACET_APPLY)
-            "open_filters" -> setOf(Role.FACET_OPEN)
+            "open_filters", "open_facet" -> setOf(Role.FACET_OPEN)
             "apply_filters" -> setOf(Role.FACET_APPLY)
             "sort_results" -> setOf(Role.SORT)
             "next_page", "load_more", "scroll_results" -> setOf(Role.PAGE_NEXT, Role.LOAD_MORE)
@@ -249,6 +249,12 @@ internal object PortableSkills {
             }
             "open_filters" -> has(Role.FACET_OPEN) && proves(post) { it == Postcondition.DialogOpened ||
                 it == Postcondition.RoleAppeared(Role.FACET) || it == Postcondition.RoleAppeared(Role.FACET_APPLY) || it == Postcondition.PageTypeIs(PageType.FACET_PANEL) }
+            "open_facet" -> {
+                val openers = required.filter { it.role == Role.FACET_OPEN }
+                openers.isNotEmpty() && openers.all { step -> step.facetKey != null && key(step.facetKey) && proves(post) {
+                    it is Postcondition.RoleAppeared && it.role in setOf(Role.FACET, Role.FACET_OPEN) && it.facetKey == step.facetKey
+                } }
+            }
             "apply_filters" -> has(Role.FACET_APPLY) && proves(post) { it == Postcondition.ResultsChanged || it == Postcondition.DialogClosed || it == Postcondition.PageTypeIs(PageType.RESULTS) }
             "sort_results" -> has(Role.SORT) && proves(post) { it == Postcondition.ResultsChanged }
             "next_page" -> pagination() && proves(post, ::result)

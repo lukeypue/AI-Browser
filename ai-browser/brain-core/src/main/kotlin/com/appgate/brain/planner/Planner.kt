@@ -113,7 +113,8 @@ class Planner(private val client: PlannerClient) {
         "PAGE_IS_RESULTS" -> Postcondition.PageTypeIs(PageType.RESULTS)
         "PAGE_IS_DETAIL" -> Postcondition.PageTypeIs(PageType.DETAIL)
         "CONSTRAINT_APPLIED" -> s.optStringOrNull("facet_key")?.let { Postcondition.ConstraintApplied(it.lowercase().replace(' ', '_'), s.optStringOrNull("arg")) }
-        "FACETS_APPEARED" -> Postcondition.RoleAppeared(Role.FACET)
+        "FACETS_APPEARED" -> Postcondition.RoleAppeared(Role.FACET, s.optStringOrNull("facet_key"))
+        "FACET_OPENERS_APPEARED" -> Postcondition.RoleAppeared(Role.FACET_OPEN, s.optStringOrNull("facet_key"))
         else -> null
     }
 
@@ -148,12 +149,13 @@ class Planner(private val client: PlannerClient) {
     companion object {
         val ROLE_NAMES: List<String> = Role.values().filter { !it.isCommit && it != Role.UNKNOWN && it != Role.LOGIN && it != Role.ACCOUNT }.map { it.name }
         val STEP_KINDS: List<String> = StepKind.values().map { it.name }
-        val EXPECT_NAMES: List<String> = listOf("RESULTS_CHANGED", "NEW_RESULTS", "END_OF_RESULTS", "TEXT_EXPANDED", "DIALOG_CLOSED", "DIALOG_OPENED", "URL_CHANGED", "COMPOSER_READY", "PAGE_IS_RESULTS", "PAGE_IS_DETAIL", "CONSTRAINT_APPLIED", "FACETS_APPEARED")
+        val EXPECT_NAMES: List<String> = listOf("RESULTS_CHANGED", "NEW_RESULTS", "END_OF_RESULTS", "TEXT_EXPANDED", "DIALOG_CLOSED", "DIALOG_OPENED", "URL_CHANGED", "COMPOSER_READY", "PAGE_IS_RESULTS", "PAGE_IS_DETAIL", "CONSTRAINT_APPLIED", "FACETS_APPEARED", "FACET_OPENERS_APPEARED")
 
         const val PROGRAM_INSTRUCTIONS = """You are the planning module of an on-device web agent that helps a person find marketplace listings. You never see HTML; you see a typed summary of the current page: affordances with roles, facets with canonical keys, collections and active constraints.
 Return a short program (1-6 steps) of typed steps over affordance ROLES that advances the goal from this page state. Rules:
 - task.requested_capability is the exact operation being repaired. For open_item, use RESULT_ITEM and verify PAGE_IS_DETAIL; do not substitute search or filters. Repair only that operation, or give_up.
 - Ground the first action in the current page. Later steps may use controls revealed by earlier steps; each target will be checked on its live page.
+- For search use arg "${'$'}query" or the exact requested query. For open_facet, name the observed facet_key and verify FACETS_APPEARED or FACET_OPENERS_APPEARED for that key.
 - Use canonical facet keys (price_max, price_min, mileage_max, year_min, make, model, zip, distance, sort, condition ...).
 - Prefer skills the engine already knows; if a known skill fits, express the same steps.
 - Every step must declare what it expects to verify (expect). Clicking is never an outcome.

@@ -112,4 +112,72 @@ class LiveTargetRegressionTest {
         assertFalse(out.steps.any { it.source == "planner" && it.action.contains("SEARCH_BOX") })
         assertFalse("open_item" in out.successfulSkills)
     }
+
+    @Test fun concreteQueryTeacherRepairExecutesAndVerifies() {
+        val fake = FakeSite().apply { dialogShown = false }
+        var teacherCalled = false
+        val renderer = object : Renderer by fake {
+            override fun act(command: JsonObject, timeoutMs: Long) = if (!teacherCalled) RendererResult(false, "fixture rejection") else fake.act(command, timeoutMs)
+        }
+        val teacher = Planner(object : PlannerClient {
+            override val describe = "fixture"
+            override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
+                teacherCalled = true
+                return """{"steps":[{"kind":"TYPE","role":"SEARCH_BOX","arg":"Ford","submit":true,"expect":["PAGE_IS_RESULTS"]}],"confidence":0.99}"""
+            }
+        })
+        val goal = Goal("search", GoalIntent.LEARN_SITE, "practice", "Ford", emptyList(), budget = Budget(actions = 20, llmCalls = 1, wallMs = 10000))
+        val out = BrainEngine(renderer, Memory(InMemoryStorage()) { 1000L }, { teacher }, object : EngineEvents {},
+            EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0)) { 1000L }
+            .runTask(TaskLedger("search", goal, fake.host, fake.url).apply { lesson = "search" })
+        assertTrue(teacherCalled)
+        assertTrue(out.steps.any { it.source == "planner" && it.status == VerifyStatus.VERIFIED })
+        assertEquals(TaskStatus.DONE, out.status)
+    }
+
+    @Test fun namedOpenerTeacherRepairCanContinueToVerifiedFacetSelection() {
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000) }
+        var teacherCalled = false; var opened = false; var selected = false
+        val renderer = object : Renderer by fake {
+            override fun observe(timeoutMs: Long): String {
+                val raw = Json.parseObject(fake.observe(timeoutMs))
+                val elements = raw.optArray("elements")!!.objects().filter { it.optString("tag") != "select" }.toMutableList()
+                fun control(id: String, tag: String, name: String) = JsonObject().put("id", id).put("tag", tag).put("name", name)
+                    .put("visible", true).put("enabled", true).put("sameSite", true).put("region", "r1")
+                elements += control("condition-header", "button", "Condition Expand").put("expanded", opened)
+                if (opened) elements += control("condition-option", "li", "New").put("role", "option").put("near", "Condition").put("selected", selected)
+                raw.put("elements", JsonArray(elements)); return raw.toString()
+            }
+            override fun act(command: JsonObject, timeoutMs: Long): RendererResult = when (command.optString("id")) {
+                "condition-header" -> if (!teacherCalled) RendererResult(false, "fixture rejection") else { opened = true; RendererResult(true) }
+                "condition-option" -> { selected = true; fake.url += "&condition=New"; RendererResult(true) }
+                else -> fake.act(command, timeoutMs)
+            }
+        }
+        val teacher = Planner(object : PlannerClient {
+            override val describe = "fixture"
+            override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
+                assertEquals("open_facet", Json.parseObject(input).optObject("task")?.optString("requested_capability"))
+                teacherCalled = true
+                return """{"steps":[{"kind":"CLICK","role":"FACET_OPEN","facet_key":"condition","expect":["FACETS_APPEARED"]}],"confidence":0.99}"""
+            }
+        })
+        val goal = Goal("facet", GoalIntent.LEARN_SITE, "practice", "Ford", emptyList(), budget = Budget(actions = 20, llmCalls = 1, wallMs = 10000))
+        val out = BrainEngine(renderer, Memory(InMemoryStorage()) { 1000L }, { teacher }, object : EngineEvents {},
+            EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0)) { 1000L }
+            .runTask(TaskLedger("facet", goal, fake.host, fake.url).apply { lesson = "select_facet" })
+        assertTrue(teacherCalled)
+        assertEquals(out.notes.joinToString(), TaskStatus.DONE, out.status)
+        assertTrue("select_facet" in out.successfulSkills)
+        assertTrue(out.steps.any { it.source == "planner" && it.status == VerifyStatus.VERIFIED })
+    }
+
+    @Test fun closingConditionOptionsRetainsTheAppliedPathConstraint() {
+        val raw = Fixtures.observation("results_page")
+        raw.put("url", "https://classifieds.ksl.com/search/newUsed/New")
+        raw.optArray("elements")!!.add(JsonObject().put("id", "condition-closed").put("tag", "input").put("type", "text")
+            .put("role", "combobox").put("name", "Condition").put("expanded", false).put("value", "")
+            .put("visible", true).put("enabled", true))
+        assertEquals("New", SpsParser().parse(raw).constraintsActive["condition"])
+    }
 }

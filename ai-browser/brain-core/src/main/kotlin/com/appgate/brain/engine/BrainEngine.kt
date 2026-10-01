@@ -759,8 +759,14 @@ class BrainEngine(
             return true
         }
         if (program.giveUp || program.steps.isEmpty() || program.confidence < config.plannerConfidenceFloor) { ledger.note("planner: ${program.rationale}"); return false }
+        // Execution accepts the requested query either literally or as a reusable parameter.
+        // Other literal queries must not satisfy this task's search contract.
+        val contractSteps = program.steps.map { step ->
+            if (step.kind == com.appgate.brain.model.StepKind.TYPE && step.role == Role.SEARCH_BOX &&
+                ledger.goal.query.isNotBlank() && step.arg?.equals(ledger.goal.query, true) == true) step.copy(arg = "\$query") else step
+        }
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && !com.appgate.brain.skills.PortableSkills.compatible(capability,
-                program.steps, program.steps.lastOrNull { !it.optional }?.expect.orEmpty())) {
+                contractSteps, program.steps.lastOrNull { !it.optional }?.expect.orEmpty())) {
             ledger.note("teacher program rejected: incompatible capability"); return false
         }
         ledger.attemptedSkills += capability
