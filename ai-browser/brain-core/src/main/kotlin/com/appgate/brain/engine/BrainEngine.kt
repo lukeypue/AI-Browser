@@ -739,7 +739,7 @@ class BrainEngine(
         events.status("Thinking about this page…")
         val failuresHere = site.failures.values.filter { it.pageType == sps.pageType }.sortedByDescending { it.lastAt }.take(3).map { "${it.role}${it.facetKey?.let { k -> "[$k]" } ?: ""}: ${it.reason}" }
         val program = try {
-            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks)
+            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability)
         } catch (e: PlannerRefused) {
             events.log("warn", "planner refused: ${e.message}"); return false
         } catch (e: Exception) {
@@ -759,6 +759,10 @@ class BrainEngine(
             return true
         }
         if (program.giveUp || program.steps.isEmpty() || program.confidence < config.plannerConfidenceFloor) { ledger.note("planner: ${program.rationale}"); return false }
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && !com.appgate.brain.skills.PortableSkills.compatible(capability,
+                program.steps, program.steps.lastOrNull { !it.optional }?.expect.orEmpty())) {
+            ledger.note("teacher program rejected: incompatible capability"); return false
+        }
         ledger.attemptedSkills += capability
         startProgram(ledger, program.steps, skillParams(ledger), "planner", program.rationale.ifBlank { "planner program" }, capability)
         return true

@@ -81,12 +81,12 @@ object BuiltinSkills {
 
     /** Expand one named facet inside an already open filter sheet (an accordion such as "Make"). */
     val openFacet = Skill(
-        id = "open_facet", version = 1, intent = "expand a named facet section inside the filter panel",
+        id = "open_facet", version = 2, intent = "expand a named facet section inside the filter panel",
         params = listOf("key"),
         pre = listOf(Precondition.PageTypeIn(resultPages), Precondition.HasRole(Role.FACET_OPEN)),
         body = listOf(Step(StepKind.CLICK, Role.FACET_OPEN, facetKey = "\$key",
-            expect = listOf(Postcondition.RoleAppeared(Role.FACET, "\$key")))),
-        post = listOf(Postcondition.RoleAppeared(Role.FACET, "\$key")),
+            expect = listOf(Postcondition.anyOf(Postcondition.RoleAppeared(Role.FACET, "\$key"), Postcondition.RoleAppeared(Role.FACET_OPEN, "\$key"))))),
+        post = listOf(Postcondition.anyOf(Postcondition.RoleAppeared(Role.FACET, "\$key"), Postcondition.RoleAppeared(Role.FACET_OPEN, "\$key"))),
         origin = SkillOrigin.BUILTIN, tags = setOf("filter")
     )
 

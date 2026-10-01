@@ -47,6 +47,7 @@ object PlannerKeyStore {
 
     fun clear(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        setStrongerTeacher(context, false)
     }
 
     fun isConfigured(context: Context): Boolean = !load(context).isNullOrBlank()
@@ -62,9 +63,20 @@ object PlannerKeyStore {
         context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putBoolean("teacher_enabled", enabled).apply()
     }
 
+    fun strongerTeacherUntil(context: Context): Long = context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).getLong("stronger_teacher_until", 0L)
+    fun strongerTeacherEligible(context: Context): Boolean = com.appgate.brain.planner.TemporaryTeacher.eligible(
+        PlannerConfig(provider = provider(context), apiKey = "", model = model(context), endpoint = endpoint(context)))
+    fun strongerTeacherActive(context: Context, now: Long = System.currentTimeMillis()): Boolean =
+        strongerTeacherEligible(context) && strongerTeacherUntil(context) > now &&
+            strongerTeacherUntil(context) - now <= com.appgate.brain.planner.TemporaryTeacher.DURATION_MS
+    fun setStrongerTeacher(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putLong("stronger_teacher_until",
+            if (enabled && strongerTeacherEligible(context)) System.currentTimeMillis() + com.appgate.brain.planner.TemporaryTeacher.DURATION_MS else 0L).apply()
+    }
+
     fun saveSettings(context: Context, provider: PlannerProvider, model: String, endpoint: String = "") {
         context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putString("provider", provider.name).putString("model", model.trim())
-            .putString("endpoint", endpoint.trim()).apply()
+            .putString("endpoint", endpoint.trim()).putLong("stronger_teacher_until", 0L).apply()
     }
 
     /** Guess the provider from the key shape so most people never have to pick one. */
@@ -77,7 +89,9 @@ object PlannerKeyStore {
 
     fun config(context: Context): PlannerConfig? {
         val key = load(context) ?: return null
-        return PlannerConfig(provider = provider(context), apiKey = key, model = model(context), endpoint = endpoint(context))
+        return com.appgate.brain.planner.TemporaryTeacher.apply(
+            PlannerConfig(provider = provider(context), apiKey = key, model = model(context), endpoint = endpoint(context)),
+            strongerTeacherUntil(context), System.currentTimeMillis())
     }
 
     private fun getOrCreateKey(): SecretKey {

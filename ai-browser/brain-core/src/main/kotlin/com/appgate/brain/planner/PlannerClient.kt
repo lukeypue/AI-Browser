@@ -26,7 +26,8 @@ data class PlannerConfig(
     val endpoint: String = "",
     val reasoningEffort: String = "",
     val connectTimeoutMs: Int = 15_000,
-    val readTimeoutMs: Int = 45_000
+    val readTimeoutMs: Int = 45_000,
+    val minimumOutputTokens: Int = 0
 ) {
     val resolvedModel: String get() = model.ifBlank {
         when (provider) {
@@ -59,12 +60,13 @@ class OpenAiResponsesClient(
     override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
         require(maxOutputTokens > 0) { "Output token limit must be positive" }
         val model = config.resolvedModel
+        val outputLimit = maxOf(maxOutputTokens, config.minimumOutputTokens)
         val body = JsonObject()
             .put("model", model)
             .put("store", false)
             .put("instructions", instructions)
             .put("input", input)
-            .put("max_output_tokens", maxOutputTokens)
+            .put("max_output_tokens", outputLimit)
             .put("text", JsonObject().put("format", JsonObject()
                 .put("type", "json_schema").put("name", schemaName).put("strict", true).put("schema", schema)))
         // Older explicitly selected models may not support `none`. Only our pinned default gets it automatically.
@@ -72,7 +74,7 @@ class OpenAiResponsesClient(
         if (effort.isNotBlank() && !model.startsWith("gpt-4")) {
             body.put("reasoning", JsonObject().put("effort", effort))
         }
-        val json = request(config, http, observer, body, maxOutputTokens, mapOf("Authorization" to "Bearer ${config.apiKey}"))
+        val json = request(config, http, observer, body, outputLimit, mapOf("Authorization" to "Bearer ${config.apiKey}"))
         reportUsage(config, observer, json, UsageShape.RESPONSES)
         if (json.has("error") || json.optString("status") in setOf("incomplete", "failed", "cancelled")) throw IOException("Planner response did not complete")
         val text = json.optStringOrNull("output_text") ?: json.optArray("output")?.objects()

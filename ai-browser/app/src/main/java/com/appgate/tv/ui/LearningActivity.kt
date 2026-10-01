@@ -22,6 +22,8 @@ class LearningActivity : ServiceBoundActivity() {
     private lateinit var progress: LinearLayout
     private lateinit var humanButton: android.widget.Button
     private lateinit var usageView: TextView
+    private lateinit var strongerTeacher: android.widget.CheckBox
+    private var updatingTeacher = false
     private val recent = ArrayDeque<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,6 +49,19 @@ class LearningActivity : ServiceBoundActivity() {
                 refreshProgress()
             }
         })
+        strongerTeacher = android.widget.CheckBox(this).apply {
+            text = "Use stronger OpenAI help for 24 hours (GPT-5.4). Higher cost: about 3.3× mini token rates, plus reasoning tokens. Same 6/hour and 24/day limits; then your usual model resumes."
+            setTextColor(Ui.text)
+            isEnabled = com.appgate.tv.store.PlannerKeyStore.strongerTeacherEligible(this@LearningActivity)
+            isChecked = com.appgate.tv.store.PlannerKeyStore.strongerTeacherActive(this@LearningActivity)
+            setOnCheckedChangeListener { _, checked ->
+                if (!updatingTeacher) {
+                    com.appgate.tv.store.PlannerKeyStore.setStrongerTeacher(this@LearningActivity, checked)
+                    refreshProgress()
+                }
+            }
+        }
+        column.addView(strongerTeacher)
         usageView = Ui.text(this, "", 12f, Ui.muted)
         column.addView(usageView)
         column.addView(android.widget.CheckBox(this).apply {
@@ -88,12 +103,22 @@ class LearningActivity : ServiceBoundActivity() {
     }
 
     private fun refreshProgress() {
+        if (::strongerTeacher.isInitialized) {
+            updatingTeacher = true
+            strongerTeacher.isEnabled = com.appgate.tv.store.PlannerKeyStore.strongerTeacherEligible(this)
+            strongerTeacher.isChecked = com.appgate.tv.store.PlannerKeyStore.strongerTeacherActive(this)
+            updatingTeacher = false
+        }
         val s = service ?: return
         val usage = s.memory.teacherBudget.snapshot()
         val enabled = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this)
         usageView.text = buildString {
             append(if (enabled) "AI requests: ${usage.requests24h}/24 in the last 24 hours · ${usage.requestsHour}/6 in the last hour" else "Local-only mode · no new AI API calls")
             append("\nReported tokens: ${usage.inputTokens} in / ${usage.outputTokens} out (${usage.reportedRequests} responses)")
+            if (com.appgate.tv.store.PlannerKeyStore.strongerTeacherActive(this@LearningActivity)) {
+                val minutes = ((com.appgate.tv.store.PlannerKeyStore.strongerTeacherUntil(this@LearningActivity) - System.currentTimeMillis()) / 60_000L).coerceAtLeast(1)
+                append("\nStronger teacher: $minutes minutes remaining")
+            }
             if (usage.lastModel.isNotBlank()) append("\nLast model: ${usage.lastModel}")
             if (enabled && !usage.allowed) append("\n${usage.reason}")
         }

@@ -19,6 +19,8 @@ object SemanticDiagnostics {
         .put("facet_controls", sps.byRole(Role.FACET).size)
         .put("facet_openers", sps.byRole(Role.FACET_OPEN).size)
         .put("filter_dialog", LearningOpportunities.dialogHoldsFilters(sps))
+        .put("facet_keys", com.appgate.brain.json.Json.arr(sps.affordances.filter { it.visible && it.role in setOf(Role.FACET, Role.FACET_OPEN) }.mapNotNull { FailedStrategies.facet(it.facetKey) }.distinct().sorted()))
+        .put("dialog_roles", JsonObject().apply { sps.affordances.filter { it.visible && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) }.groupingBy { it.role.name }.eachCount().forEach { (role, count) -> put(role, count) } })
         .put("dialog_controls", sps.affordances.count { it.visible && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) })
         .put("closers", sps.byRole(Role.CLOSE).size).put("dialog", sps.dialogOpen)
         .put("auth_wall", sps.authWall).put("challenge", sps.challenge).put("settle", sps.settle.name)

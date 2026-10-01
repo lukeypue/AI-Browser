@@ -65,7 +65,9 @@ object Curriculum {
         ensure(site)
         val order = listOf("search", "constrain_numeric", "open_item", "next_page", "load_more", "scroll_results", "select_facet", "sort_results", "expand_description", "go_back", "dismiss_dialog")
         val eligible = site.curriculum.filter {
-            it.retryAt <= now && (it.opportunity == "AVAILABLE" || (site.learningObservedAt == 0L && it.opportunity == "UNKNOWN")) &&
+            it.retryAt <= now && (it.opportunity == "AVAILABLE" || (site.learningObservedAt == 0L && it.opportunity == "UNKNOWN") ||
+                (page != null && !it.done && site.curriculum.any { prerequisite -> prerequisite.id == "search" && prerequisite.done } &&
+                    LearningOpportunities.target(page, it.id)?.skillId == "search")) &&
                 (page == null || LearningOpportunities.target(page, it.id) != null)
         }
         if (allLessonsComplete(site)) return eligible.minByOrNull { it.completedAt }?.id.orEmpty()

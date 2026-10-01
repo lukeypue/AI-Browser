@@ -68,7 +68,7 @@ class StepGrounder(private val site: SiteModel?) {
 
         val candidates = grounder.candidates(sps, role, facetKey, nameHint, itemKey, allowFallbackRoles = !strict).filter {
             val a = it.affordance
-            a.id !in excludedIds && (!strict || a.role == role && a.sameSite && !a.isCommit && !a.role.isCommit &&
+            a.id !in excludedIds && (role != Role.FACET_OPEN || (facetKey != null && a.features["expanded"] == 0.0) || (facetKey == null && a.facetKey == null)) && (!strict || a.role == role && a.sameSite && !a.isCommit && !a.role.isCommit &&
                 (facetKey == null || a.facetKey == facetKey) && (role != Role.RESULT_ITEM || a.itemKey == itemKey))
         }
         val best = candidates.firstOrNull()

@@ -125,8 +125,10 @@ object RoleClassifier {
                 isRange -> bump(Role.FACET, 0.9)
                 isTextInput && (type == "number" || facetKey in Vocabulary.numericKeys || facetKey == "zip" || facetKey == "location" || facetKey == "keyword") -> bump(Role.FACET, 0.9)
                 isCheck -> bump(Role.FACET, 0.85)
-                isOption -> bump(Role.FACET, 0.8)
-                isButton && (raw.hasPopup || raw.expanded != null || inFilters) -> bump(Role.FACET_OPEN, 0.85)
+                isOption -> bump(Role.FACET, 0.9)
+                aria == "combobox" && raw.choices.isEmpty() && raw.expanded != null -> bump(Role.FACET_OPEN, 0.96)
+                aria == "combobox" && raw.choices.isNotEmpty() -> bump(Role.FACET, 0.96)
+                isButton && (raw.hasPopup || raw.expanded != null || inFilters) -> bump(Role.FACET_OPEN, 0.96)
                 isButton -> bump(Role.FACET_OPEN, 0.6)
                 isLink && inFilters -> bump(Role.FACET, 0.7)
                 isLink && raw.hrefQueryKeys.isNotEmpty() -> bump(Role.FACET, 0.55)
@@ -159,7 +161,7 @@ object RoleClassifier {
         }
 
         // --- Result items ---
-        if (isLink && raw.sameSite) {
+        if (isLink && raw.sameSite && raw.hrefPath != null) {
             val detailPath = Regex("/(item|listing|listings|detail|details|product|vehicle|vehicles|ad|ads|post|posts|itm|p|dp|cars|listing-detail)/").containsMatchIn(hrefLower) ||
                 Regex("/[0-9]{5,}").containsMatchIn(hrefLower) || Regex("/[a-z0-9-]+-[0-9]{5,}").containsMatchIn(hrefLower)
             val s = when {
@@ -286,6 +288,7 @@ object RoleClassifier {
         if (raw.inCard) m["in_card"] = 1.0
         if (raw.hasPopup) m["haspopup"] = 1.0
         if (raw.expanded != null) m["expandable"] = 1.0
+        if (raw.expanded == true) m["expanded"] = 1.0
         if (raw.submitType) m["submit"] = 1.0
         if (raw.contentEditable) m["editable"] = 1.0
         val bbox = raw.bbox

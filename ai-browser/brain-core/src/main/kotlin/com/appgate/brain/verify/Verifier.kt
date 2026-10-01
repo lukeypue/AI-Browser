@@ -127,7 +127,8 @@ object Verifier {
         }
         is Postcondition.RoleAppeared -> {
             val ok = after.byRole(p.role).any { p.matchesFacet(it.facetKey) } &&
-                before.byRole(p.role).none { p.matchesFacet(it.facetKey) }
+                (if (p.facetKey == null) before.byRole(p.role).isEmpty() else
+                    after.byRole(p.role).count { p.matchesFacet(it.facetKey) } > before.byRole(p.role).count { p.matchesFacet(it.facetKey) })
             if (ok) evidence += "${p.role} appeared"
             ok
         }

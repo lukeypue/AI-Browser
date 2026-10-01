@@ -44,11 +44,11 @@ object LearningOpportunities {
         fun openItem(): LearningTarget? = if (!results) null else controls.firstOrNull { it.role == Role.RESULT_ITEM && it.itemKey != null && it.itemKey in page.resultKeys }
             ?.let { LearningTarget("open_item", mapOf("item" to it.itemKey!!)) }
         // Inside a filter sheet, an unexpanded opener that names a facet (the "Make" accordion) is the next prerequisite.
-        fun openFacet(keys: Set<String>): LearningTarget? = if (!filterSheet) null else controls.firstOrNull {
-            it.role == Role.FACET_OPEN && it.facetKey != null && it.facetKey.removeSuffix("_min").removeSuffix("_max") in keys
+        fun openFacet(keys: Set<String>): LearningTarget? = if (!facets) null else controls.firstOrNull {
+            it.role == Role.FACET_OPEN && it.features["expanded"] == 0.0 && it.facetKey != null && it.facetKey.removeSuffix("_min").removeSuffix("_max") in keys
         }?.let { LearningTarget("open_facet", mapOf("key" to it.facetKey!!)) }
         // A choice facet is either a select/combobox with options, or a group of toggles whose names are the options.
-        fun choiceValue(a: Affordance): String? = alternative(a) ?: a.name.takeIf { a.facetKind == "toggle" && !a.selected && it.isNotBlank() }
+        fun choiceValue(a: Affordance): String? = alternative(a) ?: a.name.takeIf { (a.facetKind == "toggle" || a.facetKind == "choice" && a.features["aria:option"] > 0) && !a.selected && it.isNotBlank() }
         return when (lesson) {
             "search" -> if (has(Role.SEARCH_BOX)) LearningTarget("search") else null
             "next_page" -> if (results && has(Role.PAGE_NEXT)) LearningTarget(lesson) else null
@@ -62,7 +62,7 @@ object LearningOpportunities {
                     val key = facet.facetKey!!; val value = choiceValue(facet)!!
                     LearningTarget(lesson, mapOf("key" to key, "value" to value), listOf(Constraint(key, ConstraintOp.EQ, value,
                         sources = setOf(ConstraintSource.FILTERABLE))))
-                } else openFacet(choiceKeys) ?: if (!filterSheet && has(Role.FACET_OPEN)) LearningTarget("open_filters") else null
+                } else openFacet(choiceKeys) ?: if (!filterSheet && controls.any { it.role == Role.FACET_OPEN && it.facetKey == null }) LearningTarget("open_filters") else null
             }
             "constrain_numeric" -> if (!facets) null else {
                 val facet = controls.firstOrNull { it.role == Role.FACET && canonical(it.facetKey)?.removeSuffix("_min")?.removeSuffix("_max") in numericKeys &&
@@ -79,7 +79,7 @@ object LearningOpportunities {
                         else defaults.first { it != numeric(facet.value) }
                     LearningTarget(lesson, mapOf("key" to key, "value" to value), listOf(Constraint(base, if (minimum) ConstraintOp.GTE else ConstraintOp.LTE,
                         value, sources = setOf(ConstraintSource.FILTERABLE))))
-                } else openFacet(numericKeys) ?: if (!filterSheet && has(Role.FACET_OPEN)) LearningTarget("open_filters") else null
+                } else openFacet(numericKeys) ?: if (!filterSheet && controls.any { it.role == Role.FACET_OPEN && it.facetKey == null }) LearningTarget("open_filters") else null
             }
             "open_item" -> openItem()
             "expand_description" -> if (page.pageType == PageType.DETAIL && has(Role.EXPAND_TEXT)) LearningTarget(lesson) else openItem()
