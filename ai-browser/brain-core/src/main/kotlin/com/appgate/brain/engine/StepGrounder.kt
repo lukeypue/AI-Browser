@@ -127,7 +127,7 @@ class StepGrounder(private val site: SiteModel?) {
             is Postcondition.AnyOf -> p.alternatives.any { alreadyHolds(listOf(it), sps) }
             is Postcondition.DialogClosed -> !sps.dialogOpen
             is Postcondition.DialogOpened -> sps.dialogOpen
-            is Postcondition.RoleAppeared -> sps.byRole(p.role).any { p.facetKey == null || it.facetKey == p.facetKey }
+            is Postcondition.RoleAppeared -> sps.byRole(p.role).any { p.matchesFacet(it.facetKey) }
             is Postcondition.ComposerReady -> sps.has(Role.COMPOSER_INPUT) && sps.has(Role.SEND)
             is Postcondition.ConstraintApplied -> sps.constraintsActive[p.key]?.let { v -> p.value == null || Verifier.valuesMatch(p.value, v) } == true
             is Postcondition.ValueIs -> (sps.facet(p.facetKey)?.value ?: sps.constraintsActive[p.facetKey])?.let { Verifier.valuesMatch(p.value, it) } == true

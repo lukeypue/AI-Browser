@@ -142,6 +142,9 @@ sealed class Postcondition {
     data class RoleAppeared(val role: Role, val facetKey: String? = null) : Postcondition() {
         override val name = "ROLE_APPEARED"
         override fun toJson() = super.toJson().put("role", role.name).put("key", facetKey)
+        fun matchesFacet(key: String?): Boolean = facetKey == null || key == facetKey ||
+            (facetKey in setOf("price", "mileage", "year", "distance", "bedrooms", "bathrooms") &&
+                (key == "${facetKey}_min" || key == "${facetKey}_max"))
     }
 
     data class ValueIs(val facetKey: String, val value: String) : Postcondition() {

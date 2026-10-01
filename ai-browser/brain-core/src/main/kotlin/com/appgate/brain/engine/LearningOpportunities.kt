@@ -1,6 +1,7 @@
 package com.appgate.brain.engine
 
 import com.appgate.brain.model.*
+import com.appgate.brain.perception.FilterControls
 import com.appgate.brain.util.Hashing
 
 /** Values live only in the current task. Persistent opportunities contain roles and shapes. */
@@ -24,11 +25,9 @@ object LearningOpportunities {
     private fun numeric(value: String?): String? = value?.replace(",", "")?.replace("$", "")?.trim()?.toDoubleOrNull()
         ?.takeIf { it.isFinite() && it >= 0 }?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() }
 
-    private val filterRoles = setOf(Role.FACET, Role.FACET_OPEN, Role.FACET_APPLY, Role.FACET_CLEAR)
-
     /** An open overlay that holds filter controls is the lesson's workspace, never an obstacle to dismiss. */
     fun dialogHoldsFilters(page: SemanticPageState): Boolean = page.dialogOpen && page.affordances.any { a ->
-        a.visible && a.role in filterRoles && (a.regionRole == RegionRole.DIALOG || a.features["in_dialog"] > 0)
+        a.visible && FilterControls.isFilter(a) && FilterControls.inDialog(a)
     }
 
     fun target(page: SemanticPageState, lesson: String): LearningTarget? {

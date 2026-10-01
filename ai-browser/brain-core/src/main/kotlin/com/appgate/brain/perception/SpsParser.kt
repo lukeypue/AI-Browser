@@ -262,7 +262,7 @@ class SpsParser(private val siteFacetVocabulary: Map<String, String> = emptyMap(
         val facets = aff.count { it.role == Role.FACET || it.role == Role.FACET_OPEN }
         val hasComposer = aff.any { it.role == Role.COMPOSER_INPUT }
         if (dialogOpen) {
-            val inDialogFacets = aff.count { it.visible && (it.role == Role.FACET || it.role == Role.FACET_APPLY || it.role == Role.FACET_CLEAR || (it.role == Role.FACET_OPEN && it.facetKey != null)) && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) }
+            val inDialogFacets = aff.count { it.visible && FilterControls.isFilter(it) && FilterControls.inDialog(it) }
             if (inDialogFacets >= 2) return PageType.FACET_PANEL
             if (hasComposer) return PageType.MESSAGES
             // Marketplaces open item details in a modal over the results: a detail-like dialog is a DETAIL page.

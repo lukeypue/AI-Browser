@@ -13,3 +13,11 @@ Filter panel classification versus unrelated dialogs; apply step skipped by pend
 
 ## Rulings
 Limit this update to the reproduced learning blockers. Retention redesign and customer-search scheduling remain separate work because they alter lifecycle contracts unrelated to this run; cost: those known limitations remain.
+
+## Execution ledger
+Task 1 complete: imported regressions failed on filter open/dismiss loop; corrected drawer flow passes.
+Task 2 complete: GitHub run 36795090154 failed only the new unattended popup test (8/9); fixed run 36795382914 passed 9/9 and Android tests/build.
+Task 3 complete: pending retry migration test passes; diagnostics contain structural fields only.
+Final independent review: numeric accordion and unrelated-checkbox findings reproduced RED, fixed GREEN. Whole JVM suite 198/198. No additional Critical/Important findings.
+Final minor (deferred): non-first toggle, canceled-click target restoration, mutated-href explicit fixtures.
+Release uses canonical ai-browser-release.json and existing workflow; no signing or workflow changes.

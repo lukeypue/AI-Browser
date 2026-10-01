@@ -99,6 +99,8 @@ class ClaudeReviewRegressionTest {
         var url = "https://$host/search?q=Ford"
         var drawerOpen = false
         var makeExpanded = false
+        var priceExpanded = false
+        var priceMax: String? = null
         var make: String? = null
         val log = mutableListOf<String>()
 
@@ -114,7 +116,9 @@ class ClaudeReviewRegressionTest {
                 name == "Close" || command.optString("cmd") == "dismiss" -> drawerOpen = false
                 name == "Make" && drawerOpen -> makeExpanded = !makeExpanded
                 name == "Ford" && makeExpanded -> make = "Ford"
-                name == "Show results" && drawerOpen -> { drawerOpen = false; url = "https://$host/search?q=Ford" + (make?.let { "&make=$it" } ?: "") }
+                name == "Price" && drawerOpen -> priceExpanded = !priceExpanded
+                name == "Max price" && priceExpanded -> priceMax = command.optString("value", command.optString("text"))
+                name == "Show results" && drawerOpen -> { drawerOpen = false; url = "https://$host/search?q=Ford" + (make?.let { "&make=$it" } ?: "") + (priceMax?.let { "&price_max=$it" } ?: "") }
                 command.optString("cmd") == "scroll" -> {}
                 else -> return RendererResult(false, "nothing happened for '$name'")
             }
@@ -157,7 +161,8 @@ class ClaudeReviewRegressionTest {
                     elements.add(el("input", opt, mapOf("type" to "radio", "region" to "r3", "inDialog" to true, "near" to "Make", "selected" to (make == opt))))
                 }
                 elements.add(el("button", "Model", mapOf("region" to "r3", "inDialog" to true, "expanded" to false)))
-                elements.add(el("button", "Price", mapOf("region" to "r3", "inDialog" to true, "expanded" to false)))
+                elements.add(el("button", "Price", mapOf("region" to "r3", "inDialog" to true, "expanded" to priceExpanded)))
+                if (priceExpanded) elements.add(el("input", "Max price", mapOf("type" to "number", "region" to "r3", "inDialog" to true, "value" to priceMax)))
                 elements.add(el("button", "Show results", mapOf("region" to "r3", "inDialog" to true)))
             }
             return JsonObject().put("v", 3).put("url", url).put("host", host).put("title", "Ford - results").put("readyState", "complete")
@@ -219,6 +224,38 @@ class ClaudeReviewRegressionTest {
         val page = SpsParser().parse(raw.toString())
         assertEquals(PageType.FACET_PANEL, page.pageType)
         assertEquals("open_facet", LearningOpportunities.target(page, "select_facet")?.skillId)
+    }
+
+    @Test fun numericLessonCompletesThroughPriceAccordion() {
+        val site = DrawerSite()
+        val memory = Memory(InMemoryStorage())
+        val model = memory.site(site.host)
+        Curriculum.ensure(model)
+        val goal = Curriculum.nextGoal(model, SiteProfiles.generic(site.host), 0, null, "constrain_numeric")
+        val ledger = TaskLedger("learn-price", goal, site.host, site.url).apply {
+            lesson = "constrain_numeric"; lastCheckpointUrl = site.url; resultsUrl = site.url
+        }
+        BrainEngine(site, memory, { null }, Capture(), config).runTask(ledger, EngineMode.TRAIN)
+        assertTrue("numeric accordion reveal was not verified", "open_facet" in ledger.successfulSkills)
+        assertTrue("numeric drawer failed: ${site.log}", "constrain_numeric" in ledger.successfulSkills)
+        assertEquals("8000", site.priceMax)
+        assertFalse(site.drawerOpen)
+    }
+
+    @Test fun unrelatedCheckboxDialogsRemainDismissible() {
+        for (count in 1..2) {
+            val raw = Json.parseObject(DrawerSite().apply { drawerOpen = true }.observe(1000))
+            val elements = JsonArray(raw.optArray("elements")!!.objects().filter { !it.optBoolean("inDialog") })
+            elements.add(JsonObject().put("id", "close").put("tag", "button").put("name", "Close")
+                .put("visible", true).put("enabled", true).put("region", "r3").put("inDialog", true))
+            repeat(count) { n -> elements.add(JsonObject().put("id", "cookie$n").put("tag", "input").put("type", "checkbox")
+                .put("name", "Functional cookies $n").put("visible", true).put("enabled", true).put("region", "r3").put("inDialog", true)) }
+            raw.put("elements", elements)
+            val page = SpsParser().parse(raw.toString())
+            assertNotEquals("unrelated checkbox dialog", PageType.FACET_PANEL, page.pageType)
+            assertFalse("unrelated checkbox is not a filter", LearningOpportunities.dialogHoldsFilters(page))
+            assertEquals("dismiss_dialog", LearningOpportunities.target(page, "select_facet")?.skillId)
+        }
     }
 
     @Test fun facetOpeningRequiresTheRequestedFacetAndSurvivesSerialization() {
