@@ -99,3 +99,27 @@ test('existing standalone and modal detail fixtures retain their own readable de
     } finally { await page.close(); }
   }
 });
+
+test('training opens observed listing links in this tab when unattended popups are refused', async () => {
+  const page = await fixture(style + '<main><section>' + cards(3).replaceAll('<a ', '<a target="_blank" ') + '</section></main>');
+  page.on('popup', popup => popup.close());
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    await page.evaluate(() => window.__brainExecute({cmd: 'guard', mode: 'TRAIN'}));
+    const item = obs.items[1];
+    await page.evaluate(({obs, item}) => window.__brainExecute({cmd: 'click', id: item.aff, expectedDocumentId: obs.documentId, expectedUrl: obs.url}), {obs, item});
+    await page.waitForURL('**/item/100002', {timeout: 1500});
+  } finally { await page.close(); }
+});
+
+test('manual browsing retains listing link popup behavior', async () => {
+  const page = await fixture(style + '<main><section>' + cards(3).replaceAll('<a ', '<a target="_blank" ') + '</section></main>');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    const popupPromise = page.waitForEvent('popup');
+    await page.evaluate(({obs}) => window.__brainExecute({cmd: 'click', id: obs.items[0].aff, expectedDocumentId: obs.documentId, expectedUrl: obs.url}), {obs});
+    const popup = await popupPromise;
+    assert.equal(page.url(), obs.url);
+    await popup.close();
+  } finally { await page.close(); }
+});

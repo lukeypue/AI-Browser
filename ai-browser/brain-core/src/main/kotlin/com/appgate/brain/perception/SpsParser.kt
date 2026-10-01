@@ -261,13 +261,13 @@ class SpsParser(private val siteFacetVocabulary: Map<String, String> = emptyMap(
         val path = ("/" + url.substringAfter("://", url).substringAfter('/', "")).substringBefore('?').lowercase()
         val facets = aff.count { it.role == Role.FACET || it.role == Role.FACET_OPEN }
         val hasComposer = aff.any { it.role == Role.COMPOSER_INPUT }
-        if (dialogOpen && sig.dialogCoverage >= 0.35) {
-            val inDialogFacets = aff.count { (it.role == Role.FACET || it.role == Role.FACET_APPLY) && (it.regionRole == RegionRole.DIALOG) }
+        if (dialogOpen) {
+            val inDialogFacets = aff.count { it.visible && (it.role == Role.FACET || it.role == Role.FACET_APPLY || it.role == Role.FACET_CLEAR || (it.role == Role.FACET_OPEN && it.facetKey != null)) && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) }
             if (inDialogFacets >= 2) return PageType.FACET_PANEL
             if (hasComposer) return PageType.MESSAGES
             // Marketplaces open item details in a modal over the results: a detail-like dialog is a DETAIL page.
             if (sig.detailHint || aff.any { it.role == Role.MESSAGE_SELLER && it.regionRole == RegionRole.DIALOG }) return PageType.DETAIL
-            if (items.size < 3) return PageType.DIALOG
+            if (sig.dialogCoverage >= 0.35 && items.size < 3) return PageType.DIALOG
         }
         if (Regex("(^|/)(messages|inbox|chat|conversations)(/|$)").containsMatchIn(path) || (hasComposer && items.isEmpty() && !sig.detailHint)) return PageType.MESSAGES
         if (Regex("(^|/)(profile|user|users|u|member|members|seller|account|my)(/|$)").containsMatchIn(path) && items.size < 3) return PageType.PROFILE

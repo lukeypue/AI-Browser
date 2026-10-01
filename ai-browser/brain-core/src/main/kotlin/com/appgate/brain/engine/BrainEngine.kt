@@ -882,7 +882,7 @@ class BrainEngine(
         if ((ledger.constraintAttempts["__explore"] ?: 0) >= 3) return false
         ledger.constraintAttempts["__explore"] = (ledger.constraintAttempts["__explore"] ?: 0) + 1
         return when {
-            sps.dialogOpen && sps.has(Role.CLOSE) -> { startProgram(ledger, memory.skills.get("dismiss_dialog")!!.body, emptyMap(), "skill:dismiss_dialog", "explore: close dialog"); true }
+            sps.dialogOpen && !LearningOpportunities.dialogHoldsFilters(sps) && sps.has(Role.CLOSE) -> { startProgram(ledger, memory.skills.get("dismiss_dialog")!!.body, emptyMap(), "skill:dismiss_dialog", "explore: close dialog"); true }
             ledger.resultsUrl.isNotBlank() && sps.url != ledger.resultsUrl -> { startProgram(ledger, listOf(Step(com.appgate.brain.model.StepKind.NAVIGATE, arg = ledger.resultsUrl, expect = listOf(Postcondition.UrlChanged))), emptyMap(), "navigate", "explore: back to results"); true }
             sps.pageType == PageType.RESULTS -> { startProgram(ledger, memory.skills.get("scroll_results")!!.body, emptyMap(), "skill:scroll_results", "explore: scroll"); true }
             else -> false

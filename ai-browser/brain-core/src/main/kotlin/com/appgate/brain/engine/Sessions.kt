@@ -115,16 +115,15 @@ class LearningSession(
             // Keep normal failure cooldowns and every human-review hold intact.
             if (Curriculum.isComplete(site) && !Curriculum.allLessonsComplete(site) &&
                 site.learningBlockedUntil > clock() + 30 * 60_000L) {
-                site.learningBlockedUntil = 0L
+                site.learningBlockedUntil = Curriculum.earliestRetryAt(site, clock())
                 memory.saveSite(site)
             }
             if (site.challengeDay != clock() / 86_400_000L) { site.challengeDay = clock() / 86_400_000L; site.challengesToday = 0 }
-            // Upgrade the previous 30-minute lesson cooldown without shortening daily
-            // reviews, human holds, or the separate daily challenge limit.
             val now = clock()
+            // Migrate old generic cooldowns, but never shorten a pending lesson's retry.
             if (!site.learningNeedsHuman && site.challengesToday < 3 && !Curriculum.allLessonsComplete(site) &&
                 site.learningBlockedUntil > now + lessonRetryMs && site.learningBlockedUntil <= now + 30 * 60_000L) {
-                site.learningBlockedUntil = now + lessonRetryMs
+                site.learningBlockedUntil = maxOf(now + lessonRetryMs, Curriculum.earliestRetryAt(site, now))
                 memory.saveSite(site)
             }
             if (site.challengesToday >= 3 || site.learningNeedsHuman || site.learningBlockedUntil > clock() || !Curriculum.reviewDue(site, clock())) {
@@ -147,10 +146,13 @@ class LearningSession(
                 if (page != null) Curriculum.observe(site, page, clock())
                 val lesson = if (page == null || site.learningNeedsHuman) "" else Curriculum.nextLesson(site, clock(), page)
                 if (lesson.isBlank()) {
-                    site.learningBlockedUntil = clock() + lessonRetryMs
+                    site.learningBlockedUntil = maxOf(clock() + lessonRetryMs, Curriculum.earliestRetryAt(site, clock()))
                     if (!site.learningNeedsHuman) site.lastLearningStatus = "Waiting for an observed lesson opportunity"
                     events.diagnostic(site.host, "learning_recheck", com.appgate.brain.json.JsonObject()
-                        .put("available", false).put("human_hold", site.learningNeedsHuman))
+                        .put("available", false).put("human_hold", site.learningNeedsHuman)
+                        .put("reason", Curriculum.unavailableReason(site, clock(), page))
+                        .put("page_type", page?.pageType?.name).put("settle", page?.settle?.name)
+                        .put("pending", site.curriculum.count { !it.done }))
                     memory.saveSite(site)
                     break
                 }

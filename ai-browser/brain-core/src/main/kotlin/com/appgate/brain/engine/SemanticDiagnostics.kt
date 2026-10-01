@@ -8,7 +8,7 @@ enum class DiagnosticCode { VERIFIED, NO_TARGET, REPEAT_STATE_LIMIT, OUTSIDE_TAS
 
 /** Diagnostics contain typed coordinates and counts, never action arguments or page text. */
 object SemanticDiagnostics {
-    private val capabilities = setOf("search", "constrain_numeric", "select_facet", "scroll_results", "next_page", "load_more", "sort_results", "open_item", "expand_description", "go_back", "dismiss_dialog", "open_filters", "apply_filters", "open_category", "prepare_message", "commit_send", "navigate", "custom")
+    private val capabilities = setOf("search", "constrain_numeric", "select_facet", "scroll_results", "next_page", "load_more", "sort_results", "open_item", "expand_description", "go_back", "dismiss_dialog", "open_filters", "open_facet", "apply_filters", "open_category", "prepare_message", "commit_send", "navigate", "custom")
     fun capability(value: String): String = value.takeIf { it in capabilities } ?: "other"
     fun host(url: String): String = runCatching { java.net.URI(url).host?.lowercase()?.take(253).orEmpty() }.getOrDefault("")
 

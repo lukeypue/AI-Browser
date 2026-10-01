@@ -72,6 +72,33 @@ object Curriculum {
         return eligible.filter { !it.done }.minWithOrNull(compareBy<CurriculumItem> { it.blocked + it.unavailable }.thenBy { order.indexOf(it.id) })?.id.orEmpty()
     }
 
+    /**
+     * Why no lesson is available right now. Typed so an hour of "available=false" rechecks can be
+     * diagnosed from the log alone (review finding, September 30 2026): distinguish a cooldown
+     * from an absent control, a busy page, a wrong page type, or a missing observation.
+     */
+    fun unavailableReason(site: SiteModel, now: Long, page: SemanticPageState?): String {
+        ensure(site)
+        if (page == null) return "probe_unavailable"
+        if (page.isHumanOnly) return "human_hold"
+        if (page.settle != com.appgate.brain.model.Settle.IDLE) return "page_busy"
+        val pending = site.curriculum.filter { !it.done }
+        if (pending.isEmpty()) return "all_lessons_complete"
+        val cooling = pending.filter { it.retryAt > now }
+        if (cooling.size == pending.size) return "cooldown:" + ((cooling.minOf { it.retryAt } - now + 59_999L) / 60_000L) + "m"
+        val absent = pending.filter { it.retryAt <= now && LearningOpportunities.target(page, it.id) == null }
+        if (absent.size == pending.count { it.retryAt <= now }) return "no_target_on_${page.pageType.name.lowercase()}"
+        return "not_observed_available"
+    }
+
+    /** Earliest moment any unfinished lesson leaves its cooldown; 0 when one is already eligible. */
+    fun earliestRetryAt(site: SiteModel, now: Long): Long {
+        ensure(site)
+        val pending = site.curriculum.filter { !it.done }
+        if (pending.isEmpty() || pending.any { it.retryAt <= now }) return 0L
+        return pending.minOf { it.retryAt }
+    }
+
     fun nextReviewAt(site: SiteModel): Long = if (!allLessonsComplete(site)) 0L else
         (site.curriculum.maxOfOrNull { it.completedAt } ?: 0L) + 24 * 60 * 60_000L
 

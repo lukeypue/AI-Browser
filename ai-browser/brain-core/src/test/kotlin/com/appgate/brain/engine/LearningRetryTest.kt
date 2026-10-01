@@ -33,6 +33,21 @@ class LearningRetryTest {
         assertTrue(fake.log.isEmpty())
     }
 
+    @Test fun pendingLessonCooldownSurvivesMigrationAndAvoidsEmptyProbes() {
+        val fake = FakeSite(); val memory = Memory(InMemoryStorage()); val site = memory.site(fake.host)
+        Curriculum.ensure(site)
+        site.curriculum.forEach { it.completedAt = now - 1 }
+        site.curriculum.single { it.id == "select_facet" }.apply { completedAt = 0; retryAt = now + 15 * 60_000L }
+        site.learningBlockedUntil = now + 15 * 60_000L
+        val events = object : EngineEvents {}
+        LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events,
+            listOf(profile(fake.host)), clock = { now }).run(maxSites = 1)
+        assertEquals(now + 15 * 60_000L, site.learningBlockedUntil)
+        assertTrue(fake.log.isEmpty())
+        assertEquals("cooldown:15m", Curriculum.unavailableReason(site, now,
+            com.appgate.brain.perception.SpsParser().parse(fake.observe(1000))))
+    }
+
     @Test fun dailyReviewAndChallengeHoldsAreNotShortened() {
         for (kind in listOf("review", "challenge", "human")) {
             val fake = FakeSite(); val memory = Memory(InMemoryStorage()); val site = memory.site(fake.host)

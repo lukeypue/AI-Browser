@@ -63,7 +63,7 @@ class TaskPolicy(private val profile: SiteProfile, private val site: SiteModel) 
     // ------------------------------------------------------------------ FIND_LISTINGS
     private fun findListings(goal: Goal, sps: SemanticPageState, ledger: TaskLedger): PolicyDecision {
         // A blocking dialog is handled before anything else, on every phase.
-        if (sps.dialogOpen && sps.pageType != PageType.FACET_PANEL && sps.has(Role.CLOSE) && ledger.phase != TaskPhase.INSPECT) {
+        if (sps.dialogOpen && sps.pageType != PageType.FACET_PANEL && !LearningOpportunities.dialogHoldsFilters(sps) && sps.has(Role.CLOSE) && ledger.phase != TaskPhase.INSPECT) {
             if ((ledger.constraintAttempts["__dismiss"] ?: 0) < 3) {
                 ledger.constraintAttempts["__dismiss"] = (ledger.constraintAttempts["__dismiss"] ?: 0) + 1
                 return PolicyDecision.RunSkill("dismiss_dialog", emptyMap(), "blocking dialog")

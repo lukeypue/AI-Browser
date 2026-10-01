@@ -60,7 +60,8 @@ class StepGrounder(private val site: SiteModel?) {
         if (role == Role.RESULT_ITEM && arg != null && arg !in sps.resultKeys) return GroundingOutcome.Missing("expected item is not on this page")
         val itemKey = if (role == Role.RESULT_ITEM) arg?.takeIf { key -> sps.results?.itemKeys?.contains(key) == true } else null
         if (strict && role == Role.RESULT_ITEM && itemKey == null) return GroundingOutcome.Missing("strict target has no expected item")
-        val nameHint = step.nameHint ?: (if (role == Role.CATEGORY_LINK || role == Role.NAV_LINK || role == Role.TAB) arg else null)
+        // A choice option in a toggle group is named by its value ("Ford"), so the value is the best hint.
+        val nameHint = step.nameHint ?: (if (role == Role.CATEGORY_LINK || role == Role.NAV_LINK || role == Role.TAB || (role == Role.FACET && step.kind == StepKind.SELECT)) arg else null)
 
         // Opt steps whose expectation already holds are skipped (e.g. filters already open).
         if (step.optional && expect.isNotEmpty() && alreadyHolds(expect, sps)) return GroundingOutcome.Skip("expectation already holds")

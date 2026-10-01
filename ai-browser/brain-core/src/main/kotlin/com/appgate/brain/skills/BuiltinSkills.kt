@@ -34,7 +34,7 @@ object BuiltinSkills {
     )
 
     val constrainNumeric = Skill(
-        id = "constrain_numeric", version = 3, intent = "apply an upper or lower bound on a numeric facet",
+        id = "constrain_numeric", version = 4, intent = "apply an upper or lower bound on a numeric facet",
         params = listOf("key", "value"),
         pre = listOf(Precondition.PageTypeIn(resultPages)),
         body = listOf(
@@ -42,15 +42,17 @@ object BuiltinSkills {
                 expect = listOf(Postcondition.anyOf(Postcondition.DialogOpened, Postcondition.RoleAppeared(Role.FACET), Postcondition.PageTypeIs(PageType.FACET_PANEL)))),
             Step(StepKind.SET_RANGE, Role.FACET, facetKey = "\$key", arg = "\$value", submit = true,
                 expect = listOf(Postcondition.anyOf(Postcondition.ConstraintApplied("\$key", "\$value"), Postcondition.ValueIs("\$key", "\$value"), Postcondition.ResultsChanged))),
+            // A pending value inside an open sheet is not an applied constraint: the optional Apply
+            // step must not be skipped as "already holding" while the drawer is still open.
             Step(StepKind.CLICK, Role.FACET_APPLY, optional = true,
-                expect = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.DialogClosed, Postcondition.ConstraintApplied("\$key", "\$value"))))
+                expect = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.DialogClosed)))
         ),
         post = listOf(Postcondition.anyOf(Postcondition.ConstraintApplied("\$key", "\$value"), Postcondition.ValueIs("\$key", "\$value"))),
         origin = SkillOrigin.BUILTIN, tags = setOf("filter", "numeric")
     )
 
     val selectFacet = Skill(
-        id = "select_facet", version = 3, intent = "choose a value for a categorical facet (make, model, condition...)",
+        id = "select_facet", version = 4, intent = "choose a value for a categorical facet (make, model, condition...)",
         params = listOf("key", "value"),
         pre = listOf(Precondition.PageTypeIn(resultPages)),
         body = listOf(
@@ -58,8 +60,10 @@ object BuiltinSkills {
                 expect = listOf(Postcondition.anyOf(Postcondition.DialogOpened, Postcondition.RoleAppeared(Role.FACET), Postcondition.PageTypeIs(PageType.FACET_PANEL)))),
             Step(StepKind.SELECT, Role.FACET, facetKey = "\$key", arg = "\$value",
                 expect = listOf(Postcondition.anyOf(Postcondition.ConstraintApplied("\$key", "\$value"), Postcondition.ValueIs("\$key", "\$value"), Postcondition.ResultsChanged))),
+            // A pending value inside an open sheet is not an applied constraint: the optional Apply
+            // step must not be skipped as "already holding" while the drawer is still open.
             Step(StepKind.CLICK, Role.FACET_APPLY, optional = true,
-                expect = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.DialogClosed, Postcondition.ConstraintApplied("\$key", "\$value"))))
+                expect = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.DialogClosed)))
         ),
         post = listOf(Postcondition.anyOf(Postcondition.ConstraintApplied("\$key", "\$value"), Postcondition.ValueIs("\$key", "\$value"))),
         origin = SkillOrigin.BUILTIN, tags = setOf("filter", "choice")
@@ -72,6 +76,17 @@ object BuiltinSkills {
         body = listOf(Step(StepKind.CLICK, Role.FACET_OPEN,
             expect = listOf(Postcondition.anyOf(Postcondition.DialogOpened, Postcondition.RoleAppeared(Role.FACET), Postcondition.PageTypeIs(PageType.FACET_PANEL), Postcondition.RoleAppeared(Role.FACET_APPLY))))),
         post = listOf(Postcondition.anyOf(Postcondition.DialogOpened, Postcondition.RoleAppeared(Role.FACET))),
+        origin = SkillOrigin.BUILTIN, tags = setOf("filter")
+    )
+
+    /** Expand one named facet inside an already open filter sheet (an accordion such as "Make"). */
+    val openFacet = Skill(
+        id = "open_facet", version = 1, intent = "expand a named facet section inside the filter panel",
+        params = listOf("key"),
+        pre = listOf(Precondition.PageTypeIn(resultPages), Precondition.HasRole(Role.FACET_OPEN)),
+        body = listOf(Step(StepKind.CLICK, Role.FACET_OPEN, facetKey = "\$key",
+            expect = listOf(Postcondition.anyOf(Postcondition.RoleAppeared(Role.FACET), Postcondition.DialogOpened, Postcondition.PageTypeIs(PageType.FACET_PANEL))))),
+        post = listOf(Postcondition.anyOf(Postcondition.RoleAppeared(Role.FACET), Postcondition.DialogOpened)),
         origin = SkillOrigin.BUILTIN, tags = setOf("filter")
     )
 
@@ -190,7 +205,7 @@ object BuiltinSkills {
     )
 
     val all: List<Skill> = listOf(
-        search, constrainNumeric, selectFacet, openFilters, applyFilters, sortResults, nextPage, loadMore,
+        search, constrainNumeric, selectFacet, openFilters, openFacet, applyFilters, sortResults, nextPage, loadMore,
         scrollResults, openItem, expandDescription, goBack, dismissDialog, prepareMessage, commitSend, openCategory
     )
 
