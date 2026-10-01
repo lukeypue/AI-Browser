@@ -128,7 +128,7 @@ object RoleClassifier {
                 isOption -> bump(Role.FACET, 0.9)
                 aria == "combobox" && raw.choices.isEmpty() && raw.expanded != null -> bump(Role.FACET_OPEN, 0.96)
                 aria == "combobox" && raw.choices.isNotEmpty() -> bump(Role.FACET, 0.96)
-                isButton && (raw.hasPopup || raw.expanded != null || inFilters) -> bump(Role.FACET_OPEN, 0.96)
+                isButton && (raw.hasPopup || raw.expanded != null || inFilters) -> bump(Role.FACET_OPEN, 0.85)
                 isButton -> bump(Role.FACET_OPEN, 0.6)
                 isLink && inFilters -> bump(Role.FACET, 0.7)
                 isLink && raw.hrefQueryKeys.isNotEmpty() -> bump(Role.FACET, 0.55)
@@ -155,7 +155,8 @@ object RoleClassifier {
             if (relNext || Vocabulary.matches("next", labelLower) || raw.hrefQueryKeys.any { it in setOf("page", "p", "pg", "offset", "start") } && labelLower.matches(Regex("[0-9]+|next.*"))) bump(Role.PAGE_NEXT, if (relNext) 0.95 else 0.85)
             if (relPrev || Vocabulary.matches("prev", labelLower)) bump(Role.PAGE_PREV, 0.85)
             if (Vocabulary.matches("load_more", labelLower)) bump(Role.LOAD_MORE, 0.92)
-            if (Vocabulary.matches("expand", labelLower) && !Vocabulary.matches("load_more", labelLower)) {
+            if (Vocabulary.matches("expand", labelLower) && !Vocabulary.matches("load_more", labelLower) &&
+                !(facetKey != null && ctx.pageTypeGuess in setOf(PageType.RESULTS, PageType.FACET_PANEL))) {
                 bump(Role.EXPAND_TEXT, if (raw.expanded == false) 0.92 else if (ctx.pageTypeGuess == PageType.DETAIL) 0.8 else 0.5)
             }
         }

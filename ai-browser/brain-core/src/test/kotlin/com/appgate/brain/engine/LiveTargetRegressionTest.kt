@@ -180,4 +180,13 @@ class LiveTargetRegressionTest {
             .put("visible", true).put("enabled", true))
         assertEquals("New", SpsParser().parse(raw).constraintsActive["condition"])
     }
+
+    @Test fun buyingANewItemCannotBeReclassifiedAsAConditionFilter() {
+        val raw = Fixtures.observation("results_page")
+        raw.optArray("elements")!!.add(JsonObject().put("id", "buy-new").put("tag", "button").put("name", "Buy new")
+            .put("expanded", false).put("visible", true).put("enabled", true))
+        val target = SpsParser().parse(raw).affordances.single { it.id == "buy-new" }
+        assertEquals(Role.BUY, target.role)
+        assertTrue(target.isCommit)
+    }
 }

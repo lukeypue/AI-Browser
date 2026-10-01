@@ -17,4 +17,6 @@ Research: https://developers.openai.com/api/docs/models/gpt-5.4 and https://deve
 
 Review fixes: concrete query repairs are normalized for the template check, named-facet repairs have a keyed contract, and the observed newUsed URL path retains the selected condition after its popup closes. Input text alone is not promoted to an applied condition. Local verification is recorded after the full post-review suite; live phone verification remains pending.
 
-Local final validation: 212 core JUnit tests and three document-boundary tests passed. Browser/Android CI and signed updater publication are required before this release is declared available.
+Local final validation: 213 core JUnit tests and three document-boundary tests passed. Browser/Android CI and signed updater publication are required before this release is declared available.
+
+Facet priority is narrowed to results/filter accordion recognition; purchase controls retain their consequential classification.
