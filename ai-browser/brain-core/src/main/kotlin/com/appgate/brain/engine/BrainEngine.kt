@@ -394,6 +394,7 @@ class BrainEngine(
         is Postcondition.ConstraintApplied -> Postcondition.ConstraintApplied(StepGrounder.substitute(p.key, params), p.value?.let { StepGrounder.substitute(it, params) })
         is Postcondition.ValueIs -> Postcondition.ValueIs(StepGrounder.substitute(p.facetKey, params), StepGrounder.substitute(p.value, params))
         is Postcondition.UrlQueryHas -> Postcondition.UrlQueryHas(StepGrounder.substitute(p.key, params))
+        is Postcondition.RoleAppeared -> p.copy(facetKey = p.facetKey?.let { StepGrounder.substitute(it, params) })
         else -> p
     }
 

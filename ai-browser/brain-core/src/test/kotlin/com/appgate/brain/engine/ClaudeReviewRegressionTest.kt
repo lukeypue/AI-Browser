@@ -221,6 +221,20 @@ class ClaudeReviewRegressionTest {
         assertEquals("open_facet", LearningOpportunities.target(page, "select_facet")?.skillId)
     }
 
+    @Test fun facetOpeningRequiresTheRequestedFacetAndSurvivesSerialization() {
+        val site = DrawerSite().apply { drawerOpen = true }
+        val before = SpsParser().parse(site.observe(1000))
+        val numeric = Affordance("price", Role.FACET, facetKey = "price_max", tag = "input")
+        val withNumeric = before.copy(affordances = before.affordances + numeric)
+        val expected = Postcondition.RoleAppeared(Role.FACET, "make")
+        assertEquals(expected, Postcondition.fromJson(expected.toJson()))
+        val action = Action(ActionKind.CLICK, expect = listOf(expected))
+        val unrelated = withNumeric.copy(affordances = withNumeric.affordances + numeric.copy(id = "year", facetKey = "year_min"))
+        assertEquals(VerifyStatus.FAILED, com.appgate.brain.verify.Verifier.verify(action, withNumeric, unrelated).status)
+        val revealed = withNumeric.copy(affordances = withNumeric.affordances + numeric.copy(id = "make", facetKey = "make"))
+        assertEquals(VerifyStatus.VERIFIED, com.appgate.brain.verify.Verifier.verify(action, withNumeric, revealed).status)
+    }
+
     // ------------------------------------------------------------------ diagnostics truth: an already-passing invariant
 
     /** Sanity: on a single-host site the same lesson does earn credit, so the tests above fail for the right reason. */

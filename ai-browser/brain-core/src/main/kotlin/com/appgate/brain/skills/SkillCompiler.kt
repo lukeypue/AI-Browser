@@ -188,7 +188,7 @@ internal object PortableSkills {
         is Postcondition.DetailMatches -> p.itemKey == null
         is Postcondition.UrlQueryHas -> p.key in setOf("q", "query", "search", "keyword", "sort", "order", "page", "offset") || isParameter(p.key)
         is Postcondition.PageTypeIs -> p.pageType in pages
-        is Postcondition.RoleAppeared -> p.role in safeRoles
+        is Postcondition.RoleAppeared -> p.role in safeRoles && (p.facetKey == null || key(p.facetKey))
         Postcondition.ComposerReady -> false
         else -> true
     }
@@ -201,6 +201,7 @@ internal object PortableSkills {
             is Postcondition.ConstraintApplied -> { add(p.key); add(p.value) }
             is Postcondition.ValueIs -> { add(p.facetKey); add(p.value) }
             is Postcondition.UrlQueryHas -> add(p.key)
+            is Postcondition.RoleAppeared -> add(p.facetKey)
             else -> {}
         } }
         body.forEach { add(it.facetKey); add(it.arg); it.expect.forEach(::visit) }

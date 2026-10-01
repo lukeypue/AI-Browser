@@ -422,6 +422,7 @@
   const CANDIDATE_SELECTOR = 'a[href], button, input, select, textarea, [role=button], [role=link], [role=tab], [role=menuitem], [role=combobox], [role=listbox], [role=option], [role=checkbox], [role=radio], [role=switch], [role=searchbox], [role=textbox], [contenteditable=true], [aria-haspopup], [aria-expanded], summary, [tabindex="0"][class]';
 
   let lastElements = new Map();
+  let lastListingLinks = new Map();
   const idOf = new WeakMap();
 
   function observe() {
@@ -532,6 +533,8 @@
     const signals = computeSignals(elements, cards, dialogs, bodyText);
     const authOrChallenge = signals.challengeWidget || (signals.passwordFields > 0 && (signals.sparse || signals.authPath || signals.authPhrases)) || authy;
     const items = authOrChallenge ? [] : cardInfos.map((c) => ({ key: c.key, title: c.title, price: c.price, href: c.href, text: c.text, aff: c.link && idOf.get(c.link) ? idOf.get(c.link) : null }));
+    // Only the actual listing anchors from this observation qualify for same-tab training.
+    lastListingLinks = new Map(authOrChallenge ? [] : elements.filter(e => e.itemKey && e.href && e.sameSite).map(e => [e.id, e.href]));
     const scripts = Array.from(document.scripts).map((s) => s.src).filter(Boolean).map((s) => s.replace(/^https?:\/\/[^/]+/, "").split("?")[0]).filter((p) => /\.(m?js)$/.test(p)).slice(0, 25);
     const detailText = signals.detailHint && !authOrChallenge ? redact(primaryText(detailScope(dialogs), cards, DETAIL_TEXT_MAX), DETAIL_TEXT_MAX) : "";
     return {
@@ -797,7 +800,15 @@
         const el = elementFor(cmd.id);
         if (!el) return { ok: false, detail: "TARGET_MISSING" };
         if (guard.blocks(el)) return { ok: false, detail: "GUARD_BLOCKED" };
-        realClick(el);
+        const listingHref = lastListingLinks.get(cmd.id);
+        if (guard.mode === "TRAIN" && listingHref && el.tagName === "A") {
+          if (el.href !== listingHref) return { ok: false, detail: "STALE_TARGET" };
+          // Gecko refuses unattended popups. Keep this observed read-only listing in
+          // the owned session; normal clicks and manual browsing retain their targets.
+          const target = el.getAttribute("target");
+          try { el.setAttribute("target", "_self"); realClick(el); }
+          finally { if (target === null) el.removeAttribute("target"); else el.setAttribute("target", target); }
+        } else realClick(el);
         return { ok: true, detail: "clicked" };
       }
       case "type": {

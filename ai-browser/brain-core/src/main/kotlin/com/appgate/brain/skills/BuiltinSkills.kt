@@ -85,8 +85,8 @@ object BuiltinSkills {
         params = listOf("key"),
         pre = listOf(Precondition.PageTypeIn(resultPages), Precondition.HasRole(Role.FACET_OPEN)),
         body = listOf(Step(StepKind.CLICK, Role.FACET_OPEN, facetKey = "\$key",
-            expect = listOf(Postcondition.anyOf(Postcondition.RoleAppeared(Role.FACET), Postcondition.DialogOpened, Postcondition.PageTypeIs(PageType.FACET_PANEL))))),
-        post = listOf(Postcondition.anyOf(Postcondition.RoleAppeared(Role.FACET), Postcondition.DialogOpened)),
+            expect = listOf(Postcondition.RoleAppeared(Role.FACET, "\$key")))),
+        post = listOf(Postcondition.RoleAppeared(Role.FACET, "\$key")),
         origin = SkillOrigin.BUILTIN, tags = setOf("filter")
     )
 

@@ -16,6 +16,10 @@ object SemanticDiagnostics {
         .put("host", host(sps.url)).put("page_type", sps.pageType.name).put("items", sps.resultKeys.size)
         .put("controls", sps.affordances.count { it.visible && it.enabled })
         .put("search_boxes", sps.byRole(Role.SEARCH_BOX).size).put("result_links", sps.byRole(Role.RESULT_ITEM).size)
+        .put("facet_controls", sps.byRole(Role.FACET).size)
+        .put("facet_openers", sps.byRole(Role.FACET_OPEN).size)
+        .put("filter_dialog", LearningOpportunities.dialogHoldsFilters(sps))
+        .put("dialog_controls", sps.affordances.count { it.visible && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) })
         .put("closers", sps.byRole(Role.CLOSE).size).put("dialog", sps.dialogOpen)
         .put("auth_wall", sps.authWall).put("challenge", sps.challenge).put("settle", sps.settle.name)
 

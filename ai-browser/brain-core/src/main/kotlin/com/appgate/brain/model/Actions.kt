@@ -139,9 +139,9 @@ sealed class Postcondition {
         override fun toJson() = super.toJson().put("key", key)
     }
 
-    data class RoleAppeared(val role: Role) : Postcondition() {
+    data class RoleAppeared(val role: Role, val facetKey: String? = null) : Postcondition() {
         override val name = "ROLE_APPEARED"
-        override fun toJson() = super.toJson().put("role", role.name)
+        override fun toJson() = super.toJson().put("role", role.name).put("key", facetKey)
     }
 
     data class ValueIs(val facetKey: String, val value: String) : Postcondition() {
@@ -175,7 +175,7 @@ sealed class Postcondition {
                 "CONSTRAINT_APPLIED" -> ConstraintApplied(o.optString("key"), o.optStringOrNull("value"))
                 "DETAIL_MATCHES" -> DetailMatches(o.optStringOrNull("item"))
                 "URL_QUERY_HAS" -> UrlQueryHas(o.optString("key"))
-                "ROLE_APPEARED" -> RoleAppeared(Role.parse(o.optStringOrNull("role")))
+                "ROLE_APPEARED" -> RoleAppeared(Role.parse(o.optStringOrNull("role")), o.optStringOrNull("key"))
                 "VALUE_IS" -> ValueIs(o.optString("key"), o.optString("value"))
                 else -> null
             }

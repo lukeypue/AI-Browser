@@ -127,7 +127,7 @@ class StepGrounder(private val site: SiteModel?) {
             is Postcondition.AnyOf -> p.alternatives.any { alreadyHolds(listOf(it), sps) }
             is Postcondition.DialogClosed -> !sps.dialogOpen
             is Postcondition.DialogOpened -> sps.dialogOpen
-            is Postcondition.RoleAppeared -> sps.has(p.role)
+            is Postcondition.RoleAppeared -> sps.byRole(p.role).any { p.facetKey == null || it.facetKey == p.facetKey }
             is Postcondition.ComposerReady -> sps.has(Role.COMPOSER_INPUT) && sps.has(Role.SEND)
             is Postcondition.ConstraintApplied -> sps.constraintsActive[p.key]?.let { v -> p.value == null || Verifier.valuesMatch(p.value, v) } == true
             is Postcondition.ValueIs -> (sps.facet(p.facetKey)?.value ?: sps.constraintsActive[p.facetKey])?.let { Verifier.valuesMatch(p.value, it) } == true
@@ -139,6 +139,7 @@ class StepGrounder(private val site: SiteModel?) {
     private fun bind(p: Postcondition, params: Map<String, String>): Postcondition = when (p) {
         is Postcondition.AnyOf -> Postcondition.AnyOf(p.alternatives.map { bind(it, params) })
         is Postcondition.ConstraintApplied -> Postcondition.ConstraintApplied(substitute(p.key, params), p.value?.let { substitute(it, params) })
+        is Postcondition.RoleAppeared -> p.copy(facetKey = p.facetKey?.let { substitute(it, params) })
         is Postcondition.ValueIs -> Postcondition.ValueIs(substitute(p.facetKey, params), substitute(p.value, params))
         is Postcondition.UrlQueryHas -> Postcondition.UrlQueryHas(substitute(p.key, params))
         else -> p
