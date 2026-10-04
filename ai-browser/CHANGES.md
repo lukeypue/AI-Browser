@@ -1,3 +1,20 @@
+# Changes in 7.2.4 (Simulation-tested search fixes)
+
+- A typed query on the home page no longer counts as a completed search; results
+  must actually be visible.
+- Missing controls in an open filter panel stop repeated attempts to reopen it.
+  Requested limits still apply when checking listing cards and details.
+- A refused stale page or target triggers a fresh observation and bounded retry.
+  The brain checks the current site, page, and listing identity before trying again.
+  Seller messages and other consequential actions are never automatically retried.
+- Added an offline simulation trainer for development. Practice memory stays
+  separate from your phone's real-site knowledge, and the trainer is excluded
+  from the app's production code.
+
+These changes have synthetic and automated regression coverage. Real marketplace
+behavior and background operation still need phone testing. Existing browser,
+sign-ins, stored knowledge, service, and update-signing setup are preserved.
+
 # Changes in 7.0.0 (Site Brain v3)
 
 ## Why the Google sign-in went white after your email — and the fix
