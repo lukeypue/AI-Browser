@@ -18,3 +18,26 @@ test {
     // The recorded extractor observations used by the perception tests.
     systemProperty 'brain.fixtures', file('src/test/fixtures').absolutePath
 }
+
+// Offline training/evaluation is deliberately absent from the Android production jar.
+sourceSets {
+    lab {
+        kotlin.srcDir 'src/lab/kotlin'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+    test {
+        compileClasspath += sourceSets.lab.output
+        runtimeClasspath += sourceSets.lab.output
+    }
+}
+configurations.labImplementation.extendsFrom(configurations.implementation)
+configurations.labRuntimeOnly.extendsFrom(configurations.runtimeOnly)
+
+tasks.register('simulationExperiment', JavaExec) {
+    group = 'verification'
+    description = 'Frozen-memory baseline, training and held-out marketplace evaluation (no network).'
+    classpath = sourceSets.lab.runtimeClasspath
+    mainClass = 'com.appgate.brain.lab.SimulationMainKt'
+    args layout.buildDirectory.file('reports/brain/simulation.json').get().asFile.absolutePath
+}

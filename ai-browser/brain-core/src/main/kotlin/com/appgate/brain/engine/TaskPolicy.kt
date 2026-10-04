@@ -126,6 +126,12 @@ class TaskPolicy(private val profile: SiteProfile, private val site: SiteModel) 
             if (attempts >= 2) continue
             val hasFacet = sps.affordances.any { it.visible && (it.role == Role.FACET || it.role == Role.FACET_OPEN) && (it.facetKey == facetKey || it.facetKey == facetKey.removeSuffix("_max").removeSuffix("_min")) }
             val hasOpener = sps.has(Role.FACET_OPEN)
+            // Once the filter sheet is observed, absence is evidence: do not reopen the
+            // same sheet for an unavailable key. Card/detail checks keep the constraint.
+            if (!hasFacet && (sps.pageType == PageType.FACET_PANEL || LearningOpportunities.dialogHoldsFilters(sps))) {
+                ledger.constraintAttempts[facetKey] = 2
+                continue
+            }
             if (!hasFacet && !hasOpener) continue
             ledger.constraintAttempts[facetKey] = attempts + 1
             if (!hasFacet && hasOpener && attempts == 0) return PolicyDecision.RunSkill("open_filters", emptyMap(), "open filters for $facetKey")
@@ -241,6 +247,8 @@ class TaskPolicy(private val profile: SiteProfile, private val site: SiteModel) 
 
     // ------------------------------------------------------------------ helpers
     fun queryApplied(goal: Goal, sps: SemanticPageState): Boolean {
+        // A filled search box is only draft evidence until the page actually shows results.
+        if (sps.pageType != PageType.RESULTS) return false
         if (goal.query.isBlank()) return sps.pageType == PageType.RESULTS
         val q = Text.tokens(goal.query).filter { it.length > 1 }
         if (q.isEmpty()) return sps.pageType == PageType.RESULTS

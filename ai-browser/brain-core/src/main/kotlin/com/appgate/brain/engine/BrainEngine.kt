@@ -457,6 +457,25 @@ class BrainEngine(
                 ledger.record(LedgerStep(clock(), ledger.phase, before.hash, stepDesc, VerifyStatus.FAILED, outcome.reason, ledger.programSource))
                 events.step(ledger, stepDesc, VerifyStatus.FAILED)
                 recordEpisode(site, before, grounded, VerifyStatus.FAILED, before.pageType, clock() - started)
+                // A document/target refusal happened before a click. Re-observe and ground
+                // the semantic step against the new document; never replay the old target.
+                val stale = outcome.reason.contains("STALE_DOCUMENT") || outcome.reason.contains("STALE_TARGET")
+                if (stale && retriesLeft > 0 && grounded.chosen != null && action.effect != com.appgate.brain.model.EffectClass.COMMIT_EXTERNAL) {
+                    val observed = runCatching { executor.observe(clock()) }.getOrNull()
+                    if (observed != null && acceptPage(ledger, observed, profile) && !observed.isHumanOnly &&
+                        observed.pageType == before.pageType && !observed.dialogOpen) {
+                        // IDs are document-local: a document refusal invalidates the old exclusion set.
+                        val excluded = if (outcome.reason.contains("STALE_DOCUMENT")) emptySet() else
+                            excludedIds + listOfNotNull(grounded.chosen.affordance.id)
+                        val fresh = StepGrounder(site).ground(grounded.step, emptyMap(), observed, ledger.visited,
+                            excluded, strict = strictGrounding(ledger))
+                        if (fresh is GroundingOutcome.Ready && fresh.grounded.chosen != null) {
+                            executeGrounded(ledger, observed, site, profile, executor, mode, fresh.grounded, retriesLeft - 1, excluded)
+                            return
+                        }
+                    }
+                    if (ledger.blocked || ledger.done) return
+                }
                 if (outcome.timeout) handleRendererFailure(ledger, outcome.reason, true)
                 else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "exec:" + outcome.reason.take(40)) }
                 finishProgram(ledger, before, site, success = false)
