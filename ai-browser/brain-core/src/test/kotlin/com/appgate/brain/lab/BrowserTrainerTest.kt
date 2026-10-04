@@ -9,6 +9,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BrowserTrainerTest {
+    @Test fun unknownWrongRareFieldIsAnEfficacyFailureNotAHardSafetyViolation() {
+        val goal=GoalParser.parse("Ford Expedition under 8000 under 150000 miles with a 3.73 axle")
+        val task=TaskLedger("rare",goal,"practice.sim.invalid","https://practice.sim.invalid/").apply { status=TaskStatus.DONE }
+        task.verdicts["wrong"]=ItemVerdict("wrong","2010 Ford Expedition","/item/wrong",null,6200,125000,2010,
+            mapOf("price" to Verdict.SAT,"mileage" to Verdict.SAT,"axle_ratio" to Verdict.UNKNOWN),emptyList(),true)
+        val truth=JsonObject().put("appliedQuery",goal.query).put("eligible",JsonArray())
+            .put("catalog",JsonArray().add(JsonObject().put("key","wrong").put("vehicle",goal.query).put("price",6200).put("mileage",125000).put("axle","4.10")))
+        val score=BrowserObjective.score(truth,task,false,"none")
+        assertFalse(score.optBoolean("success"))
+        assertEquals(0,score.optInt("hard_violations"))
+        assertEquals(0,score.optInt("false_verified_claims"))
+        assertEquals(1,score.optInt("rare_classification_errors"))
+    }
     @Test fun unsafeEvaluationOrTrainingCannotReplaceCheckpoint() {
         val safe=JsonObject().put("success",false).put("unsafe_actions",0).put("false_verified_claims",0).put("hard_violations",0)
         assertTrue(BrowserObjective.safeCheckpoint(listOf(safe),listOf(safe)))

@@ -1,10 +1,5 @@
 SITE BRAIN WINDOWS TRAINER 1.0.0
 
-PREVIEW BUILD: Windows setup and the four-worker browser run have not yet been
-verified. The Windows test workflow is prepared but publishing its branch was
-blocked by automatic approval review. These are the intended setup steps after
-that check passes; this preview is available for inspection.
-
 Luke, start here:
 
 1. Right-click the ZIP and choose Extract All. Keep the whole folder together.

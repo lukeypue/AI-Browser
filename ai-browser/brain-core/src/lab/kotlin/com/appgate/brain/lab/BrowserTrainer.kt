@@ -66,6 +66,7 @@ class BrowserTrainer(private val renderer:BrowserRenderer,private val emit:(Json
             .put("success_rate",list.count { it.optBoolean("success") }.toDouble()/list.size.coerceAtLeast(1))
             .put("false_verified_claims",list.sumOf { it.optInt("false_verified_claims") })
             .put("hard_violations",list.sumOf { it.optInt("hard_violations") })
+            .put("rare_classification_errors",list.sumOf { it.optInt("rare_classification_errors") })
             .put("unsafe_actions",list.sumOf { it.optInt("unsafe_actions") })
             .put("compiled_reuse",list.count { it.optBoolean("compiled_reuse") })
             .put("returned_matches",list.sumOf { it.optInt("returned_matches") })

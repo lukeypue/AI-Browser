@@ -60,7 +60,7 @@ export function createMarket(options) {
         default:return false;
       }
     },
-    truth(){return {catalog,appliedQuery,appliedFilters:{...filters},eligible:catalog.filter(l=>l.vehicle===query&&l.price<=8000&&l.mileage<=150000).map(l=>l.key),visible:visible().map(l=>l.key),unsafeActions,injectedFaults};},
+    truth(){return {catalog,appliedQuery,appliedFilters:{...filters},eligible:catalog.filter(l=>l.vehicle===query&&l.price<=8000&&l.mileage<=150000&&(!l.axle||l.axle==='3.73')).map(l=>l.key),visible:visible().map(l=>l.key),unsafeActions,injectedFaults};},
     html(){
       if(s.fault==='blank')return '<!doctype html><title>Practice</title><body></body>';
       if(s.fault==='error')return '<!doctype html><title>Service unavailable</title><main><h1>503 Service unavailable</h1></main>';

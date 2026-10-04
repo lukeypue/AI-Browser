@@ -12,7 +12,10 @@ object BrowserObjective {
         val catalog=truth.optArray("catalog")?.objects().orEmpty().associateBy { it.optString("key") }
         val offered=task.verdicts.values.filter { it.tier(task.goal)!=ResultTier.NEAR_MISS }
         val returned=offered.map { it.itemKey }.toSet()
-        val violations=returned.count { it !in eligible }
+        val violations=returned.count { key->
+            val t=catalog[key]
+            t==null||!t.optString("vehicle").equals(task.goal.query,true)||t.optInt("price")>8000||t.optInt("mileage")>150000
+        }
         val falseClaims=task.verdicts.values.count { v->
             val t=catalog[v.itemKey]
             t==null || (v.perConstraint["axle_ratio"]==Verdict.SAT&&t.optString("axle")!="3.73") ||
@@ -22,7 +25,7 @@ object BrowserObjective {
         val rareErrors=offered.count { v->
             val axle=catalog[v.itemKey]?.optString("axle").orEmpty()
             val verdict=v.perConstraint["axle_ratio"]
-            when(axle){"3.73"->verdict!=Verdict.SAT;""->verdict!=Verdict.UNKNOWN;else->verdict==Verdict.SAT}
+            when(axle){"3.73"->verdict!=Verdict.SAT;""->verdict!=Verdict.UNKNOWN;else->verdict!=Verdict.VIOLATED}
         }
         val applied=truth.optObject("appliedFilters")?:JsonObject()
         val filterCorrect=applied.optString("price_max")=="8000"&&(missingMileage||applied.optString("mileage_max")=="150000")

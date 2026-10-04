@@ -13,7 +13,10 @@ try {
         $Results = Join-Path $PSScriptRoot 'Site-Brain-Training-Results.zip'
         $Items = @(Get-ChildItem -LiteralPath $Data | Where-Object { $_.Name -ne 'connection.json' -and $_.Name -ne 'runner.lock' -and $_.Name -ne 'stop-requested' })
         if ($Items.Count -eq 0) { throw 'No completed practice results are available yet.' }
-        Compress-Archive -LiteralPath $Items.FullName -DestinationPath $Results -Force
+        $ExportPaths = @($Items.FullName)
+        $BuildManifest = Join-Path $PSScriptRoot 'bundle-manifest.json'
+        if (Test-Path -LiteralPath $BuildManifest) { $ExportPaths += $BuildManifest }
+        Compress-Archive -LiteralPath $ExportPaths -DestinationPath $Results -Force
         Write-Host 'Send this ZIP in our AI Browser chat:'
         Write-Host $Results -ForegroundColor Green
         if (-not $NoPause) { Invoke-Item $PSScriptRoot }

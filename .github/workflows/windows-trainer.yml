@@ -63,6 +63,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Restart failed' }
           $saved = Get-Content "$env:TRAINER_ROOT\data\worker-1\worker.json" -Raw | ConvertFrom-Json
           if ($saved.completedRounds -ne 2) { throw 'Restart did not preserve progress' }
+          $resumed = Get-Content "$env:TRAINER_ROOT\data\worker-1\batch-00000002.json" -Raw | ConvertFrom-Json
+          if ($resumed.after_training.compiled_reuse -lt 1 -or $resumed.teacher_demonstrations -gt 1) { throw 'Saved learning was not reused' }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Control.ps1" -Action Results -NoPause
           if ($LASTEXITCODE -ne 0) { throw 'Results export failed' }
       - name: Actual launch, duplicate protection, dashboard, and stop
@@ -72,6 +74,10 @@ jobs:
           $node = Join-Path "$env:TRAINER_ROOT\.runtime" $paths.node
           & $node "$env:TRAINER_ROOT\tests\station-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { throw 'Launcher lifecycle smoke failed' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead("$env:TRAINER_ROOT\Site-Brain-Training-Results.zip")
+          try { if ($zip.Entries.FullName -notcontains 'bundle-manifest.json') { throw 'Results omit build identity' } }
+          finally { $zip.Dispose() }
       - uses: actions/upload-artifact@v4
         with:
           name: Site-Brain-Trainer-Windows

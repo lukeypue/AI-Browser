@@ -23,7 +23,16 @@ test('filters and pagination change hidden results independently', () => {
   assert.equal(t.visible.length, 2);
   m.event({kind: 'next'});
   assert.notDeepEqual(m.truth().visible, t.visible);
-  assert.equal(m.truth().eligible.length, 4);
+  assert.equal(m.truth().eligible.length, 3);
+});
+test('eligible matches include unknown axle evidence and exclude a known wrong axle',()=>{
+  const t=market().truth();
+  const wrong=t.catalog.find(l=>l.vehicle==='Ford Expedition'&&l.axle==='4.10');
+  assert.equal(t.eligible.includes(wrong.key),false);
+  for(const l of t.catalog.filter(l=>l.vehicle==='Ford Expedition'&&l.price<=8000&&l.mileage<=150000&&!l.axle)){
+    assert.equal(t.eligible.includes(l.key),true);
+  }
+  assert.equal(market({missingRareEvidence:true}).truth().eligible.length,4);
 });
 test('drawer keeps drafts pending until Apply and retains a missing limit as unknown', () => {
   const m = market({family:'drawer', missingMileage:true});

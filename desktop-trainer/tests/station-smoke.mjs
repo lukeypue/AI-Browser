@@ -13,6 +13,7 @@ const saved=JSON.parse(readFileSync(join(data,'worker-1','worker.json'),'utf8'))
 const paths=JSON.parse(readFileSync(join(root,'.runtime','paths.json'),'utf8').replace(/^\uFEFF/,''));
 const runtime=join(root,'.runtime');
 const env={...process.env,BRAIN_JAVA:join(runtime,paths.java),PLAYWRIGHT_BROWSERS_PATH:join(runtime,'browsers')};
+process.env.PLAYWRIGHT_BROWSERS_PATH=env.PLAYWRIGHT_BROWSERS_PATH;
 function command(file,args){
   const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(root,file),...args],{cwd:root,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
   let output='';child.stdout.on('data',s=>{output+=s;});child.stderr.on('data',s=>{output+=s;});
