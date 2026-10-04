@@ -12,8 +12,12 @@ test('the shipped extractor sees and acts on actual search/filter/detail HTML', 
     const before=await b.handle('observe',{});
     const search=before.elements.find(e=>e.type==='search');
     const act=command=>b.handle('act',{...command,expectedDocumentId:before.documentId,expectedUrl:before.url});
-    assert.equal((await act({cmd:'type',id:search.id,text:'Ford Expedition',submit:true})).ok,true);
+    assert.equal((await act({cmd:'type',id:search.id,text:'Ford Expedition',submit:false})).ok,true);
     let obs=await b.handle('observe',{});
+    assert.equal((await b.handle('truth',{})).appliedQuery,'','typing alone cannot earn a submitted-search result');
+    const submit=obs.elements.find(e=>e.submitType);
+    assert.equal((await b.handle('act',{cmd:'click',id:submit.id,expectedDocumentId:obs.documentId,expectedUrl:obs.url})).ok,true);
+    obs=await b.handle('observe',{});
     assert.equal(obs.items.length,2,JSON.stringify({truth:await b.handle('truth',{}),observation:obs,html:await b.page.content()}));
     const price=obs.elements.find(e=>e.name==='Price max');
     await b.handle('act',{cmd:'set_range',id:price.id,value:'8000',direction:'max',expectedDocumentId:obs.documentId,expectedUrl:obs.url});
