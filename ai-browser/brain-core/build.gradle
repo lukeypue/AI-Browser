@@ -41,3 +41,16 @@ tasks.register('simulationExperiment', JavaExec) {
     mainClass = 'com.appgate.brain.lab.SimulationMainKt'
     args layout.buildDirectory.file('reports/brain/simulation.json').get().asFile.absolutePath
 }
+
+tasks.register('desktopTrainerJar', Jar) {
+    group = 'distribution'
+    description = 'Standalone desktop lab; never a production Android dependency.'
+    dependsOn tasks.named('labClasses')
+    archiveFileName = 'site-brain-trainer.jar'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest { attributes 'Main-Class': 'com.appgate.brain.lab.BrowserMainKt' }
+    from sourceSets.main.output
+    from sourceSets.lab.output
+    from { configurations.labRuntimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+}

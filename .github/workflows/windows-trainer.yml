@@ -1,0 +1,77 @@
+name: Windows browser trainer
+on:
+  push:
+    branches: [codex/windows-browser-trainer]
+  pull_request:
+    paths: [desktop-trainer/**, ai-browser/brain-core/**, scripts/package-desktop-trainer.py, .github/workflows/windows-trainer.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Core tests and trainer JAR
+        run: gradle -p ai-browser/brain-core test desktopTrainerJar --no-daemon
+      - name: Package and extract into a path with spaces
+        shell: pwsh
+        run: |
+          python scripts/package-desktop-trainer.py dist/Site-Brain-Trainer.zip
+          $destination = Join-Path $env:RUNNER_TEMP 'Site Brain Package'
+          Expand-Archive -LiteralPath dist/Site-Brain-Trainer.zip -DestinationPath $destination
+          "TRAINER_ROOT=$destination\Site-Brain-Trainer" >> $env:GITHUB_ENV
+      - name: Run the actual portable Windows setup
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Setup.ps1" -NoPause
+          if ($LASTEXITCODE -ne 0) { throw 'Portable setup failed' }
+      - name: Real browser and dashboard tests
+        shell: pwsh
+        run: |
+          $paths = Get-Content "$env:TRAINER_ROOT\.runtime\paths.json" -Raw | ConvertFrom-Json
+          $node = Join-Path "$env:TRAINER_ROOT\.runtime" $paths.node
+          $env:PLAYWRIGHT_BROWSERS_PATH = "$env:TRAINER_ROOT\.runtime\browsers"
+          $tests = @(Get-ChildItem "$env:TRAINER_ROOT\tests\*.test.mjs" | ForEach-Object FullName)
+          & $node --test @tests
+          if ($LASTEXITCODE -ne 0) { throw 'Browser tests failed' }
+      - name: Four workers save actual practice and restart
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Run.ps1" -Workers 4 -Rounds 1 -TrainingCount 2 -EvaluationCount 2 -NoBrowser -NoPause
+          if ($LASTEXITCODE -ne 0) { throw 'Four-worker run failed' }
+          foreach ($worker in 1..4) {
+            $folder = "$env:TRAINER_ROOT\data\worker-$worker"
+            $report = Get-Content "$folder\batch-00000001.json" -Raw | ConvertFrom-Json
+            if (-not (Test-Path "$folder\memory.json")) { throw 'Checkpoint missing' }
+            if ($report.compiled_skills -lt 1 -or $report.verified_search_practice -lt 2) { throw 'No verified learning saved' }
+            if ($report.after_training.false_verified_claims -ne 0 -or $report.after_training.unsafe_actions -ne 0 -or $report.after_training.hard_violations -ne 0) { throw 'Objective safety failure' }
+          }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Run.ps1" -Workers 1 -Rounds 1 -TrainingCount 2 -EvaluationCount 2 -NoBrowser -NoPause
+          if ($LASTEXITCODE -ne 0) { throw 'Restart failed' }
+          $saved = Get-Content "$env:TRAINER_ROOT\data\worker-1\worker.json" -Raw | ConvertFrom-Json
+          if ($saved.completedRounds -ne 2) { throw 'Restart did not preserve progress' }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Control.ps1" -Action Results -NoPause
+          if ($LASTEXITCODE -ne 0) { throw 'Results export failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Site-Brain-Trainer-Windows
+          path: dist/Site-Brain-Trainer.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-trainer-test-results
+          path: |
+            ${{ env.TRAINER_ROOT }}/data/
+            ${{ env.TRAINER_ROOT }}/Site-Brain-Training-Results.zip

@@ -4,3 +4,8 @@
 ai-browser/.gradle/
 ai-browser/**/.gradle/
 ai-browser/**/build/
+ai-browser/**/.kotlin/
+/dist/
+/desktop-trainer/node_modules/
+/desktop-trainer/.runtime/
+/desktop-trainer/data/

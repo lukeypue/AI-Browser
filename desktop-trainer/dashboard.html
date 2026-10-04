@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Site Brain Training Station</title>
+<style>
+:root{color-scheme:dark;font-family:Segoe UI,Arial,sans-serif;background:#101722;color:#eef4ff}*{box-sizing:border-box}body{margin:0}main{max-width:1160px;margin:0 auto;padding:36px 24px}header{display:flex;justify-content:space-between;align-items:center;gap:24px}h1{font-size:34px;letter-spacing:-1px;margin:6px 0}p{line-height:1.6;color:#b6c4d9}.eyebrow{color:#6bdfc6;text-transform:uppercase;font-size:12px;letter-spacing:2px;font-weight:700}.button{border:1px solid #51607b;background:#202c3e;color:white;border-radius:10px;padding:12px 20px;cursor:pointer;font:600 15px Segoe UI}.button:disabled{opacity:.5;cursor:default}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:28px 0}.tile,.worker{background:#192334;border:1px solid #2b3950;border-radius:14px;padding:20px}.tile strong{display:block;font-size:28px;margin-top:8px}.label{font-size:13px;color:#b6c4d9}.workers{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.worker h2{font-size:18px;margin:0 0 12px}.phase{min-height:36px;color:#6bdfc6;font-size:15px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}.metrics strong{display:block;font-size:22px;margin:8px 0}.notes{border-left:3px solid #6bdfc6;padding-left:18px;margin-top:26px}.error{color:#ffb6a9}.badge{display:inline-block;padding:6px 10px;border-radius:8px;background:#22384a;color:#b0e8dc;font-size:12px}.small{font-size:13px}footer{padding-top:16px;color:#8396b2;font-size:13px}@media(max-width:720px){.summary,.workers{grid-template-columns:1fr 1fr}header{align-items:start}.metrics{grid-template-columns:1fr}.workers{grid-template-columns:1fr}h1{font-size:26px}}
+</style></head><body><main>
+<header><div><div class="eyebrow">AI Browser • Desktop practice</div><h1>Site Brain Training Station</h1><p id="status">Connecting to your trainer…</p></div><button id="stop" class="button">Stop training</button></header>
+<section class="summary"><div class="tile"><span class="label">Workers running</span><strong id="workers">—</strong></div><div class="tile"><span class="label">Verified search practice this session</span><strong id="practice">—</strong></div><div class="tile"><span class="label">Computer CPU use</span><strong id="cpu">—</strong></div><div class="tile"><span class="label">Computer memory use</span><strong id="ram">—</strong></div></section>
+<section class="workers" id="cards"></section>
+<section class="notes"><span class="badge">Practice websites only • $0 paid AI calls</span><p>The same brain and browser observation code used by your phone are practicing on controlled HTML marketplaces. Each worker saves its own memory. Test cases are kept separate from practice.</p><p class="small">A passing practice test is not proof that KSL, OfferUp, or Facebook will work. These lessons are saved for review; nothing is sent to your phone automatically. Each worker retains its latest 20 batch reports.</p></section>
+<footer>Keep the launcher window open. Stop here or use 3-Stop.cmd. To share results, double-click 4-Results.cmd.</footer>
+</main><script>
+const stopToken='__STOP_TOKEN__';
+const el=id=>document.getElementById(id);
+const percent=v=>typeof v==='number'?Math.round(v*100)+'%':'—';
+function workerCard(w){
+ const div=document.createElement('article');div.className='worker';
+ const h=document.createElement('h2');h.textContent='Worker '+w.number;div.append(h);
+ const phase=document.createElement('div');phase.className='phase';phase.textContent=w.phase;div.append(phase);
+ const metrics=document.createElement('div');metrics.className='metrics';
+ for(const [label,value] of [['Before practice',percent(w.latest?.baseline?.success_rate)],['After practice',percent(w.latest?.after?.success_rate)],['Saved skills',w.latest?.compiledSkills??'—']]){
+  const block=document.createElement('div'),name=document.createElement('span'),number=document.createElement('strong');name.className='label';name.textContent=label;number.textContent=value;block.append(name,number);metrics.append(block);
+ }
+ div.append(metrics);
+ const note=document.createElement('p');note.className='small';note.textContent=`${w.completedRounds} saved batches • ${w.latest?.after?.compiled_reuse??0} tested cases reused a learned procedure`;div.append(note);
+ if(w.error){const e=document.createElement('p');e.className='error small';e.textContent=w.error;div.append(e);}
+ return div;
+}
+async function update(){
+ try{
+  const s=await fetch('/status').then(r=>r.json());
+  el('status').textContent=s.stopping?'Stopping and preserving saved practice…':s.running?'Training is running. Your screen can turn off.':'Training stopped. Your results are saved.';
+  el('workers').textContent=s.workers.filter(w=>!w.phase.startsWith('Stopped')).length;
+  el('practice').textContent=s.workers.reduce((n,w)=>n+w.verifiedPractice,0);
+  el('cpu').textContent=(s.resources.cpuPercent??'—')+'%';
+  el('ram').textContent=s.resources.memoryUsedGB?`${s.resources.memoryUsedGB} / ${s.resources.memoryTotalGB} GB`:'—';
+  el('cards').replaceChildren(...s.workers.map(workerCard));el('stop').disabled=s.stopping||!s.running;
+ }catch{el('status').textContent='Trainer is not connected. Check the launcher window. Saved results remain in the data folder.';el('stop').disabled=true;}
+}
+el('stop').onclick=async()=>{el('stop').disabled=true;await fetch('/stop',{method:'POST',headers:{'X-Trainer-Token':stopToken}});await update();};
+update();setInterval(update,2000);
+</script></body></html>

@@ -1,0 +1,7 @@
+Site Brain Windows trainer
+Uses the AI Browser brain and its production browser perception script.
+Portable Node and Eclipse Temurin Java are downloaded from their official sources.
+Playwright and Chromium are downloaded by the official Playwright installer.
+Their respective licenses remain in the installed runtime and node_modules folders.
+Playwright: Apache-2.0. Kotlin standard library: Apache-2.0.
+This package contains no credentials, user memory, or paid AI integration.

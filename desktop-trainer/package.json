@@ -1,0 +1,10 @@
+{
+  "name": "site-brain-desktop-trainer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline real-browser practice for the existing Kotlin Site Brain",
+  "scripts": {"test": "node --test tests/*.test.mjs"},
+  "dependencies": {"playwright": "1.62.1"},
+  "engines": {"node": ">=22"}
+}
