@@ -123,3 +123,16 @@ test('manual browsing retains listing link popup behavior', async () => {
     await popup.close();
   } finally { await page.close(); }
 });
+
+for (const button of ['<button type="submit">Go</button>', '<button type="submit" hidden>Hidden</button><button type="submit">Go</button>', '<button type="submit" disabled>Disabled</button><button type="submit">Go</button>']) {
+  test('search submission chooses an enabled visible button instead of the labelled input: ' + button, async () => {
+    const page = await fixture('<form onsubmit="event.preventDefault(); window.submissions=(window.submissions||0)+1"><input type="search" aria-label="Search listings">' + button + '</form>');
+    try {
+      const obs = await page.evaluate(() => window.__brainObserve());
+      const input = obs.elements.find(e => e.tag === 'input');
+      await page.evaluate(({obs, input}) => window.__brainExecute({cmd:'type', id:input.id, text:'bike', submit:true, expectedDocumentId:obs.documentId, expectedUrl:obs.url}), {obs, input});
+      assert.equal(await page.evaluate(() => window.submissions || 0), 1);
+      assert.equal(await page.locator('input').inputValue(), 'bike');
+    } finally { await page.close(); }
+  });
+}

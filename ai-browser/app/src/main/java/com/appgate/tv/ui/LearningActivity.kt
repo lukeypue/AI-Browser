@@ -41,7 +41,7 @@ class LearningActivity : ServiceBoundActivity() {
             Ui.button(this, "STOP") { service?.stopLearning() }
         ))
         column.addView(android.widget.CheckBox(this).apply {
-            text = "Allow AI help: up to 6 requests/hour and 24/day. Off = local only."
+            text = "Allow AI help: up to 30 requests/hour and 120/day. Off = local only."
             setTextColor(Ui.text)
             isChecked = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this@LearningActivity)
             setOnCheckedChangeListener { _, checked ->

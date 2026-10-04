@@ -24,6 +24,28 @@ class OpportunityCurriculumTest {
 
     private fun observe(site: SiteModel, page: SemanticPageState, at: Long = now) = Curriculum.observe(site, page, at)
 
+    @Test fun strandedResultsProbeTriesAnotherPracticeQueryWithoutCreatingALesson() {
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=old", 1000) }
+        val memory = Memory(InMemoryStorage()) { now }
+        val site = memory.site(fake.host)
+        Curriculum.ensure(site)
+        site.curriculum.filter { it.id != "next_page" }.forEach { it.completedAt = now - 1 }
+        val raw = fake.observe(1000)
+        val empty = Json.parseObject(raw).put("elements", com.appgate.brain.json.JsonArray()).put("items", com.appgate.brain.json.JsonArray()).toString()
+        var navigations = 0
+        val renderer = object : Renderer by fake {
+            override fun observe(timeoutMs: Long): String = if (navigations == 0) empty else fake.observe(timeoutMs)
+            override fun navigate(url: String, timeoutMs: Long): RendererResult { navigations++; return fake.navigate(url, timeoutMs) }
+        }
+        val engine = BrainEngine(renderer, memory, { null }, object : EngineEvents {}, config = EngineConfig(pacingOverrideMs = 0)) { now }
+        val p = profile().copy(searchUrl = "https://fake.market/search?q={q}", trainingQueries = listOf("fresh", "different"))
+        assertNotNull(engine.probeLearning(p))
+        assertEquals(1, navigations)
+        assertFalse(fake.currentUrl().contains("q=old"))
+        assertEquals(0, site.lessonOrdinal)
+        assertFalse(site.curriculum.single { it.id == "next_page" }.done)
+    }
+
     @Test fun observedResultsWithoutNextDoNotScheduleAnotherGenericTask() {
         val site = siteOnly("next_page")
         observe(site, results().copy(affordances = emptyList()))

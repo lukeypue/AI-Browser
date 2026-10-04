@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "AI Browser Site Brain Bridge",
-  "version": "3.1.2",
+  "version": "3.1.3",
   "description": "First-party bridge between Gecko web content and the AI Browser Site Brain: semantic page extraction, typed actions, settle detection, input guard and the network interlock. Sends nothing anywhere except to the app process.",
   "browser_specific_settings": {
     "gecko": {

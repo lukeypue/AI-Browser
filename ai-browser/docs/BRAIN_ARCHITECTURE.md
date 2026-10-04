@@ -108,13 +108,15 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
 - `SkillCompiler` — verified local/planner programs → `COMPILED` skills (values → params);
   explained human demonstrations → `DEMONSTRATED` skills.
 - `Curriculum` — per-site goals selected from observed live opportunities. Unavailable controls
-  wait without creating a task or a success. One-minute probes continue; failed lessons back
+  wait without creating a task or a success. An idle results page with no unfinished
+  lesson targets may try one different practice search per probe; auth, busy pages,
+  dialogs and live lesson controls prevent that recovery. One-minute probes continue; failed lessons back
   off for 1/5/15/60 minutes unless relevant live controls change.
 - `SkillLibrary` — canonical program identity with independent host evidence; strong source
   evidence can admit a compatible procedure on a new host. A target failure blocks that
   host until an independently verified repair. Every action is grounded and verified again.
-- `TeacherBudget` — durable reservations before actual transport: 6 requests per rolling
-  hour and 24 per rolling day, shared by learning, search and demonstration explanation.
+- `TeacherBudget` — durable reservations before actual transport: 30 requests per rolling
+  hour and 120 per rolling day, shared by learning, search and demonstration explanation.
   Failed requests consume allowance. This is a request cap, not a dollar cap. Provider usage
   is recorded when returned; missing usage is distinguished from zero usage.
 

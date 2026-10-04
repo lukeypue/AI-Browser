@@ -107,7 +107,8 @@ class BrainEngine(
         renderer.setNetworkMode(EngineMode.TRAIN.name,
             site.endpointEffects.filterValues { it == com.appgate.brain.model.EffectClass.READ }.keys.toList(),
             site.endpointEffects.filterValues { it == com.appgate.brain.model.EffectClass.COMMIT_EXTERNAL }.keys.toList())
-        val query = profile.trainingQueries.firstOrNull() ?: "mountain bike"
+        val queries = profile.trainingQueries.ifEmpty { listOf("mountain bike") }
+        val query = queries[Math.floorMod(clock() / 60_000L, queries.size.toLong()).toInt()]
         val goal = Goal("probe", GoalIntent.LEARN_SITE, "learning opportunity check", query, emptyList())
         val knownSearch = profile.searchUrlFor(goal) ?: site.searchUrlTemplate?.let {
             profile.copy(searchUrl = it).searchUrlFor(goal)
@@ -116,8 +117,18 @@ class BrainEngine(
         return runCatching {
             val current = renderer.currentUrl()
             var page = if (allowedUrl(probe, current, profile)) executor.observe(clock()) else null
+            // A results page with none of the unfinished lesson controls cannot improve by
+            // observation alone. Try one different safe practice search; no AI call,
+            // lesson completion or cooldown reset is credited to this navigation.
+            Curriculum.ensure(site)
+            val strandedResults = page?.let { p ->
+                p.pageType == PageType.RESULTS && p.settle == com.appgate.brain.model.Settle.IDLE && !p.dialogOpen &&
+                    site.curriculum.any { !it.done } &&
+                    site.curriculum.filter { !it.done }.none { LearningOpportunities.target(p, it.id) != null } &&
+                    knownSearch != null && knownSearch != current
+            } == true
             // Always observe an already open auth/challenge before navigating elsewhere.
-            if (page?.isHumanOnly != true && (page == null || page.pageType == PageType.DETAIL ||
+            if (page?.isHumanOnly != true && (page == null || strandedResults || page.pageType == PageType.DETAIL ||
                     (page.pageType in setOf(PageType.HOME, PageType.UNKNOWN) && knownSearch != null))) {
                 val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }
                     ?: profile.startUrl.takeIf { allowedUrl(probe, it, profile) } ?: return@runCatching null

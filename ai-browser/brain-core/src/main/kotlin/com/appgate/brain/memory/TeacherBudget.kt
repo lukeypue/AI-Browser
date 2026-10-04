@@ -67,8 +67,8 @@ class TeacherBudget(private val storage: BrainStorage, private val clock: () -> 
         val allowed = state.valid && hour.size < HOURLY_LIMIT && state.entries.size < DAILY_LIMIT
         val reason = when {
             !state.valid -> "AI usage record needs repair; local learning continues"
-            state.entries.size >= DAILY_LIMIT -> "AI allowance reached (24 requests per 24 hours); local learning continues"
-            hour.size >= HOURLY_LIMIT -> "AI hourly allowance reached (6 requests); local learning continues"
+            state.entries.size >= DAILY_LIMIT -> "AI allowance reached ($DAILY_LIMIT requests per 24 hours); local learning continues"
+            hour.size >= HOURLY_LIMIT -> "AI hourly allowance reached ($HOURLY_LIMIT requests); local learning continues"
             else -> "AI help available"
         }
         val next = maxOf(
@@ -89,8 +89,8 @@ class TeacherBudget(private val storage: BrainStorage, private val clock: () -> 
     } ?: "custom"
 
     companion object {
-        const val DAILY_LIMIT = 24
-        const val HOURLY_LIMIT = 6
+        const val DAILY_LIMIT = 120
+        const val HOURLY_LIMIT = 30
         private const val DAY_MS = 86_400_000L
         private const val HOUR_MS = 3_600_000L
         private const val KEY = "teacher/usage"

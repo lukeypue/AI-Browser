@@ -8,24 +8,24 @@ class TeacherBudgetTest {
         val store = InMemoryStorage()
         var now = 100_000L
         val budget = TeacherBudget(store) { now }
-        repeat(6) { budget.reserve("OPENAI", "test-model", 1200) }
-        assertEquals(6, TeacherBudget(store) { now }.snapshot().requestsHour)
+        repeat(30) { budget.reserve("OPENAI", "test-model", 1200) }
+        assertEquals(30, TeacherBudget(store) { now }.snapshot().requestsHour)
         assertFalse(TeacherBudget(store) { now }.snapshot().allowed)
         assertTrue(runCatching { TeacherBudget(store) { now }.reserve("OPENAI", "test-model", 1200) }.exceptionOrNull() is TeacherBudgetExceeded)
         now += 3_600_000L
         assertTrue(budget.snapshot().allowed)
-        assertEquals(6, budget.snapshot().requests24h)
+        assertEquals(30, budget.snapshot().requests24h)
     }
 
-    @Test fun twentyFourRequestsBlockAcrossFreshInstancesAndClockRollback() {
+    @Test fun oneHundredTwentyRequestsBlockAcrossFreshInstancesAndClockRollback() {
         val store = InMemoryStorage()
         var now = 100_000L
         repeat(4) {
-            repeat(6) { TeacherBudget(store) { now }.reserve("OPENAI", "test-model", 1200) }
+            repeat(30) { TeacherBudget(store) { now }.reserve("OPENAI", "test-model", 1200) }
             now += 3_600_000L
         }
         val budget = TeacherBudget(store) { now }
-        assertEquals(24, budget.snapshot().requests24h)
+        assertEquals(120, budget.snapshot().requests24h)
         assertFalse(budget.snapshot().allowed)
         now = 1L
         assertFalse(TeacherBudget(store) { now }.snapshot().allowed)
