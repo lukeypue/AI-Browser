@@ -32,6 +32,7 @@ export async function createBrowserSession() {
         });
         await context.routeWebSocket('**/*',ws=>ws.close());
         page=await context.newPage();page.setDefaultTimeout(5000);
+        page.on('pageerror',error=>process.stderr.write('Practice page error: '+error.message+'\n'));
         await render();return {url:market.url,browserVersion:browser.version()};
       }
       if(!page)throw new Error('practice session not initialized');
