@@ -1,6 +1,7 @@
 import {readFileSync,writeFileSync,existsSync,lstatSync,mkdirSync,copyFileSync,rmSync,unlinkSync,openSync,closeSync} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 export function acquireStationLock(root){
  const path=join(root,'.station.lock');
@@ -11,7 +12,7 @@ export function acquireStationLock(root){
  const fd=openSync(path,'wx');writeFileSync(fd,JSON.stringify({pid:process.pid}));closeSync(fd);
  return ()=>{if(existsSync(path))unlinkSync(path);};
 }
-export function installBundle(stage,root){
+export function installBundle(stage,root,refresh=()=>{}){
  const lock=join(root,'data','runner.lock');
  if(existsSync(lock)){
   const pid=JSON.parse(readFileSync(lock,'utf8')).pid;
@@ -37,10 +38,23 @@ export function installBundle(stage,root){
    for(const name of names){if(old.has(name))copyFileSync(join(backup,name),join(root,name));else rmSync(join(root,name),{force:true});}
    throw e;
   }
+  refresh();
   return manifest.version;
  }finally{release();}
 }
+function refreshTools(root){
+ const r=spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(root,'Setup.ps1'),'-WithinStationLock','-NoPause'],{stdio:'inherit',windowsHide:true});
+ if(r.error)throw r.error;
+ if(r.status!==0)throw new Error('Browser setup needs retry. Press Start to finish setup. Saved training remains.');
+}
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- try{console.log('Updated to '+installBundle(process.argv[2],process.argv[3])+'. Saved training remains.');}
- catch(e){console.error(e.message);process.exitCode=1;}
+ try{
+  if(process.argv[2]==='--setup'){
+   const root=process.argv[3],release=acquireStationLock(root);
+   try{refreshTools(root);}finally{release();}
+  }else{
+   const root=process.argv[3];
+   console.log('Updated to '+installBundle(process.argv[2],root,process.argv.includes('--refresh')?()=>refreshTools(root):undefined)+'. Saved training remains.');
+  }
+ }catch(e){console.error(e.message);process.exitCode=1;}
 }

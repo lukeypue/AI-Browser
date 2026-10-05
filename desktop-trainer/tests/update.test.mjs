@@ -53,3 +53,11 @@ test('station ownership prevents training and update from overlapping and recove
  writeFileSync(join(root,'.station.lock'),JSON.stringify({pid:2147483647}));
  m.installBundle(stage,root);assert.equal(readFileSync(join(root,'runner.mjs'),'utf8'),'new program');
 });
+test('update ownership remains held throughout dependency refresh and releases on refresh failure',()=>{
+ const {root,stage}=fixture();let called=false;
+ assert.throws(()=>m.installBundle(stage,root,()=>{
+  called=true;assert.throws(()=>m.acquireStationLock(root),/already/);throw new Error('refresh failed');
+ }),/refresh failed/);
+ assert.equal(called,true);const release=m.acquireStationLock(root);release();
+ assert.equal(readFileSync(join(root,'data','worker-1','memory.json'),'utf8'),'saved learning');
+});

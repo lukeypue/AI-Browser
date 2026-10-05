@@ -1,4 +1,4 @@
-param([switch]$NoPause)
+param([switch]$NoPause, [switch]$WithinStationLock)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest
@@ -17,6 +17,15 @@ function Get-CheckedArchive([string]$Url, [string]$Hash, [string]$Destination) {
 }
 try {
     if (-not [Environment]::Is64BitOperatingSystem) { throw 'This trainer requires 64-bit Windows.' }
+    if (-not $WithinStationLock -and (Test-Path (Join-Path $RuntimeRoot 'paths.json'))) {
+        $SavedPaths = Get-Content (Join-Path $RuntimeRoot 'paths.json') -Raw | ConvertFrom-Json
+        $SavedNode = Join-Path $RuntimeRoot $SavedPaths.node
+        if (Test-Path $SavedNode) {
+            & $SavedNode (Join-Path $TrainerRoot 'update.mjs') --setup $TrainerRoot
+            if ($LASTEXITCODE -ne 0) { throw 'Setup could not finish. Stop any running trainer and press Start to retry.' }
+            exit 0
+        }
+    }
     Remove-Item -LiteralPath (Join-Path $RuntimeRoot 'ready.txt') -Force -ErrorAction SilentlyContinue
     $SetupHandle = [IO.File]::Open((Join-Path $RuntimeRoot 'setup.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     $Manifest = Get-Content -LiteralPath (Join-Path $TrainerRoot 'bundle-manifest.json') -Raw | ConvertFrom-Json

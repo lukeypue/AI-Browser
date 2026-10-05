@@ -51,7 +51,7 @@ $import = New-Object Windows.Forms.Button; $import.Text = 'Import Previous Train
 $note = New-Object Windows.Forms.Label; $note.Text = 'Updates keep saved memories and batches. Results go to Downloads.' + [Environment]::NewLine + 'Practice websites only. No paid AI calls. Keep this window open while training.'; $note.Location = New-Object Drawing.Point(26,448); $note.Size = New-Object Drawing.Size(750,52); $form.Controls.Add($note)
 $buttons['Start'].Add_Click({
     try {
-        if (Get-Running) { return }
+        if ((Get-Running) -or $script:Operation -or $script:TrainerProcess) { return }
         if (-not (Test-Path (Join-Path $script:Root '.runtime\ready.txt'))) { $script:StartAfterSetup = $true; Start-Operation 'Setup.ps1'; $script:Status.Text = 'Setting up the browser tools. This can take several minutes.' }
         else { Start-Operation 'Run.ps1' ('-NoBrowser' + $(if ($SmokeTest) { ' -Workers 1 -TrainingCount 2 -EvaluationCount 2' } else { '' })); $script:Status.Text = 'Starting training from saved memories...' }
     } catch { $script:Status.Text = $_.Exception.Message }
@@ -80,7 +80,15 @@ $timer = New-Object Windows.Forms.Timer; $timer.Interval = 1000
 $timer.Add_Tick({
     try {
         $running = Get-Running
-        if ($script:TrainerProcess -and $script:TrainerProcess.HasExited) { $script:TrainerProcess.Dispose(); $script:TrainerProcess = $null; if (-not $script:Operation) { $script:Status.Text = 'Training stopped. Saved training remains.' } }
+        if ($script:TrainerProcess -and $script:TrainerProcess.HasExited) {
+            $launchCode = $script:TrainerProcess.ExitCode; $script:TrainerProcess.Dispose(); $script:TrainerProcess = $null
+            if (-not $script:Operation) {
+                if ($launchCode -ne 0) {
+                    $failure = @(Get-Content (Join-Path $Data 'training-launch.log') -Tail 3 -ErrorAction SilentlyContinue) + @(Get-Content (Join-Path $Data 'Run.ps1-errors.log') -Tail 3 -ErrorAction SilentlyContinue)
+                    $script:Status.Text = 'Training could not finish: ' + ($failure -join ' ')
+                } else { $script:Status.Text = 'Training stopped. Saved training remains.' }
+            }
+        }
         $m = Get-Content (Join-Path $script:Root 'bundle-manifest.json') -Raw | ConvertFrom-Json
         $version.Text = 'Trainer ' + $m.version + ' | Search, price filters, listing details, and pagination'
         if ($script:Operation -and $script:Operation.HasExited) {
@@ -112,7 +120,9 @@ $timer.Add_Tick({
         if ($script:Closing -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) { $form.Close() }
         if ($SmokeTest) {
             if (((Get-Date) - $script:StartedAt).TotalSeconds -gt 90) { throw 'Control window smoke timed out.' }
-            if ($script:SmokePhase -eq 0 -and $running) { $script:SmokePhase = 1; $buttons['Stop'].PerformClick() }
+            if ($script:SmokePhase -eq 0 -and $running) {
+                $bitmap = New-Object Drawing.Bitmap($form.Width,$form.Height); $form.DrawToBitmap($bitmap, $form.ClientRectangle); $bitmap.Save((Join-Path $Data 'control-window-smoke.png')); $bitmap.Dispose()
+                $script:SmokePhase = 1; $buttons['Stop'].PerformClick() }
             elseif ($script:SmokePhase -eq 1 -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) { $script:SmokePhase = 2; $buttons['Download Results'].PerformClick() }
             elseif ($script:SmokePhase -eq 2 -and -not $script:Operation) { $script:SmokePhase = 3; $form.Close() }
         }

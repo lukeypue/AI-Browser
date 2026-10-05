@@ -31,11 +31,8 @@ try {
         }
     } finally { $Archive.Dispose() }
     Expand-Archive -LiteralPath $Zip -DestinationPath $Stage
-    & $Node (Join-Path $PSScriptRoot 'update.mjs') (Join-Path $Stage 'Site-Brain-Trainer') $PSScriptRoot
+    & $Node (Join-Path $PSScriptRoot 'update.mjs') (Join-Path $Stage 'Site-Brain-Trainer') $PSScriptRoot --refresh
     if ($LASTEXITCODE -ne 0) { throw 'Update was not installed. The previous program and saved training remain.' }
-    # Runtime paths and memories remain; setup refreshes browser dependencies if needed.
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Setup.ps1') -NoPause
-    if ($LASTEXITCODE -ne 0) { throw 'Update installed; browser setup needs another try. Press Start to finish setup. Saved training remains.' }
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
