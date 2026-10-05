@@ -692,7 +692,7 @@
     el.dispatchEvent(new KeyboardEvent("keyup", Object.assign({ bubbles: true, cancelable: true }, keyInit)));
     if (!notCancelled) return { ok: true, detail: "typed+enter(handled)" };
     if (form) {
-      const btn = form.querySelector('button[type=submit], input[type=submit], button:not([type]), [aria-label*="search" i]');
+      const btn = Array.from(form.querySelectorAll('button[type=submit], input[type=submit], button:not([type]), button[aria-label*="search" i], [role=button][aria-label*="search" i]')).find(b => b !== el && visible(b) && !b.disabled && b.getAttribute("aria-disabled") !== "true");
       if (btn && visible(btn) && !btn.disabled) { realClick(btn); return { ok: true, detail: "typed+submit-button" }; }
       try { if (typeof form.requestSubmit === "function") form.requestSubmit(); else form.submit(); return { ok: true, detail: "typed+form-submit" }; } catch (e) { /* fallthrough */ }
     } else {

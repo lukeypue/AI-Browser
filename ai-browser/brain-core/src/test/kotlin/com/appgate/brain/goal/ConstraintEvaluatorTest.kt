@@ -14,6 +14,16 @@ class ConstraintEvaluatorTest {
     private fun card(title: String, price: Int?, mileage: Int?, text: String = "") =
         ItemSummary(key = title.hashCode().toString(), affordanceId = null, title = title, price = price, mileage = mileage, year = null, hrefPath = "/listing/1", snippet = text)
 
+    @Test fun explicitlyDifferentAxleRatioIsViolatedButMissingEvidenceStaysUnknown() {
+        val previous = ConstraintEvaluator.fromCard(goal, card("2010 Ford Expedition", 7500, 120000), "h")
+        for (text in listOf("4.10 axle ratio", "Axle ratio: 4.10", "4.10 gears")) {
+            val v = ConstraintEvaluator.withDetail(goal, previous, text, null)
+            assertEquals(text, Verdict.VIOLATED, v.perConstraint["axle_ratio"])
+            assertTrue(v.evidence.any { it.key == "axle_ratio" && it.span.contains("4.10") })
+        }
+        assertEquals(Verdict.UNKNOWN, ConstraintEvaluator.withDetail(goal, previous, "Ratio is not specified", null).perConstraint["axle_ratio"])
+    }
+
     @Test
     fun cardVerdictsUseStructuredFieldsAndLeaveRareUnknown() {
         val v = ConstraintEvaluator.fromCard(goal, card("2008 Ford Expedition Eddie Bauer", 7500, 142000), "cars.ksl.com")

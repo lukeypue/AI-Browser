@@ -16,7 +16,7 @@ files = {p.relative_to(source).as_posix(): p for p in source.rglob('*')
          and p.suffix in {'.mjs', '.json', '.ps1', '.cmd', '.html', '.txt'}}
 files['site-brain-trainer.jar'] = repo / 'ai-browser/brain-core/build/libs/site-brain-trainer.jar'
 files['content.js'] = repo / 'ai-browser/app/src/main/assets/sitebrain/content.js'
-manifest = {'version': '1.0.0', 'source_commit': subprocess.check_output(
+manifest = {'version': '1.1.0', 'source_commit': subprocess.check_output(
     ['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(),
     'files': {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in sorted(files.items())}}
 output.parent.mkdir(parents=True, exist_ok=True)

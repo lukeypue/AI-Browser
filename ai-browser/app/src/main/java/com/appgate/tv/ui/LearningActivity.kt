@@ -9,6 +9,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.appgate.brain.engine.Curriculum
 import com.appgate.brain.model.VerifyStatus
+import com.appgate.brain.memory.TeacherBudget
 import com.appgate.brain.profile.SiteProfiles
 import com.appgate.tv.service.BrainService
 
@@ -41,7 +42,7 @@ class LearningActivity : ServiceBoundActivity() {
             Ui.button(this, "STOP") { service?.stopLearning() }
         ))
         column.addView(android.widget.CheckBox(this).apply {
-            text = "Allow AI help: up to 6 requests/hour and 24/day. Off = local only."
+            text = "Allow AI help: up to ${TeacherBudget.HOURLY_LIMIT} requests/hour and ${TeacherBudget.DAILY_LIMIT}/day. Off = local only."
             setTextColor(Ui.text)
             isChecked = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this@LearningActivity)
             setOnCheckedChangeListener { _, checked ->
@@ -50,7 +51,7 @@ class LearningActivity : ServiceBoundActivity() {
             }
         })
         strongerTeacher = android.widget.CheckBox(this).apply {
-            text = "Use stronger OpenAI help for 24 hours (GPT-5.4). Higher cost: about 3.3× mini token rates, plus reasoning tokens. Same 6/hour and 24/day limits; then your usual model resumes."
+            text = "Use stronger OpenAI help for 24 hours (GPT-5.4). Higher cost: about 3.3× mini token rates, plus reasoning tokens. Same ${TeacherBudget.HOURLY_LIMIT}/hour and ${TeacherBudget.DAILY_LIMIT}/day limits; then your usual model resumes."
             setTextColor(Ui.text)
             isEnabled = com.appgate.tv.store.PlannerKeyStore.strongerTeacherEligible(this@LearningActivity)
             isChecked = com.appgate.tv.store.PlannerKeyStore.strongerTeacherActive(this@LearningActivity)

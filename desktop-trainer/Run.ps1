@@ -1,4 +1,4 @@
-param([int]$Workers=4, [int]$Rounds=0, [int]$TrainingCount=6, [int]$EvaluationCount=4, [switch]$NoBrowser, [switch]$NoPause)
+param([int]$Workers=4, [int]$Rounds=0, [int]$TrainingCount=12, [int]$EvaluationCount=4, [switch]$NoBrowser, [switch]$NoPause)
 $ErrorActionPreference = 'Stop'
 $TrainerRoot = $PSScriptRoot
 $RuntimeRoot = Join-Path $TrainerRoot '.runtime'

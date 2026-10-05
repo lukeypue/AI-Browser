@@ -9,6 +9,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BrowserTrainerTest {
+    @Test fun openingAnotherListingCannotEarnLessonCredit() {
+        val task=TaskLedger("open",GoalParser.parse("Ford Expedition"),"practice.sim.invalid","https://practice.sim.invalid/").apply {
+            status=TaskStatus.DONE;lesson="open_item";currentItem="wanted";successfulSkills += "open_item"
+        }
+        val truth=JsonObject().put("path","/item/wrong").put("catalog",JsonArray().add(JsonObject().put("key","wanted").put("path","/item/wanted")))
+        assertFalse(BrowserObjective.scoreLesson(truth,task).optBoolean("success"))
+        truth.put("path","/item/wanted")
+        assertTrue(BrowserObjective.scoreLesson(truth,task).optBoolean("success"))
+    }
+
+    @Test fun lessonScoreRequiresActualOutcomeAndVerifiedCapability() {
+        val goal=GoalParser.parse("Ford Expedition").copy(intent=GoalIntent.LEARN_SITE)
+        val task=TaskLedger("lesson",goal,"practice.sim.invalid","https://practice.sim.invalid/").apply {status=TaskStatus.DONE;lesson="next_page"}
+        val truth=JsonObject().put("page",2).put("unsafeActions",0)
+        assertFalse(BrowserObjective.scoreLesson(truth,task).optBoolean("success"))
+        task.successfulSkills += "next_page"
+        assertTrue(BrowserObjective.scoreLesson(truth,task).optBoolean("success"))
+        truth.put("page",1)
+        assertFalse(BrowserObjective.scoreLesson(truth,task).optBoolean("success"))
+        truth.put("page",2).put("unsafeActions",1)
+        assertFalse(BrowserObjective.scoreLesson(truth,task).optBoolean("success"))
+    }
+
     @Test fun unknownWrongRareFieldIsAnEfficacyFailureNotAHardSafetyViolation() {
         val goal=GoalParser.parse("Ford Expedition under 8000 under 150000 miles with a 3.73 axle")
         val task=TaskLedger("rare",goal,"practice.sim.invalid","https://practice.sim.invalid/").apply { status=TaskStatus.DONE }

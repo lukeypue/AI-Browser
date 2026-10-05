@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=dirname(fileURLToPath(import.meta.url));
 export function parseOptions(args){
-  const result={workers:4,rounds:0,trainingCount:6,evaluationCount:4,noBrowser:false};
+  const result={workers:4,rounds:0,trainingCount:12,evaluationCount:4,noBrowser:false};
   for(let i=0;i<args.length;i++){
     const key={'--workers':'workers','--rounds':'rounds','--training-count':'trainingCount','--evaluation-count':'evaluationCount'}[args[i]];
     if(args[i]==='--no-browser'){result.noBrowser=true;continue;}
@@ -75,7 +75,7 @@ export async function run(options,trainerRoot=root){
   const node=process.execPath,java=process.env.BRAIN_JAVA||'java';
   if(!existsSync(join(root,'site-brain-trainer.jar'))){unlinkSync(lockPath);throw new Error('Trainer JAR missing. Extract all files before starting.');}
   const children=new Set();let stopping=false,stopTimer;
-  const state={version:'1.0.0',running:true,stopping:false,started:new Date().toISOString(),mode:'Practice websites only',workers:[],resources:{},errors:[]};
+  const state={version:'1.1.0',running:true,stopping:false,started:new Date().toISOString(),mode:'Practice websites only',workers:[],resources:{},errors:[]};
   const save=()=>atomicJson(join(data,'status.json'),state);
   function stop(){
     if(stopping)return;stopping=true;state.stopping=true;writeFileSync(stopPath,'stop');save();
@@ -124,8 +124,8 @@ export async function run(options,trainerRoot=root){
       }
       const report=JSON.parse(readFileSync(reportPath,'utf8'));
       row.latest={baseline:report.baseline,after:report.after_training,compiledSkills:report.compiled_skills,teacherDemonstrations:report.teacher_demonstrations,
-        eligibleForReview:report.eligible_for_review,browserVersion:report.browser_version};
-      row.verifiedPractice+=report.verified_search_practice;row.error=null;failures=0;
+        lessonCounts:report.lesson_counts,capabilities:report.compiled_capabilities,eligibleForReview:report.eligible_for_review,browserVersion:report.browser_version};
+      row.verifiedPractice+=report.verified_lesson_practice??report.verified_search_practice;row.error=null;failures=0;
       completed++;sessionRounds++;row.completedRounds=completed;row.phase='Batch saved';
       atomicJson(recordPath,{completedRounds:completed});trimReports(folder,20);save();
     }

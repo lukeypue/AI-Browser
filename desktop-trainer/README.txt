@@ -1,6 +1,10 @@
-SITE BRAIN WINDOWS TRAINER 1.0.0
+SITE BRAIN WINDOWS TRAINER 1.1.0
 
 Luke, start here:
+
+For this update, stop the old trainer and extract this ZIP into a new folder.
+You can start fresh: no copying is needed. It will relearn search alongside the
+new lessons. Keep the old folder as a backup of your earlier practice.
 
 1. Right-click the ZIP and choose Extract All. Keep the whole folder together.
 2. Open the extracted Site-Brain-Trainer folder.
@@ -16,7 +20,8 @@ Luke, start here:
 
 You do not need marketplace passwords, API keys, or a cloud account.
 This version uses four practice workers and makes no paid AI calls. It practices
-searches, filters, listing details, and getting out of controlled failure cases
+12 lessons per batch: three each for search, price filters, opening listings,
+and pagination, plus separate tests of controlled failure cases
 using our actual Kotlin brain and shipped browser observation code.
 
 Important: the practice websites are synthetic. This is not browsing KSL,
@@ -29,8 +34,8 @@ their results are not automatically merged.
 WHAT YOU WILL SEE
 - Before / After practice: objective test pass rate, including safe failure cases.
 - Saved skills: verified reusable procedures in that worker's practice memory.
-- Verified search practice: successful search lessons this session, not general
-  intelligence or real-site mastery.
+- Verified lessons: successful search, filter, detail, and pagination lessons
+  this session. The dashboard also shows counts by lesson.
 - Computer CPU/memory: overall computer resource use, not just this program.
 
 STOP AND RESUME

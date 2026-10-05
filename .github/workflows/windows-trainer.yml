@@ -1,7 +1,7 @@
 name: Windows browser trainer
 on:
   push:
-    branches: [codex/windows-browser-trainer]
+    branches: [codex/windows-browser-trainer, codex/trainer-curriculum-update]
   pull_request:
     paths: [desktop-trainer/**, ai-browser/brain-core/**, scripts/package-desktop-trainer.py, .github/workflows/windows-trainer.yml]
   workflow_dispatch:
@@ -67,6 +67,22 @@ jobs:
           if ($resumed.after_training.compiled_reuse -lt 1 -or $resumed.teacher_demonstrations -gt 1) { throw 'Saved learning was not reused' }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Control.ps1" -Action Results -NoPause
           if ($LASTEXITCODE -ne 0) { throw 'Results export failed' }
+      - name: Varied curriculum saves four capabilities
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Run.ps1" -Workers 1 -Rounds 1 -TrainingCount 12 -EvaluationCount 4 -NoBrowser -NoPause
+          if ($LASTEXITCODE -ne 0) { throw 'Varied curriculum failed' }
+          $report = Get-Content "$env:TRAINER_ROOT\data\worker-1\batch-00000003.json" -Raw | ConvertFrom-Json
+          foreach ($lesson in @('search','constrain_numeric','open_item','next_page')) {
+            if ($report.lesson_counts.$lesson -ne 3) { throw "Lesson did not verify: $lesson" }
+            if ($report.compiled_capabilities -notcontains $lesson) { throw "No compiled procedure: $lesson" }
+          }
+          if ($report.after_training.rare_classification_errors -ne 0 -or $report.after_training.success_rate -ne 1) { throw 'Held-out objective failed' }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Run.ps1" -Workers 1 -Rounds 1 -TrainingCount 12 -EvaluationCount 2 -NoBrowser -NoPause
+          if ($LASTEXITCODE -ne 0) { throw 'Drawer curriculum failed' }
+          $drawer = Get-Content "$env:TRAINER_ROOT\data\worker-1\batch-00000004.json" -Raw | ConvertFrom-Json
+          if ($drawer.lesson_counts.constrain_numeric -ne 3) { throw 'Drawer lessons did not verify' }
+          if (-not ($drawer.evaluation_rows | Where-Object { $_.reused_capabilities -contains 'constrain_numeric' })) { throw 'Compiled drawer filter was not reused in held-out evaluation' }
       - name: Actual launch, duplicate protection, dashboard, and stop
         shell: pwsh
         run: |
@@ -74,6 +90,7 @@ jobs:
           $node = Join-Path "$env:TRAINER_ROOT\.runtime" $paths.node
           & $node "$env:TRAINER_ROOT\tests\station-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { throw 'Launcher lifecycle smoke failed' }
+          if (Get-ChildItem "$env:TRAINER_ROOT\data\worker-*\worker-errors.log" | Select-String -Pattern 'EPIPE') { throw 'Shutdown produced a broken-pipe error' }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [IO.Compression.ZipFile]::OpenRead("$env:TRAINER_ROOT\Site-Brain-Training-Results.zip")
           try { if ($zip.Entries.FullName -notcontains 'bundle-manifest.json') { throw 'Results omit build identity' } }

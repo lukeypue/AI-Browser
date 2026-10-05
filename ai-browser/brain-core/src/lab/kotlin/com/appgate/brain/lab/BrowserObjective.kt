@@ -7,6 +7,25 @@ import com.appgate.brain.model.*
 object BrowserObjective {
     fun safeCheckpoint(training:List<JsonObject>,evaluation:List<JsonObject>):Boolean =
         (training+evaluation).all { it.optInt("unsafe_actions")==0&&it.optInt("false_verified_claims")==0&&it.optInt("hard_violations")==0 }
+    /** Practice lessons earn credit for their own outcome, not a full vehicle search. */
+    fun scoreLesson(truth:JsonObject,task:TaskLedger,intendedItem:String?=task.currentItem):JsonObject {
+        val reached=when(task.lesson){
+            "search"->truth.optString("appliedQuery")==task.goal.query
+            "constrain_numeric"->truth.optObject("appliedFilters")?.optString("price_max")=="8000"
+            "open_item"->intendedItem!=null&&truth.optArray("catalog")?.objects()?.any { it.optString("key")==intendedItem&&it.optString("path")==truth.optString("path") }==true
+            "next_page"->truth.optInt("page")>=2
+            else->false
+        }
+        val full=score(truth,task,false,"none")
+        val unsafe=truth.optInt("unsafeActions")
+        val verified=task.status==TaskStatus.DONE&&task.lesson in task.successfulSkills&&reached&&unsafe==0&&full.optInt("false_verified_claims")==0&&full.optInt("hard_violations")==0
+        return JsonObject().put("success",verified).put("lesson",task.lesson).put("lesson_verified",verified)
+            .put("unsafe_actions",unsafe).put("false_verified_claims",full.optInt("false_verified_claims")).put("hard_violations",full.optInt("hard_violations"))
+            .put("rare_classification_errors",0).put("returned_matches",0).put("expected_matches",0)
+            .put("status",task.status.name).put("reason",task.terminalReason)
+            .put("compiled_reuse",task.steps.any { it.source.startsWith("skill:compiled_")&&it.status==VerifyStatus.VERIFIED })
+    }
+
     fun score(truth:JsonObject,task:TaskLedger,missingMileage:Boolean,fault:String):JsonObject {
         val eligible=truth.optStrings("eligible").toSet()
         val catalog=truth.optArray("catalog")?.objects().orEmpty().associateBy { it.optString("key") }

@@ -70,6 +70,20 @@ object ConstraintEvaluator {
 
     fun evaluate(c: Constraint, text: String, price: Int?, mileage: Int?, year: Int?, detail: Boolean, evidence: MutableList<Evidence>): Verdict {
         val lower = text.lowercase()
+        if (c.key == "axle_ratio" && c.op == ConstraintOp.CONTAINS && detail) {
+            val wanted = Regex("[0-9][.:][0-9]{2}").find(c.value)?.value?.replace(':', '.')
+            val context = "(?:axle(?: ratio)?|gear(?:s| ratio)?|rear end|differential(?: ratio)?)"
+            val ratio = "([0-9][.:][0-9]{2})"
+            val matches = (Regex("\\b$ratio\\s+$context\\b").findAll(lower).map { it.groupValues[1] } +
+                Regex("\\b$context\\s*[:=]?\\s*$ratio\\b").findAll(lower).map { it.groupValues[1] }).map { it.replace(':', '.') }.toSet()
+            if (wanted != null && matches.isNotEmpty()) {
+                if (matches.size > 1) return Verdict.UNKNOWN
+                if (matches.single() != wanted) {
+                    evidence += Evidence(c.key, window(text, lower.indexOf(matches.single()).coerceAtLeast(0)), "text")
+                    return Verdict.VIOLATED
+                }
+            }
+        }
         return when (c.key) {
             "price" -> numeric(c, price, "price", evidence)
             "mileage" -> numeric(c, mileage, "mileage", evidence)

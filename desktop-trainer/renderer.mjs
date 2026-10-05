@@ -65,18 +65,37 @@ export async function createBrowserSession() {
   return session;
 }
 
+// A parent may stop between a request and its reply. EPIPE is normal shutdown,
+// not a new worker crash; keep an error listener installed through async emission.
+export function createProtocolWriter(output) {
+  let closed=false, failure;
+  output.on('error',error=>{closed=true;if(error.code!=='EPIPE')failure=error;});
+  return async message=>{
+    if(failure)throw failure;
+    if(closed||output.destroyed)return false;
+    return new Promise((resolve,reject)=>{
+      output.write(JSON.stringify(message)+'\n',error=>{
+        if(!error)return resolve(true);
+        closed=true;
+        if(error.code==='EPIPE')resolve(false);else reject(error);
+      });
+    });
+  };
+}
+
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const session=await createBrowserSession();
   const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
+  const reply=createProtocolWriter(process.stdout);
   try{
     for await(const line of lines){
       let request;
       try{
         request=JSON.parse(line);
         const result=await session.handle(request.op,request.payload||{});
-        process.stdout.write(JSON.stringify({id:request.id,ok:true,result})+'\n');
+        if(!await reply({id:request.id,ok:true,result}))break;
         if(request.op==='close')break;
-      }catch(error){process.stdout.write(JSON.stringify({id:request?.id,ok:false,error:String(error.message)})+'\n');}
+      }catch(error){if(!await reply({id:request?.id,ok:false,error:String(error.message)}))break;}
     }
   }finally{await session.close();}
 }

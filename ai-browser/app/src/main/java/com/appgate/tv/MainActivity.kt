@@ -14,6 +14,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.appgate.brain.memory.TeacherBudget
 import com.appgate.brain.profile.SiteProfiles
 import com.appgate.tv.browser.BrainRuntime
 import com.appgate.tv.service.BrainService
@@ -144,7 +145,7 @@ class MainActivity : AppCompatActivity() {
         val endpoint = EditText(this).apply { hint = "Custom HTTPS operation URL (optional)"; setText(oldEndpoint); setSingleLine(true) }
         container.addView(provider); container.addView(enabled); container.addView(input); container.addView(model); container.addView(endpoint)
         val builder = AlertDialog.Builder(this).setTitle("AI planner")
-            .setMessage("Local skills run first. AI help is limited to 6 requests per hour and 24 per 24 hours, shared across searches and learning. Turn help off for zero API calls. Keys are stored encrypted. Each provider has its own billing and data terms.")
+            .setMessage("Local skills run first. AI help is limited to ${TeacherBudget.HOURLY_LIMIT} requests per hour and ${TeacherBudget.DAILY_LIMIT} per 24 hours, shared across searches and learning. Turn help off for zero API calls. Keys are stored encrypted. Each provider has its own billing and data terms.")
             .setView(container)
             .setPositiveButton("SAVE") save@ { _, _ ->
                 val key = input.text?.toString().orEmpty().trim()
