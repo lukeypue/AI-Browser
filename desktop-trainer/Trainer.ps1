@@ -80,6 +80,7 @@ $timer = New-Object Windows.Forms.Timer; $timer.Interval = 1000
 $timer.Add_Tick({
     try {
         $running = Get-Running
+        if ($script:Closing -and $running) { Stop-Training }
         if ($script:TrainerProcess -and $script:TrainerProcess.HasExited) {
             $launchCode = $script:TrainerProcess.ExitCode; $script:TrainerProcess.Dispose(); $script:TrainerProcess = $null
             if (-not $script:Operation) {
@@ -110,28 +111,28 @@ $timer.Add_Tick({
         $buttons['Update'].Enabled = -not $script:PendingUpdate -and -not $script:Operation
         $import.Enabled = -not $running -and -not $busy
         if ($running) {
-            if (-not $script:PendingUpdate) { $script:Status.Text = 'Training is running. Stop saves your progress.' }
+            if (-not $script:PendingUpdate -and -not $script:Closing) { $script:Status.Text = 'Training is running. Stop saves your progress.' }
             $rows = @($script:Live.workers | ForEach-Object { 'Worker ' + $_.number + ': ' + $_.phase + ' | ' + $_.completedRounds + ' saved batches | ' + $_.verifiedPractice + ' verified lessons this session' })
             $summary.Text = 'CPU: ' + $script:Live.resources.cpuPercent + '% | Memory: ' + $script:Live.resources.memoryUsedGB + ' GB' + [Environment]::NewLine + [Environment]::NewLine + ($rows -join [Environment]::NewLine)
         } elseif (Test-Path (Join-Path $Data 'status.json')) {
             $saved = Get-Content (Join-Path $Data 'status.json') -Raw | ConvertFrom-Json
             $summary.Text = 'Saved batches: ' + (($saved.workers | Measure-Object completedRounds -Sum).Sum) + '. Start continues from saved memories.'
         }
-        if ($script:Closing -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) { $form.Close() }
+        if ($script:Closing -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) { if ($SmokeTest) { $script:SmokePhase = 4 }; $form.Close() }
         if ($SmokeTest) {
             if (((Get-Date) - $script:StartedAt).TotalSeconds -gt 90) { throw 'Control window smoke timed out.' }
             if ($script:SmokePhase -eq 0 -and $running) {
                 $bitmap = New-Object Drawing.Bitmap($form.Width,$form.Height); $form.DrawToBitmap($bitmap, $form.ClientRectangle); $bitmap.Save((Join-Path $Data 'control-window-smoke.png')); $bitmap.Dispose()
                 $script:SmokePhase = 1; $buttons['Download Results'].PerformClick() }
             elseif ($script:SmokePhase -eq 1 -and $running -and -not $script:Operation) { $script:SmokePhase = 2; $buttons['Stop'].PerformClick() }
-            elseif ($script:SmokePhase -eq 2 -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) { $script:SmokePhase = 3; $form.Close() }
+            elseif ($script:SmokePhase -eq 2 -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) { $script:SmokePhase = 3; $buttons['Start'].Enabled = $true; $buttons['Start'].PerformClick(); $form.Close() }
         }
     } catch { $script:Status.Text = $_.Exception.Message; if ($SmokeTest) { $script:SmokeFailure = $_.Exception.Message; $form.Close() } }
 })
 $form.Add_FormClosing({
     param($sender,$eventArgs)
-    if (-not $SmokeTest -and ((Get-Running) -or $script:Operation -or $script:TrainerProcess)) { $eventArgs.Cancel = $true; $script:Closing = $true; Stop-Training; $script:Status.Text = 'Stopping safely before closing...' }
+    if ((-not $SmokeTest -or $script:SmokePhase -eq 3) -and ((Get-Running) -or $script:Operation -or $script:TrainerProcess)) { $eventArgs.Cancel = $true; $script:Closing = $true; Stop-Training; $script:Status.Text = 'Stopping safely before closing...' }
 })
 $form.Add_Shown({ $timer.Start(); if ($SmokeTest) { $buttons['Start'].PerformClick() } })
 [void]$form.ShowDialog(); $timer.Stop(); $timer.Dispose()
-if ($SmokeTest -and ($script:SmokeFailure -or $script:SmokePhase -ne 3)) { throw ('Control window failed: ' + $script:SmokeFailure) }
+if ($SmokeTest -and ($script:SmokeFailure -or $script:SmokePhase -ne 4)) { throw ('Control window failed: ' + $script:SmokeFailure) }
