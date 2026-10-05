@@ -109,9 +109,8 @@ object LearningOpportunities {
             val target = target(page, item.id)
             // A dialog prerequisite is not evidence of the hidden page's other capabilities.
             if (target?.skillId == "dismiss_dialog" && item.id != "dismiss_dialog") continue
-            val shape = Hashing.short("${page.pageType}|${page.dialogOpen}|${page.resultKeys.isNotEmpty()}|" + safe.map {
-                "${it.role}:${canonical(it.facetKey)}:${it.facetKind}:${it.tag}:${it.choices.size}"
-            }.distinct().sorted().joinToString("|"))
+            val shape = Hashing.short("${page.pageType}|${page.dialogOpen}|${target?.skillId}|" +
+                com.appgate.brain.memory.FailedStrategies.controlShape(page, target?.skillId ?: item.id))
             // A normal results -> drawer -> results cycle is not a repaired layout.
             val changedLayout = item.observedPage == page.pageType.name && item.opportunityShape.isNotBlank() && item.opportunityShape != shape
             val newlyExposedTarget = item.opportunity == "ABSENT" && target?.skillId == item.id

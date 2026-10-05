@@ -175,4 +175,37 @@ class OpportunityCurriculumTest {
         assertEquals("an empty observation must not schedule a guessed lesson", "", Curriculum.nextLesson(site, now))
         assertEquals(0, site.curriculum.count { it.done })
     }
+    @Test fun unrelatedFilterChurnDoesNotResetFailedListingLessonCooldown() {
+        val site = siteOnly("open_item")
+        val page = results()
+        observe(site, page)
+        val lesson = site.curriculum.single { it.id == "open_item" }
+        lesson.retryAt = now + 15 * 60_000L
+        val changed = page.copy(affordances = page.affordances + Affordance("unrelated", Role.FACET_OPEN, "transmission", tag = "button"))
+        observe(site, changed, now + 1)
+        assertEquals(now + 15 * 60_000L, lesson.retryAt)
+        assertEquals("", Curriculum.nextLesson(site, now + 1, changed))
+    }
+
+    @Test fun unrelatedFilterChurnDoesNotReopenFailedListingTeacherRepair() {
+        val site = siteOnly("open_item")
+        val page = results()
+        val steps = listOf(Step(StepKind.CLICK, Role.RESULT_ITEM, arg = "\$item"))
+        val key = FailedStrategies.key(page, "open_item", steps)
+        repeat(2) { FailedStrategies.record(site, key, false, now) }
+        val changed = page.copy(affordances = page.affordances + Affordance("unrelated", Role.FACET_OPEN, "transmission", tag = "button"))
+        assertFalse(FailedStrategies.allowed(site, FailedStrategies.key(changed, "open_item", steps), now + 1))
+    }
+
+    @Test fun optionCountChurnDoesNotReopenFailedFilterTeacherRepair() {
+        val site = siteOnly("select_facet")
+        val control = Affordance("make", Role.FACET, "make", "choice", tag = "select", choices = listOf("Ford", "Toyota"))
+        val page = results().copy(affordances = listOf(control))
+        val steps = listOf(Step(StepKind.SELECT, Role.FACET, facetKey = "make", arg = "Ford"))
+        val key = FailedStrategies.key(page, "select_facet", steps)
+        repeat(2) { FailedStrategies.record(site, key, false, now) }
+        val changed = page.copy(affordances = listOf(control.copy(choices = control.choices + "Honda")))
+        assertFalse(FailedStrategies.allowed(site, FailedStrategies.key(changed, "select_facet", steps), now + 1))
+    }
+
 }

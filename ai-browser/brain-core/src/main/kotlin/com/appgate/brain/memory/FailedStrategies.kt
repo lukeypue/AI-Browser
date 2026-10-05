@@ -15,10 +15,29 @@ object FailedStrategies {
 
     fun facet(key: String?): String? = key?.takeIf { it.removeSuffix("_min").removeSuffix("_max") in Vocabulary.facetLexicon }
 
-    fun key(sps: SemanticPageState, capability: String, steps: List<Step>? = null, params: Map<String, String> = emptyMap()): String {
-        val controls = sps.affordances.filter { it.visible && it.role != Role.RESULT_ITEM }.map {
-            "${it.role}:${facet(it.facetKey)}:${it.tag}:${it.enabled}:${it.regionRole}"
+    /** Only controls for the failing operation can reopen its cooldown. Listings,
+     * filter option counts and unrelated header controls routinely change on live pages.
+     * This signature remains content-free and ignores result identities/counts. */
+    fun controlShape(sps: SemanticPageState, capability: String): String {
+        val roles = when (capability) {
+            "search" -> setOf(Role.SEARCH_BOX, Role.SUBMIT)
+            "open_item", "go_back" -> setOf(Role.RESULT_ITEM)
+            "expand_description" -> setOf(Role.EXPAND_TEXT, Role.RESULT_ITEM)
+            "next_page" -> setOf(Role.PAGE_NEXT)
+            "load_more" -> setOf(Role.LOAD_MORE)
+            "scroll_results" -> setOf(Role.RESULT_ITEM, Role.LOAD_MORE, Role.PAGE_NEXT)
+            "sort_results" -> setOf(Role.SORT)
+            "dismiss_dialog" -> setOf(Role.CLOSE)
+            "constrain_numeric", "select_facet", "open_filters", "open_facet", "apply_filters" -> setOf(Role.FACET, Role.FACET_OPEN, Role.FACET_APPLY, Role.CLOSE)
+            else -> null
+        }
+        return sps.affordances.filter { it.visible && (roles == null || it.role in roles) }.map {
+            "${it.role}:${facet(it.facetKey)}:${it.facetKind}:${it.tag}:${it.enabled}:${it.regionRole}"
         }.distinct().sorted().joinToString("|")
+    }
+
+    fun key(sps: SemanticPageState, capability: String, steps: List<Step>? = null, params: Map<String, String> = emptyMap()): String {
+        val controls = controlShape(sps, capability)
         val procedure = steps?.joinToString("|") {
             val f = it.facetKey?.let { k -> if (k.startsWith("$")) params[k.drop(1)] else k }
             "${it.kind}:${it.role}:${facet(f)}:${it.submit}:${it.optional}"

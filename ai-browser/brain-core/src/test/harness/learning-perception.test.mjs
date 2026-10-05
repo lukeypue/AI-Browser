@@ -136,3 +136,50 @@ for (const button of ['<button type="submit">Go</button>', '<button type="submit
     } finally { await page.close(); }
   });
 }
+
+test('training follows a current listing href when its script cancels synthetic clicks', async () => {
+  const page = await fixture(style + '<main><section>' + cards(3).replaceAll('<a ', '<a onclick="event.preventDefault()" ') + '</section></main>');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    await page.evaluate(() => window.__brainExecute({cmd: 'guard', mode: 'TRAIN'}));
+    const item = obs.items[1];
+    await page.evaluate(({obs, item}) => window.__brainExecute({cmd: 'click', id: item.aff, expectedDocumentId: obs.documentId, expectedUrl: obs.url}), {obs, item});
+    await page.waitForURL('**/item/100002', {timeout: 1500});
+  } finally { await page.close(); }
+});
+
+test('training refuses a listing whose observed href changed before execution', async () => {
+  const page = await fixture(style + '<main><section>' + cards(3) + '</section></main>');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    await page.evaluate(() => { window.__brainExecute({cmd: 'guard', mode: 'TRAIN'}); document.querySelector('a.card').href = '/checkout'; });
+    const result = await page.evaluate(({obs}) => window.__brainExecute({cmd: 'click', id: obs.items[0].aff, expectedDocumentId: obs.documentId, expectedUrl: obs.url}), {obs});
+    assert.equal(result.detail, 'STALE_TARGET');
+    assert.equal(page.url(), obs.url);
+  } finally { await page.close(); }
+});
+
+test('unrelated thumbnail loading does not hold stable results busy', async () => {
+  const page = await fixture(style + '<main><section>' + cards(3) + '</section></main><img id="thumbnail"><script>setInterval(() => { document.querySelector("#thumbnail").src="/thumb.png?t="+Date.now() }, 100)</script>');
+  try {
+    await page.route('**/thumb.png?*', route => route.fulfill({contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=', 'base64')}));
+    await page.waitForTimeout(900);
+    assert.equal((await page.evaluate(() => window.__brainObserve())).settle.state, 'IDLE');
+  } finally { await page.close(); }
+});
+
+test('an actual results loader keeps the page busy', async () => {
+  const page = await fixture(style + '<main aria-busy="true"><section>' + cards(3) + '</section><div role="progressbar">Loading results</div></main>');
+  try {
+    await page.waitForTimeout(900);
+    assert.equal((await page.evaluate(() => window.__brainObserve())).settle.state, 'BUSY');
+  } finally { await page.close(); }
+});
+
+test('an offscreen lazy loader does not block visible stable results', async () => {
+  const page = await fixture(style + '<main><section>' + cards(3) + '</section><div style="margin-top:3000px" class="skeleton">Loading more images</div></main>');
+  try {
+    await page.waitForTimeout(900);
+    assert.equal((await page.evaluate(() => window.__brainObserve())).settle.state, 'IDLE');
+  } finally { await page.close(); }
+});

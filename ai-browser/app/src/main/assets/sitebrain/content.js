@@ -574,6 +574,10 @@
             const a = r.attributeName || "";
             if (a === "class" || a === "style" || a.startsWith("data-") || a === "aria-selected" || a === "tabindex") continue;
           }
+          // Thumbnail src churn does not change listing controls/text. The next
+          // semantic observation still verifies any genuine result/detail change.
+          if (r.type === "attributes" && r.target && /^(IMG|SOURCE|VIDEO)$/.test(r.target.tagName || "") &&
+              /^(src|srcset|sizes|poster|loading|decoding)$/.test(r.attributeName || "")) continue;
           counted++;
         }
         if (counted > 0) { lastMutationAt = now; mutationsWindow.push(now); }
@@ -585,7 +589,7 @@
           for (const e of list.getEntries()) {
             const name = e.name || "";
             if (/analytics|beacon|pixel|doubleclick|googletagmanager|facebook\.com\/tr|hotjar|segment|sentry|datadog|newrelic|collect\?/i.test(name)) continue;
-            if (e.initiatorType === "beacon") continue;
+            if (["beacon", "img", "image", "css", "video", "audio"].includes(e.initiatorType)) continue;
             lastResourceAt = Math.max(lastResourceAt, e.responseEnd || e.startTime + (e.duration || 0));
           }
         });
@@ -594,7 +598,7 @@
     }
     function busyCount() {
       try {
-        return Array.from(document.querySelectorAll('[aria-busy="true"], [role=progressbar], progress:not([value="100"]), .spinner, .loading, .skeleton, [class*="skeleton" i], [class*="spinner" i], [class*="shimmer" i], [data-loading="true"]')).filter(visible).length;
+        return Array.from(document.querySelectorAll('[aria-busy="true"], [role=progressbar], progress:not([value="100"]), .spinner, .loading, .skeleton, [class*="skeleton" i], [class*="spinner" i], [class*="shimmer" i], [data-loading="true"]')).filter(el => visible(el) && inViewport(el.getBoundingClientRect())).length;
       } catch (e) { return 0; }
     }
     function state() {
@@ -803,11 +807,11 @@
         const listingHref = lastListingLinks.get(cmd.id);
         if (guard.mode === "TRAIN" && listingHref && el.tagName === "A") {
           if (el.href !== listingHref) return { ok: false, detail: "STALE_TARGET" };
-          // Gecko refuses unattended popups. Keep this observed read-only listing in
-          // the owned session; normal clicks and manual browsing retain their targets.
-          const target = el.getAttribute("target");
-          try { el.setAttribute("target", "_self"); realClick(el); }
-          finally { if (target === null) el.removeAttribute("target"); else el.setAttribute("target", target); }
+          if (el.disabled || el.getAttribute("aria-disabled") === "true") return { ok: false, detail: "TARGET_DISABLED" };
+          // Use the current observed listing route in the owned session. Scripts can
+          // cancel untrusted clicks or open a popup even with target=_self. This is
+          // navigation only; Kotlin still verifies the matching detail afterwards.
+          location.assign(listingHref);
         } else realClick(el);
         return { ok: true, detail: "clicked" };
       }
