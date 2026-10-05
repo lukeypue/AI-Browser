@@ -18,6 +18,8 @@ $Log = Join-Path $Data 'control-window.log'
 function Start-Operation([string]$File, [string]$Arguments = '') {
     $script:OperationName = $File
     $launched = Start-Process powershell.exe -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $script:Root $File) + '" -NoPause ' + $Arguments) -WindowStyle Hidden -PassThru -RedirectStandardOutput $(if ($File -eq 'Run.ps1') { Join-Path $Data 'training-launch.log' } else { $Log }) -RedirectStandardError (Join-Path $Data ($File + '-errors.log'))
+    # Cache the handle so Windows PowerShell 5.1 reports the real exit code.
+    $null = $launched.Handle
     if ($File -eq 'Run.ps1') { $script:TrainerProcess = $launched } else { $script:Operation = $launched }
 }
 function Get-Running {
