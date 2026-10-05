@@ -32,7 +32,7 @@ try {
     } finally { $Archive.Dispose() }
     Expand-Archive -LiteralPath $Zip -DestinationPath $Stage
     & $Node (Join-Path $PSScriptRoot 'update.mjs') (Join-Path $Stage 'Site-Brain-Trainer') $PSScriptRoot --refresh
-    if ($LASTEXITCODE -ne 0) { throw 'Update was not installed. The previous program and saved training remain.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Update did not finish. Saved training remains. If browser setup failed, press Start to retry.' }
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
