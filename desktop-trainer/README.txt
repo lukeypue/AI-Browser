@@ -1,66 +1,47 @@
-SITE BRAIN WINDOWS TRAINER 1.1.0
+SITE BRAIN TRAINER 1.1.0 — WINDOWS 11
 
-Luke, start here:
+ONE WINDOW
+Extract this ZIP into a folder you will keep. Double-click Trainer.cmd.
+Use Start, Stop, Download Results, and Update in that window.
+The first Start installs portable Java, Node, and Chromium automatically.
+No administrator access is needed. Keep the window open while training.
+Closing it stops training safely. Start resumes saved worker memories.
 
-For this update, stop the old trainer and extract this ZIP into a new folder.
-You can start fresh: no copying is needed. It will relearn search alongside the
-new lessons. Keep the old folder as a backup of your earlier practice.
+KEEP YOUR CURRENT TRAINING
+Stop the old trainer. Open the new Trainer.cmd and click Import Previous
+Training BEFORE its first Start. Select your old Site-Brain-Trainer folder
+(the folder containing data). Your old folder remains as a backup.
+If you prefer a fresh start, just press Start without importing.
 
-1. Right-click the ZIP and choose Extract All. Keep the whole folder together.
-2. Open the extracted Site-Brain-Trainer folder.
-3. Double-click 1-Setup.cmd. It downloads the tools and a practice browser.
-   The first setup needs internet and may take several minutes.
-4. When it says READY, double-click 2-Start.cmd.
-5. A progress dashboard opens. Leave the launcher window open and the laptop
-   plugged in. The screen can turn off while the launcher keeps Windows awake.
-6. Let it run for about 30 minutes for the first test. Check that workers keep
-   completing and saving batches. Then let it run longer if it is working.
-7. Click Stop training on the dashboard, or double-click 3-Stop.cmd.
-8. Double-click 4-Results.cmd. Send Site-Brain-Training-Results.zip in our chat.
+FUTURE UPDATES
+Click Update. Training stops first, the tested update downloads and is
+checked, then program files are replaced in this same folder. Memories,
+completed batches, and portable browser tools stay here. Press Start to
+resume. Updating needs an internet connection. A damaged download is
+rejected before your program files change. Previous program files are
+kept in .update-backup. Do not delete the trainer folder between updates.
 
-You do not need marketplace passwords, API keys, or a cloud account.
-This version uses four practice workers and makes no paid AI calls. It practices
-12 lessons per batch: three each for search, price filters, opening listings,
-and pagination, plus separate tests of controlled failure cases
-using our actual Kotlin brain and shipped browser observation code.
+DOWNLOAD RESULTS
+Click Download Results. Site-Brain-Training-Results.zip is saved in your
+Windows Downloads folder. Send that ZIP in our AI Browser chat. Export
+works during training; only completed batches should be used for review.
+The latest export replaces the previous results ZIP in Downloads.
 
-Important: the practice websites are synthetic. This is not browsing KSL,
-OfferUp, or Facebook. Passing practice does not prove that real sites work.
-Saved practice stays on this computer. It is not automatically imported into
-your phone or used to retrain a large AI model. We review the results and proven
-skills before making another phone update. Each worker has separate memory;
-their results are not automatically merged.
+WHAT IT PRACTICES
+Four workers by default. Each batch has 12 lessons: three searches,
+three numeric price filters, three exact listing openings, and three
+next-page lessons. Workers save verified reusable procedures and test
+on separate cases. Filters alternate between inline controls and drawers.
+The dashboard shows saved batches and verified lessons this session.
+Each worker retains its latest 20 reports; its memory is retained.
 
-WHAT YOU WILL SEE
-- Before / After practice: objective test pass rate, including safe failure cases.
-- Saved skills: verified reusable procedures in that worker's practice memory.
-- Verified lessons: successful search, filter, detail, and pagination lessons
-  this session. The dashboard also shows counts by lesson.
-- Computer CPU/memory: overall computer resource use, not just this program.
+LIMITS
+Practice is on controlled HTML marketplaces. No paid AI calls or
+marketplace account logins are used. A passing practice test does not
+prove real KSL, OfferUp, or Facebook performance. Training memories are
+saved locally for review, not automatically imported into your phone.
+Keep using phone version 7.2.5 while the laptop practices.
 
-STOP AND RESUME
-Previous completed batches and memory are saved in data/worker-N. Start again
-with 2-Start.cmd to reuse them. Stop may interrupt the current batch; earlier
-checkpoints remain. Only the latest 20 reports per worker are kept. A worker
-stops after two repeated process errors. Check its error message and send results.
-Do not close the laptop lid if Windows is configured to sleep when it closes.
-
-TROUBLESHOOTING
-- Run files from the extracted folder, not from inside the ZIP viewer.
-- Setup stopped: read its message, check internet, then run 1-Setup.cmd again.
-- No dashboard: look in the launcher for the local http://127.0.0.1 address.
-- Already running: use 3-Stop.cmd or the existing dashboard before starting.
-- Damaged memory: keep the old folder for review and extract a fresh trainer copy.
-- Put the laptop on a dry hard surface with vents clear. Keep it away from A/C
-  condensation. Stop if it overheats or becomes unstable.
-
-First setup uses official Node.js and Eclipse Temurin portable downloads with
-SHA-256 checks, then Playwright's browser installer. It does not change the
-system PATH, install a service, or change permanent Windows execution settings.
-The dashboard listens only on this computer. The training browser cannot reach
-real websites: its requests are restricted to intercepted practice pages.
-
-SETTINGS (optional; default is suitable for your 32 GB laptop)
-Advanced users may run Run.ps1 with -Workers 1 to reduce load or -Workers 6
-after measuring resource use. Maximum allowed is 8. More workers are not proof
-of better learning. Start with four and review real results before increasing.
+OLDER COMMANDS
+1-Setup.cmd, 2-Start.cmd, 3-Stop.cmd, and 4-Results.cmd remain available.
+Trainer.cmd is the normal one-window entry point.

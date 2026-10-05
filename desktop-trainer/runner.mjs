@@ -1,3 +1,4 @@
+import {acquireStationLock} from './update.mjs';
 import {createServer} from 'node:http';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
@@ -68,7 +69,8 @@ export async function run(options,trainerRoot=root){
     try{process.kill(old.pid,0);throw new Error('The trainer is already running. Use 3-Stop.cmd before starting another copy.');}
     catch(e){if(e.code!=='ESRCH')throw e;unlinkSync(lockPath);}
   }
-  const lock=openSync(lockPath,'wx');writeFileSync(lock,JSON.stringify({pid:process.pid}));closeSync(lock);
+  const releaseStation=acquireStationLock(root);
+  try{const lock=openSync(lockPath,'wx');writeFileSync(lock,JSON.stringify({pid:process.pid}));closeSync(lock);}catch(e){releaseStation();throw e;}
   let dashboard,resources;
   try{
   if(existsSync(stopPath))unlinkSync(stopPath);
@@ -145,6 +147,7 @@ export async function run(options,trainerRoot=root){
     clearInterval(resources);
     if(dashboard)await dashboard.close();
     if(existsSync(lockPath))unlinkSync(lockPath);
+    releaseStation();
   }
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){

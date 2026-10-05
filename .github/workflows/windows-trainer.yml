@@ -6,7 +6,7 @@ on:
     paths: [desktop-trainer/**, ai-browser/brain-core/**, scripts/package-desktop-trainer.py, .github/workflows/windows-trainer.yml]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   windows:
     runs-on: windows-latest
@@ -65,7 +65,7 @@ jobs:
           if ($saved.completedRounds -ne 2) { throw 'Restart did not preserve progress' }
           $resumed = Get-Content "$env:TRAINER_ROOT\data\worker-1\batch-00000002.json" -Raw | ConvertFrom-Json
           if ($resumed.after_training.compiled_reuse -lt 1 -or $resumed.teacher_demonstrations -gt 1) { throw 'Saved learning was not reused' }
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Control.ps1" -Action Results -NoPause
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Control.ps1" -Action Results -NoPause -DestinationDirectory "$env:TRAINER_ROOT"
           if ($LASTEXITCODE -ne 0) { throw 'Results export failed' }
       - name: Varied curriculum saves four capabilities
         shell: pwsh
@@ -95,6 +95,46 @@ jobs:
           $zip = [IO.Compression.ZipFile]::OpenRead("$env:TRAINER_ROOT\Site-Brain-Training-Results.zip")
           try { if ($zip.Entries.FullName -notcontains 'bundle-manifest.json') { throw 'Results omit build identity' } }
           finally { $zip.Dispose() }
+      - name: In-place update preserves memory and resumes learned procedures
+        shell: pwsh
+        run: |
+          $memory = "$env:TRAINER_ROOT\data\worker-1\memory.json"
+          $record = "$env:TRAINER_ROOT\data\worker-1\worker.json"
+          $memoryHash = (Get-FileHash $memory).Hash
+          $recordHash = (Get-FileHash $record).Hash
+          $archive = (Resolve-Path dist/Site-Brain-Trainer.zip).Path
+          $hash = (Get-FileHash $archive).Hash.ToLowerInvariant()
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Update.ps1" -ArchivePath $archive -ExpectedHash $hash -NoPause
+          if ($LASTEXITCODE -ne 0) { throw 'In-place update failed' }
+          if ((Get-FileHash $memory).Hash -ne $memoryHash -or (Get-FileHash $record).Hash -ne $recordHash) { throw 'Update changed saved learning' }
+          $saved = Get-Content $record -Raw | ConvertFrom-Json
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Run.ps1" -Workers 1 -Rounds 1 -TrainingCount 12 -EvaluationCount 2 -NoBrowser -NoPause
+          if ($LASTEXITCODE -ne 0) { throw 'Updated trainer could not resume' }
+          $after = Get-Content $record -Raw | ConvertFrom-Json
+          if ($after.completedRounds -ne ($saved.completedRounds + 1)) { throw 'Update lost progress' }
+          $batch = Join-Path (Split-Path $record) ('batch-' + $after.completedRounds.ToString('00000000') + '.json')
+          $report = Get-Content $batch -Raw | ConvertFrom-Json
+          if ($report.after_training.compiled_reuse -lt 1) { throw 'Update did not retain learned procedures' }
+      - name: One control window starts, stops, and saves to Downloads
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$env:TRAINER_ROOT\Trainer.ps1" -SmokeTest
+          if ($LASTEXITCODE -ne 0) { throw 'Control window failed' }
+          $downloads = (New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path
+          if (-not (Test-Path (Join-Path $downloads 'Site-Brain-Training-Results.zip'))) { throw 'Results were not saved to Downloads' }
+      - name: Publish tested trainer update
+        if: github.event_name == 'push' && github.ref == 'refs/heads/codex/trainer-curriculum-update'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "Trainer 1.1.0. One control window; updates preserve memories. Source: $env:GITHUB_SHA"
+          gh release view site-brain-trainer-latest --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) { gh release create site-brain-trainer-latest --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'Site Brain Trainer' --latest=false --notes $notes }
+          gh release upload site-brain-trainer-latest dist/Site-Brain-Trainer.zip --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Trainer upload failed' }
+          gh release edit site-brain-trainer-latest --repo $env:GITHUB_REPOSITORY --latest=false --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Trainer release update failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: Site-Brain-Trainer-Windows

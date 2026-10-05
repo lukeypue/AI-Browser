@@ -17,6 +17,7 @@ function Get-CheckedArchive([string]$Url, [string]$Hash, [string]$Destination) {
 }
 try {
     if (-not [Environment]::Is64BitOperatingSystem) { throw 'This trainer requires 64-bit Windows.' }
+    Remove-Item -LiteralPath (Join-Path $RuntimeRoot 'ready.txt') -Force -ErrorAction SilentlyContinue
     $SetupHandle = [IO.File]::Open((Join-Path $RuntimeRoot 'setup.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     $Manifest = Get-Content -LiteralPath (Join-Path $TrainerRoot 'bundle-manifest.json') -Raw | ConvertFrom-Json
     foreach ($Entry in $Manifest.files.PSObject.Properties) {
@@ -70,7 +71,7 @@ try {
     } finally { Pop-Location; $env:PATH = $PreviousPath }
     Set-Content -LiteralPath (Join-Path $RuntimeRoot 'ready.txt') -Value 'Setup complete' -Encoding ASCII
     Write-Host ''
-    Write-Host 'READY. Double-click 2-Start.cmd to begin training.' -ForegroundColor Green
+    Write-Host 'READY. Open Trainer.cmd and press Start.' -ForegroundColor Green
 } catch {
     Write-Host ('SETUP STOPPED: ' + $_.Exception.Message) -ForegroundColor Red
     Write-Host 'Your existing app and its learning were not changed.'

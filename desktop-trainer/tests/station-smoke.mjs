@@ -70,7 +70,7 @@ try{
   assert.equal(controlled.code,0,controlled.output);
   assert.equal(existsSync(join(data,'runner.lock')),false);
   assert.throws(()=>process.kill(connection.pid,0));
-  const exportRun=command('Control.ps1',['-Action','Results','-NoPause']);
+  const exportRun=command('Control.ps1',['-Action','Results','-NoPause','-DestinationDirectory',root]);
   assert.equal((await exportRun.done).code,0);
   assert.equal(existsSync(join(root,'Site-Brain-Training-Results.zip')),true);
   console.log('Actual Windows launch, duplicate protection, dashboard, stop, and saved memory passed.');
