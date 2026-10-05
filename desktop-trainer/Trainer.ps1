@@ -95,7 +95,7 @@ $timer.Add_Tick({
             $code = $script:Operation.ExitCode; $name = $script:OperationName; $script:Operation.Dispose(); $script:Operation = $null
             $script:Status.Text = (Get-Content $Log -Raw).Trim()
             if ($script:Status.Text.Length -gt 240) { $script:Status.Text = $script:Status.Text.Substring([Math]::Max(0,$script:Status.Text.Length - 240)) }
-            if ($name -eq 'Setup.ps1' -and $script:StartAfterSetup -and $code -eq 0) { $script:StartAfterSetup = $false; $buttons['Start'].PerformClick() }
+            if ($name -eq 'Setup.ps1' -and $script:StartAfterSetup -and $code -eq 0 -and -not $script:Closing) { $script:StartAfterSetup = $false; $buttons['Start'].Enabled = $true; $buttons['Start'].PerformClick() }
         }
         if ($script:PendingUpdate -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) {
             $script:PendingUpdate = $false
@@ -122,9 +122,9 @@ $timer.Add_Tick({
             if (((Get-Date) - $script:StartedAt).TotalSeconds -gt 90) { throw 'Control window smoke timed out.' }
             if ($script:SmokePhase -eq 0 -and $running) {
                 $bitmap = New-Object Drawing.Bitmap($form.Width,$form.Height); $form.DrawToBitmap($bitmap, $form.ClientRectangle); $bitmap.Save((Join-Path $Data 'control-window-smoke.png')); $bitmap.Dispose()
-                $script:SmokePhase = 1; $buttons['Stop'].PerformClick() }
-            elseif ($script:SmokePhase -eq 1 -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) { $script:SmokePhase = 2; $buttons['Download Results'].PerformClick() }
-            elseif ($script:SmokePhase -eq 2 -and -not $script:Operation) { $script:SmokePhase = 3; $form.Close() }
+                $script:SmokePhase = 1; $buttons['Download Results'].PerformClick() }
+            elseif ($script:SmokePhase -eq 1 -and $running -and -not $script:Operation) { $script:SmokePhase = 2; $buttons['Stop'].PerformClick() }
+            elseif ($script:SmokePhase -eq 2 -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) { $script:SmokePhase = 3; $form.Close() }
         }
     } catch { $script:Status.Text = $_.Exception.Message; if ($SmokeTest) { $script:SmokeFailure = $_.Exception.Message; $form.Close() } }
 })
