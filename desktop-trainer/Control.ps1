@@ -15,12 +15,15 @@ try {
         }
         New-Item -ItemType Directory -Path $DestinationDirectory -Force | Out-Null
         $Results = Join-Path $DestinationDirectory 'Site-Brain-Training-Results.zip'
-        $Items = @(Get-ChildItem -LiteralPath $Data | Where-Object { $_.Name -ne 'connection.json' -and $_.Name -ne 'runner.lock' -and $_.Name -ne 'stop-requested' -and $_.Extension -ne '.log' })
-        if ($Items.Count -eq 0) { throw 'No completed practice results are available yet.' }
-        $ExportPaths = @($Items.FullName)
-        $BuildManifest = Join-Path $PSScriptRoot 'bundle-manifest.json'
-        if (Test-Path -LiteralPath $BuildManifest) { $ExportPaths += $BuildManifest }
-        Compress-Archive -LiteralPath $ExportPaths -DestinationPath $Results -Force
+        $Paths = Get-Content (Join-Path $PSScriptRoot '.runtime\paths.json') -Raw | ConvertFrom-Json
+        $Node = Join-Path $PSScriptRoot ('.runtime\' + $Paths.node)
+        $Snapshot = Join-Path ([IO.Path]::GetTempPath()) ('Site-Brain-Results-' + [guid]::NewGuid().ToString('N'))
+        try {
+            & $Node (Join-Path $PSScriptRoot 'export.mjs') $PSScriptRoot $Snapshot
+            if ($LASTEXITCODE -ne 0) { throw 'Results could not be captured. Saved training remains; try Download Results again.' }
+            $Items = @(Get-ChildItem -LiteralPath $Snapshot)
+            Compress-Archive -LiteralPath @($Items.FullName) -DestinationPath $Results -Force
+        } finally { if (Test-Path $Snapshot) { Remove-Item -LiteralPath $Snapshot -Recurse -Force } }
         Write-Host 'Send this ZIP in our AI Browser chat:'
         Write-Host $Results -ForegroundColor Green
         if (-not $NoPause) { Invoke-Item $DestinationDirectory }

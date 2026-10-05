@@ -1,0 +1,20 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+const m=await import('../export.mjs').catch(()=>({}));
+test('results snapshot retains completed memory and diagnostics while excluding connections and partial writes',()=>{
+ assert.equal(typeof m.snapshotTraining,'function','Results snapshots are missing');
+ const root=mkdtempSync(join(tmpdir(),'trainer export ')),dest=mkdtempSync(join(tmpdir(),'trainer snapshot '));
+ const data=join(root,'data');mkdirSync(join(data,'worker-1'),{recursive:true});
+ for(const [name,value] of [['worker-1/memory.json','saved memory'],['worker-1/worker-errors.log','diagnostics'],['worker-1/memory.json.tmp','incomplete'],['connection.json','private connection'],['runner.lock','active pid'],['control-window.log','open control output']])writeFileSync(join(data,name),value);
+ writeFileSync(join(root,'bundle-manifest.json'),'build identity');
+ m.snapshotTraining(root,dest);
+ assert.equal(readFileSync(join(dest,'worker-1','memory.json'),'utf8'),'saved memory');
+ assert.equal(readFileSync(join(dest,'worker-1','worker-errors.log'),'utf8'),'diagnostics');
+ assert.equal(readFileSync(join(dest,'bundle-manifest.json'),'utf8'),'build identity');
+ for(const name of ['worker-1/memory.json.tmp','connection.json','runner.lock','control-window.log'])assert.equal(existsSync(join(dest,name)),false);
+ writeFileSync(join(data,'worker-1','memory.json'),'newer memory');
+ assert.equal(readFileSync(join(dest,'worker-1','memory.json'),'utf8'),'saved memory');
+});
