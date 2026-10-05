@@ -15,7 +15,7 @@ try {
         }
         New-Item -ItemType Directory -Path $DestinationDirectory -Force | Out-Null
         $Results = Join-Path $DestinationDirectory 'Site-Brain-Training-Results.zip'
-        $Items = @(Get-ChildItem -LiteralPath $Data | Where-Object { $_.Name -ne 'connection.json' -and $_.Name -ne 'runner.lock' -and $_.Name -ne 'stop-requested' })
+        $Items = @(Get-ChildItem -LiteralPath $Data | Where-Object { $_.Name -ne 'connection.json' -and $_.Name -ne 'runner.lock' -and $_.Name -ne 'stop-requested' -and $_.Extension -ne '.log' })
         if ($Items.Count -eq 0) { throw 'No completed practice results are available yet.' }
         $ExportPaths = @($Items.FullName)
         $BuildManifest = Join-Path $PSScriptRoot 'bundle-manifest.json'

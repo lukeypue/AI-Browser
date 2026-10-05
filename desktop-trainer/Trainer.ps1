@@ -9,6 +9,7 @@ $script:TrainerProcess = $null
 $script:PendingUpdate = $false
 $script:StartAfterSetup = $false
 $script:Closing = $false
+$script:StopRequested = $false
 $script:SmokePhase = 0
 $script:StartedAt = Get-Date
 $Data = Join-Path $script:Root 'data'
@@ -30,6 +31,7 @@ function Get-Running {
     } catch { return $false }
 }
 function Stop-Training {
+    $script:StopRequested = $true
     if (Get-Running) {
         $c = Get-Content (Join-Path $Data 'connection.json') -Raw | ConvertFrom-Json
         Invoke-RestMethod ($c.url + '/stop') -Method Post -Headers @{ 'X-Trainer-Token' = $c.token } -TimeoutSec 5 | Out-Null
@@ -52,11 +54,12 @@ $note = New-Object Windows.Forms.Label; $note.Text = 'Updates keep saved memorie
 $buttons['Start'].Add_Click({
     try {
         if ((Get-Running) -or $script:Operation -or $script:TrainerProcess) { return }
+        $script:StopRequested = $false
         if (-not (Test-Path (Join-Path $script:Root '.runtime\ready.txt'))) { $script:StartAfterSetup = $true; Start-Operation 'Setup.ps1'; $script:Status.Text = 'Setting up the browser tools. This can take several minutes.' }
         else { Start-Operation 'Run.ps1' ('-NoBrowser' + $(if ($SmokeTest) { ' -Workers 1 -TrainingCount 2 -EvaluationCount 2' } else { '' })); $script:Status.Text = 'Starting training from saved memories...' }
     } catch { $script:Status.Text = $_.Exception.Message }
 })
-$buttons['Stop'].Add_Click({ try { Stop-Training; $script:Status.Text = 'Stopping and keeping saved training...' } catch { $script:Status.Text = $_.Exception.Message } })
+$buttons['Stop'].Add_Click({ try { $script:StartAfterSetup = $false; Stop-Training; $script:Status.Text = 'Stopping and keeping saved training...' } catch { $script:Status.Text = $_.Exception.Message } })
 $buttons['Download Results'].Add_Click({ try { Start-Operation 'Control.ps1' '-Action Results'; $script:Status.Text = 'Saving the results ZIP to Downloads...' } catch { $script:Status.Text = $_.Exception.Message } })
 $buttons['Update'].Add_Click({
     try { $script:PendingUpdate = $true; Stop-Training; $script:Status.Text = 'Stopping training, then checking for an update...' }
@@ -64,7 +67,7 @@ $buttons['Update'].Add_Click({
 })
 $import.Add_Click({
     try {
-        if (Get-Running) { throw 'Stop training before importing.' }
+        if ((Get-Running) -or $script:TrainerProcess -or $script:Operation) { throw 'Stop training before importing.' }
         if (@(Get-ChildItem $Data -Directory -Filter 'worker-*').Count -gt 0) { throw 'This program already has saved worker memories. Import into a new trainer folder to avoid overwriting them.' }
         $picker = New-Object Windows.Forms.FolderBrowserDialog; $picker.Description = 'Select your previous Site-Brain-Trainer folder (the one with data inside).'
         if ($picker.ShowDialog() -eq [Windows.Forms.DialogResult]::OK) {
@@ -80,9 +83,9 @@ $timer = New-Object Windows.Forms.Timer; $timer.Interval = 1000
 $timer.Add_Tick({
     try {
         $running = Get-Running
-        if ($script:Closing -and $running) { Stop-Training }
+        if (($script:Closing -or $script:PendingUpdate -or $script:StopRequested) -and $running) { Stop-Training }
         if ($script:TrainerProcess -and $script:TrainerProcess.HasExited) {
-            $launchCode = $script:TrainerProcess.ExitCode; $script:TrainerProcess.Dispose(); $script:TrainerProcess = $null
+            $launchCode = $script:TrainerProcess.ExitCode; $script:TrainerProcess.Dispose(); $script:TrainerProcess = $null; $script:StopRequested = $false
             if (-not $script:Operation) {
                 if ($launchCode -ne 0) {
                     $failure = @(Get-Content (Join-Path $Data 'training-launch.log') -Tail 3 -ErrorAction SilentlyContinue) + @(Get-Content (Join-Path $Data 'Run.ps1-errors.log') -Tail 3 -ErrorAction SilentlyContinue)
@@ -93,10 +96,11 @@ $timer.Add_Tick({
         $m = Get-Content (Join-Path $script:Root 'bundle-manifest.json') -Raw | ConvertFrom-Json
         $version.Text = 'Trainer ' + $m.version + ' | Search, price filters, listing details, and pagination'
         if ($script:Operation -and $script:Operation.HasExited) {
-            $code = $script:Operation.ExitCode; $name = $script:OperationName; $script:Operation.Dispose(); $script:Operation = $null
+            $code = $script:Operation.ExitCode; $name = $script:OperationName;
+            if ($SmokeTest -and $code -ne 0) { throw ('Control operation failed: ' + $name + ' ' + (Get-Content $Log -Raw)) } $script:Operation.Dispose(); $script:Operation = $null
             $script:Status.Text = (Get-Content $Log -Raw).Trim()
             if ($script:Status.Text.Length -gt 240) { $script:Status.Text = $script:Status.Text.Substring([Math]::Max(0,$script:Status.Text.Length - 240)) }
-            if ($name -eq 'Setup.ps1' -and $script:StartAfterSetup -and $code -eq 0 -and -not $script:Closing) { $script:StartAfterSetup = $false; $buttons['Start'].Enabled = $true; $buttons['Start'].PerformClick() }
+            if ($name -eq 'Setup.ps1' -and $script:StartAfterSetup -and $code -eq 0 -and -not $script:Closing -and -not $script:PendingUpdate -and -not $script:StopRequested) { $script:StartAfterSetup = $false; $buttons['Start'].Enabled = $true; $buttons['Start'].PerformClick() }
         }
         if ($script:PendingUpdate -and -not $running -and -not $script:Operation -and -not $script:TrainerProcess) {
             $script:PendingUpdate = $false
@@ -105,13 +109,13 @@ $timer.Add_Tick({
         }
         $busy = [bool]$script:Operation -or $script:PendingUpdate
         $buttons['Start'].Enabled = -not $running -and -not $busy -and -not $script:TrainerProcess
-        $buttons['Stop'].Enabled = $running
+        $buttons['Stop'].Enabled = $running -or [bool]$script:TrainerProcess
         $buttons['Download Results'].Enabled = -not $busy
         # Run.ps1 is the running operation; updating queues until it exits.
         $buttons['Update'].Enabled = -not $script:PendingUpdate -and -not $script:Operation
-        $import.Enabled = -not $running -and -not $busy
+        $import.Enabled = -not $running -and -not $busy -and -not $script:TrainerProcess
         if ($running) {
-            if (-not $script:PendingUpdate -and -not $script:Closing) { $script:Status.Text = 'Training is running. Stop saves your progress.' }
+            if (-not $script:PendingUpdate -and -not $script:Closing -and -not $script:StopRequested) { $script:Status.Text = 'Training is running. Stop saves your progress.' }
             $rows = @($script:Live.workers | ForEach-Object { 'Worker ' + $_.number + ': ' + $_.phase + ' | ' + $_.completedRounds + ' saved batches | ' + $_.verifiedPractice + ' verified lessons this session' })
             $summary.Text = 'CPU: ' + $script:Live.resources.cpuPercent + '% | Memory: ' + $script:Live.resources.memoryUsedGB + ' GB' + [Environment]::NewLine + [Environment]::NewLine + ($rows -join [Environment]::NewLine)
         } elseif (Test-Path (Join-Path $Data 'status.json')) {
