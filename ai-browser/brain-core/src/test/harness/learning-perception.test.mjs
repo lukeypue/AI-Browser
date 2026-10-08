@@ -183,3 +183,25 @@ test('an offscreen lazy loader does not block visible stable results', async () 
     assert.equal((await page.evaluate(() => window.__brainObserve())).settle.state, 'IDLE');
   } finally { await page.close(); }
 });
+
+
+test('a newly connected document applies TRAIN from the action envelope', async () => {
+  const page = await fixture(style + '<main><section>' + cards(3).replaceAll('<a ', '<a onclick="event.preventDefault()" ') + '</section></main>');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    await page.evaluate(({obs}) => window.__brainExecute({cmd:'click', guardMode:'TRAIN', id:obs.items[0].aff, expectedDocumentId:obs.documentId, expectedUrl:obs.url}), {obs});
+    await page.waitForURL('**/item/100001', {timeout:1500});
+  } finally { await page.close(); }
+});
+
+test('TRAIN action envelopes block commit controls and OFF restores manual actions', async () => {
+  const page = await fixture('<button onclick="window.sent=(window.sent||0)+1">Send</button>');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    const blocked = await page.evaluate(({obs}) => window.__brainExecute({cmd:'click', guardMode:'TRAIN', id:obs.elements[0].id, expectedDocumentId:obs.documentId, expectedUrl:obs.url}), {obs});
+    assert.equal(blocked.detail, 'GUARD_BLOCKED');
+    assert.equal(await page.evaluate(() => window.sent || 0), 0);
+    await page.evaluate(({obs}) => window.__brainExecute({cmd:'click', guardMode:'OFF', id:obs.elements[0].id, expectedDocumentId:obs.documentId, expectedUrl:obs.url}), {obs});
+    assert.equal(await page.evaluate(() => window.sent || 0), 1);
+  } finally { await page.close(); }
+});

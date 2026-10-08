@@ -127,8 +127,17 @@ class BrainEngine(
                     site.curriculum.filter { !it.done }.none { LearningOpportunities.target(p, it.id) != null } &&
                     knownSearch != null && knownSearch != current
             } == true
+            // Description practice can start on this detail page. Back practice needs
+            // a results checkpoint in the new lesson ledger, so first reestablish results.
+            val usableDetail = page?.let { p ->
+                if (p.pageType != PageType.DETAIL) false else {
+                    Curriculum.observe(site, p, clock())
+                    Curriculum.nextLesson(site, clock(), p) == "expand_description" &&
+                        LearningOpportunities.target(p, "expand_description")?.skillId == "expand_description"
+                }
+            } == true
             // Always observe an already open auth/challenge before navigating elsewhere.
-            if (page?.isHumanOnly != true && (page == null || strandedResults || page.pageType == PageType.DETAIL ||
+            if (page?.isHumanOnly != true && (page == null || strandedResults || (page.pageType == PageType.DETAIL && !usableDetail) ||
                     (page.pageType in setOf(PageType.HOME, PageType.UNKNOWN) && knownSearch != null))) {
                 val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }
                     ?: profile.startUrl.takeIf { allowedUrl(probe, it, profile) } ?: return@runCatching null

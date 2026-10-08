@@ -208,4 +208,61 @@ class OpportunityCurriculumTest {
         assertFalse(FailedStrategies.allowed(site, FailedStrategies.key(changed, "select_facet", steps), now + 1))
     }
 
+    @Test fun absentDetailLessonCanUseALiveListingPrerequisiteAfterRestart() {
+        val site = siteOnly("expand_description")
+        val lesson = site.curriculum.single { it.id == "expand_description" }
+        lesson.opportunity = "ABSENT"; lesson.observedAt = now - 10
+        lesson.observedPage = "DETAIL"; site.learningObservedAt = now - 10
+        val restored = SiteModel.fromJson(Json.parseObject(site.toJson().toString()))
+        val page = results()
+        observe(restored, page)
+        assertEquals("expand_description", Curriculum.nextLesson(restored, now, page))
+        assertEquals("open_item", LearningOpportunities.target(page, "expand_description")!!.skillId)
+        assertFalse(restored.curriculum.single { it.id == "expand_description" }.done)
+        restored.curriculum.single { it.id == "expand_description" }.retryAt = now + 60_000
+        assertEquals("", Curriculum.nextLesson(restored, now, page))
+    }
+
+    @Test fun detailProbeKeepsAnUnfinishedDescriptionLessonOnItsCurrentPage() {
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/item/1", 1000) }
+        val memory = Memory(InMemoryStorage()) { now }
+        val site = memory.site(fake.host)
+        Curriculum.ensure(site)
+        site.curriculum.filter { it.id != "expand_description" }.forEach { it.completedAt = now - 1 }
+        var navigations = 0
+        val renderer = object : Renderer by fake {
+            override fun observe(timeoutMs: Long): String {
+                val raw = Json.parseObject(fake.observe(timeoutMs))
+                raw.optArray("elements")!!.add(JsonObject().put("id", "expand").put("tag", "button")
+                    .put("name", "Read more").put("expanded", false).put("visible", true).put("enabled", true).put("sameSite", true))
+                return raw.toString()
+            }
+            override fun navigate(url: String, timeoutMs: Long): RendererResult { navigations++; return fake.navigate(url, timeoutMs) }
+        }
+        val engine = BrainEngine(renderer, memory, { null }, object : EngineEvents {}, config = EngineConfig(pacingOverrideMs = 0)) { now }
+        val observed = engine.probeLearning(profile().copy(searchUrl = "https://fake.market/search?q={q}", trainingQueries = listOf("Ford")))!!
+        assertEquals(PageType.DETAIL, observed.pageType)
+        assertEquals(0, navigations)
+        assertEquals("expand_description", Curriculum.nextLesson(site, now, observed))
+        assertFalse(site.curriculum.single { it.id == "expand_description" }.done)
+        site.curriculum.single { it.id == "go_back" }.completedAt = 0
+        site.curriculum.single { it.id == "expand_description" }.retryAt = now + 60_000
+        val backProbe = engine.probeLearning(profile().copy(searchUrl = "https://fake.market/search?q={q}", trainingQueries = listOf("Ford")))!!
+        assertEquals("a cooling description cannot strand back practice on detail", PageType.RESULTS, backProbe.pageType)
+        assertEquals("go_back", Curriculum.nextLesson(site, now, backProbe))
+    }
+
+    @Test fun backLessonReestablishesResultsAndVerifiesItsReturn() {
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/item/1", 1000) }
+        val memory = Memory(InMemoryStorage()) { now }
+        val site = memory.site(fake.host)
+        Curriculum.ensure(site)
+        site.curriculum.filter { it.id != "go_back" }.forEach { it.completedAt = now - 1 }
+        val events = object : EngineEvents {}
+        val engine = BrainEngine(fake, memory, { null }, events, config = EngineConfig(pacingOverrideMs = 0, ambiguousRecheckMs = 0)) { now }
+        val p = profile().copy(searchUrl = "https://fake.market/search?q={q}", trainingQueries = listOf("Ford"), minActionIntervalMs = 0)
+        LearningSession(engine, memory, events, listOf(p), clock = { now }).run(maxSites = 1)
+        assertTrue("back verifies from a known results checkpoint", site.curriculum.single { it.id == "go_back" }.done)
+    }
+
 }

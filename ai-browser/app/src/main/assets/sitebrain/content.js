@@ -793,6 +793,8 @@
   }
 
   async function execute(cmd) {
+    // The native session carries mode across documents; apply it before any action.
+    if (typeof cmd.guardMode === "string") guard.setMode(cmd.guardMode);
     const acts = new Set(['click', 'type', 'select', 'set_range', 'scroll', 'dismiss', 'navigate', 'back']);
     if (acts.has(cmd.cmd) && (cmd.expectedDocumentId !== documentId || cmd.expectedUrl !== location.href)) {
       return { ok: false, detail: 'STALE_DOCUMENT' };

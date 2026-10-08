@@ -65,10 +65,17 @@ object Curriculum {
         ensure(site)
         val order = listOf("search", "constrain_numeric", "open_item", "next_page", "load_more", "scroll_results", "select_facet", "sort_results", "expand_description", "go_back", "dismiss_dialog")
         val eligible = site.curriculum.filter {
-            it.retryAt <= now && (it.opportunity == "AVAILABLE" || (site.learningObservedAt == 0L && it.opportunity == "UNKNOWN") ||
-                (page != null && !it.done && site.curriculum.any { prerequisite -> prerequisite.id == "search" && prerequisite.done } &&
-                    LearningOpportunities.target(page, it.id)?.skillId == "search")) &&
-                (page == null || LearningOpportunities.target(page, it.id) != null)
+            val live = page?.let { p -> LearningOpportunities.target(p, it.id) }
+            // A detail-only ABSENT observation cannot suppress an available results
+            // prerequisite. It still needs its own verified skill to complete.
+            val prerequisite = page != null && !it.done && when (live?.skillId) {
+                "search" -> site.curriculum.any { item -> item.id == "search" && item.done }
+                "open_item" -> it.id in setOf("expand_description", "go_back")
+                else -> false
+            }
+            it.retryAt <= now && (it.opportunity == "AVAILABLE" ||
+                (site.learningObservedAt == 0L && it.opportunity == "UNKNOWN") || prerequisite) &&
+                (page == null || live != null)
         }
         if (allLessonsComplete(site)) return eligible.minByOrNull { it.completedAt }?.id.orEmpty()
         return eligible.filter { !it.done }.minWithOrNull(compareBy<CurriculumItem> { it.blocked + it.unavailable }.thenBy { order.indexOf(it.id) })?.id.orEmpty()

@@ -200,7 +200,15 @@ class BrainSession(private val context: Context, private val runtime: GeckoRunti
                     pending.removeOwner(port).forEach { it.completeExceptionally(PortLost("port lost (navigation)")) }
                 }
             })
+            // A new document starts with its own guard OFF; restore the session mode.
+            postContentMode(port)
         }
+    }
+
+    private fun postContentMode(port: WebExtension.Port) {
+        val mode = pendingNetMode?.optString("mode") ?: "OFF"
+        val command = JsonObject().put("cmd", "guard").put("mode", mode).put("reqId", 0)
+        runCatching { port.postMessage(JSONObject(command.toString())) }
     }
 
     private val netMessageDelegate = object : WebExtension.MessageDelegate {
@@ -217,7 +225,7 @@ class BrainSession(private val context: Context, private val runtime: GeckoRunti
         }
     }
 
-    private var pendingNetMode: JsonObject? = null
+    @Volatile private var pendingNetMode: JsonObject? = null
     @Volatile var teachListener: ((JsonObject) -> Unit)? = null
 
     private fun failAllPending(reason: String) {
@@ -239,7 +247,6 @@ class BrainSession(private val context: Context, private val runtime: GeckoRunti
         val id = reqIds.getAndIncrement()
         val future = CompletableFuture<JsonObject>()
         command.put("reqId", id)
-        val payload = JSONObject(command.toString())
         main.post {
             if (future.isDone) return@post
             val port = ports[mainSession]
@@ -247,6 +254,9 @@ class BrainSession(private val context: Context, private val runtime: GeckoRunti
             else {
                 pending.put(id, port, future)
                 if (future.isDone) { pending.remove(id); return@post }
+                // Apply mode in the same message as the action, including after navigation.
+                command.put("guardMode", pendingNetMode?.optString("mode") ?: "OFF")
+                val payload = JSONObject(command.toString())
                 runCatching { port.postMessage(payload) }.onFailure { pending.remove(id); future.completeExceptionally(PortLost("post failed")) }
             }
         }
@@ -301,7 +311,10 @@ class BrainSession(private val context: Context, private val runtime: GeckoRunti
     fun setNetworkMode(mode: String, allow: List<String>, commit: List<String>) {
         val msg = JsonObject().put("type", "NET_MODE").put("mode", mode).putStrings("allow", allow).putStrings("commit", commit)
         pendingNetMode = msg
-        main.post { runCatching { netPort?.postMessage(JSONObject(msg.toString())) } }
+        main.post {
+            runCatching { netPort?.postMessage(JSONObject(msg.toString())) }
+            ports.values.toList().forEach { postContentMode(it) }
+        }
     }
 
     fun openNetworkGrant(ttlMs: Long) = main.post { runCatching { netPort?.postMessage(JSONObject(JsonObject().put("type", "NET_GRANT").put("ttlMs", ttlMs).toString())) } }
