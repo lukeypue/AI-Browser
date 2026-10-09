@@ -25,6 +25,19 @@ object SemanticDiagnostics {
         .put("closers", sps.byRole(Role.CLOSE).size).put("dialog", sps.dialogOpen)
         .put("auth_wall", sps.authWall).put("challenge", sps.challenge).put("settle", sps.settle.name)
 
+    fun learningRecheck(site: SiteModel, sps: SemanticPageState?, now: Long): JsonObject = JsonObject()
+        .put("available", false).put("human_hold", site.learningNeedsHuman)
+        .put("reason", Curriculum.unavailableReason(site, now, sps))
+        .put("page_type", sps?.pageType?.name).put("settle", sps?.settle?.name)
+        .put("pending", site.curriculum.count { !it.done })
+        .put("page", sps?.let { page(it) })
+        .put("pending_states", com.appgate.brain.json.Json.arr(site.curriculum.filter { !it.done }.map { item ->
+            JsonObject().put("lesson", capability(item.id))
+                .put("opportunity", item.opportunity.takeIf { it in setOf("UNKNOWN", "AVAILABLE", "ABSENT") } ?: "UNKNOWN")
+                .put("cooling", item.retryAt > now)
+                .put("live_target", sps?.let { LearningOpportunities.target(it, item.id) }?.skillId?.let { capability(it) })
+        }))
+
     fun action(ledger: TaskLedger, before: SemanticPageState, after: SemanticPageState?, step: Step?, status: VerifyStatus?, code: DiagnosticCode): JsonObject = JsonObject()
         .put("code", code.name).put("status", status?.name).put("phase", ledger.phase.name)
         .put("source", when { ledger.programSource.startsWith("skill:") -> "skill"; ledger.programSource == "planner" -> "planner"; else -> "engine" })

@@ -138,7 +138,8 @@ class BrainEngine(
             } == true
             // Always observe an already open auth/challenge before navigating elsewhere.
             if (page?.isHumanOnly != true && (page == null || strandedResults || (page.pageType == PageType.DETAIL && !usableDetail) ||
-                    (page.pageType in setOf(PageType.HOME, PageType.UNKNOWN) && knownSearch != null))) {
+                    (page.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.UNKNOWN) && !page.dialogOpen &&
+                        page.settle == com.appgate.brain.model.Settle.IDLE && knownSearch != null && knownSearch != current))) {
                 val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }
                     ?: profile.startUrl.takeIf { allowedUrl(probe, it, profile) } ?: return@runCatching null
                 val outcome = executor.execute(Action(ActionKind.NAVIGATE, url = target,

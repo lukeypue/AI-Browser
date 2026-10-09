@@ -43,4 +43,32 @@ class SemanticDiagnosticsTest {
         FailedStrategies.record(reloaded, key, true, 3000)
         assertTrue(FailedStrategies.allowed(reloaded, key, 3001))
     }
+    @Test fun idleRechecksExposeStructuralLessonEligibilityWithoutPageValues() {
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000); page = 2 }
+        val memory = Memory(InMemoryStorage()) { 1000L }
+        val site = memory.site(fake.host)
+        Curriculum.ensure(site)
+        site.curriculum.filter { it.id != "next_page" }.forEach { it.completedAt = 999 }
+        val captured = mutableListOf<com.appgate.brain.json.JsonObject>()
+        val events = object : EngineEvents {
+            override fun diagnostic(host: String, kind: String, data: com.appgate.brain.json.JsonObject) {
+                if (kind == "learning_recheck") captured += data
+            }
+        }
+        val engine = BrainEngine(fake, memory, { null }, events, config = EngineConfig(pacingOverrideMs = 0)) { 1000L }
+        val profile = com.appgate.brain.profile.SiteProfile("fake", "Fake", listOf(fake.host), "https://fake.market/", trainingQueries = listOf("private-query"))
+        LearningSession(engine, memory, events, listOf(profile), clock = { 1000L }).run(maxSites = 1)
+        val diagnostic = captured.single()
+        val pending = diagnostic.optArray("pending_states")
+        assertNotNull("diagnose the eligibility gate instead of only reporting available=false", pending)
+        val lesson = pending!!.objects().single()
+        assertEquals("next_page", lesson.optString("lesson"))
+        assertEquals("ABSENT", lesson.optString("opportunity"))
+        assertFalse(lesson.optBoolean("cooling"))
+        assertNotNull(diagnostic.optObject("page"))
+        assertFalse(diagnostic.toString().contains("private-query"))
+        assertFalse(diagnostic.toString().contains("Ford"))
+        assertFalse(diagnostic.toString().contains("https://"))
+    }
+
 }

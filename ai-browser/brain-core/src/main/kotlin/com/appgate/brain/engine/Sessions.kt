@@ -148,11 +148,7 @@ class LearningSession(
                 if (lesson.isBlank()) {
                     site.learningBlockedUntil = maxOf(clock() + lessonRetryMs, Curriculum.earliestRetryAt(site, clock()))
                     if (!site.learningNeedsHuman) site.lastLearningStatus = "Waiting for an observed lesson opportunity"
-                    events.diagnostic(site.host, "learning_recheck", com.appgate.brain.json.JsonObject()
-                        .put("available", false).put("human_hold", site.learningNeedsHuman)
-                        .put("reason", Curriculum.unavailableReason(site, clock(), page))
-                        .put("page_type", page?.pageType?.name).put("settle", page?.settle?.name)
-                        .put("pending", site.curriculum.count { !it.done }))
+                    events.diagnostic(site.host, "learning_recheck", SemanticDiagnostics.learningRecheck(site, page, clock()))
                     memory.saveSite(site)
                     break
                 }

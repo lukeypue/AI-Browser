@@ -265,4 +265,39 @@ class OpportunityCurriculumTest {
         assertTrue("back verifies from a known results checkpoint", site.curriculum.single { it.id == "go_back" }.done)
     }
 
+    @Test fun knownDismissalCanUnblockAnAbsentUnfinishedLesson() {
+        val site = siteOnly("select_facet")
+        val lesson = site.curriculum.single { it.id == "select_facet" }
+        lesson.opportunity = "ABSENT"; lesson.observedAt = now - 1
+        site.learningObservedAt = now - 1
+        val dialog = results().copy(dialogOpen = true, affordances = listOf(Affordance("close", Role.CLOSE)))
+        observe(site, dialog)
+        assertEquals("select_facet", Curriculum.nextLesson(site, now, dialog))
+        assertEquals("dismiss_dialog", LearningOpportunities.target(dialog, "select_facet")!!.skillId)
+        assertFalse(lesson.done)
+        lesson.retryAt = now + 60_000
+        assertEquals("", Curriculum.nextLesson(site, now, dialog))
+        assertEquals("", Curriculum.nextLesson(site, now + 60_000, dialog.copy(pageType = PageType.AUTH_WALL)))
+    }
+
+    @Test fun emptySearchContextUsesTheKnownResultsRouteBeforeAnotherLesson() {
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=old", 1000) }
+        val raw = Json.parseObject(fake.observe(1000)).put("items", com.appgate.brain.json.JsonArray())
+        raw.optObject("signals")!!.put("resultsHint", false).put("priceCount", 0)
+        raw.put("elements", com.appgate.brain.json.JsonArray().add(JsonObject().put("id", "search").put("tag", "input")
+            .put("type", "search").put("name", "Search").put("visible", true).put("enabled", true)))
+        assertEquals(PageType.SEARCH, SpsParser().parse(raw.toString(), now).pageType)
+        var navigations = 0
+        val renderer = object : Renderer by fake {
+            override fun observe(timeoutMs: Long): String = if (navigations == 0) raw.toString() else fake.observe(timeoutMs)
+            override fun navigate(url: String, timeoutMs: Long): RendererResult { navigations++; return fake.navigate(url, timeoutMs) }
+        }
+        val memory = Memory(InMemoryStorage()) { now }
+        val engine = BrainEngine(renderer, memory, { null }, object : EngineEvents {}, config = EngineConfig(pacingOverrideMs = 0)) { now }
+        val observed = engine.probeLearning(profile().copy(searchUrl = "https://fake.market/search?q={q}", trainingQueries = listOf("Ford")))!!
+        assertEquals(PageType.RESULTS, observed.pageType)
+        assertEquals(1, navigations)
+        assertEquals(0, memory.site(fake.host).lessonOrdinal)
+    }
+
 }

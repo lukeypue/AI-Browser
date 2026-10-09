@@ -17,6 +17,7 @@
   if (window.__aiBrowserBrainInstalled) return;
   window.__aiBrowserBrainInstalled = true;
   const documentId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+  let navigationPending = false;
 
   const MAX_ELEMENTS = 380;
   const MAX_ITEMS = 120;
@@ -622,10 +623,13 @@
       const tick = () => {
         const s = settleTracker.state();
         const sig = quickSignature();
-        if (s.state === "IDLE" && sig === lastSig) idleSamples++; else idleSamples = 0;
+        if (!navigationPending && s.state === "IDLE" && sig === lastSig) idleSamples++; else idleSamples = 0;
         lastSig = sig;
         const elapsed = performance.now() - started;
         if ((idleSamples >= 2 && elapsed >= 350) || elapsed >= capMs) {
+          // If the destination never arrives, release the wait without crediting
+          // the departing document as settled. Normal failures remain bounded.
+          navigationPending = false;
           resolve({ ok: true, state: idleSamples >= 2 ? "IDLE" : "UNKNOWN", waitedMs: Math.round(elapsed), detail: s });
         } else setTimeout(tick, 150);
       };
@@ -813,7 +817,9 @@
           // Use the current observed listing route in the owned session. Scripts can
           // cancel untrusted clicks or open a popup even with target=_self. This is
           // navigation only; Kotlin still verifies the matching detail afterwards.
-          location.assign(listingHref);
+          navigationPending = true;
+          try { location.assign(listingHref); }
+          catch (error) { navigationPending = false; throw error; }
         } else realClick(el);
         return { ok: true, detail: "clicked" };
       }

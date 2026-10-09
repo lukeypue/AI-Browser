@@ -205,3 +205,25 @@ test('TRAIN action envelopes block commit controls and OFF restores manual actio
     assert.equal(await page.evaluate(() => window.sent || 0), 1);
   } finally { await page.close(); }
 });
+
+
+test('a delayed listing response cannot settle the departing results document', async () => {
+  const page = await fixture(style + '<main><section>' + cards(3) + '</section></main>');
+  await page.route('**/item/*', async route => {
+    await new Promise(resolve => setTimeout(resolve, 1400));
+    await route.fulfill({contentType:'text/html', body:'<main><h1>Primary bicycle</h1><p>Description: A bicycle.</p></main>'});
+  });
+  const settled = [];
+  await page.exposeFunction('captureSettle', result => settled.push(result));
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    await page.evaluate(({obs}) => {
+      window.__brainExecute({cmd:'click', guardMode:'TRAIN', id:obs.items[0].aff, expectedDocumentId:obs.documentId, expectedUrl:obs.url})
+        .then(() => window.__brainExecute({cmd:'settle', capMs:2500}))
+        .then(window.captureSettle);
+    }, {obs});
+    await page.waitForTimeout(700);
+    assert.ok(!settled.some(r => r.state === 'IDLE'), 'verification must wait for the destination document');
+    await page.waitForURL('**/item/100001', {timeout:3000});
+  } finally { await page.close(); }
+});

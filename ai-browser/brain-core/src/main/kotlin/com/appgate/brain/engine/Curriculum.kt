@@ -71,6 +71,7 @@ object Curriculum {
             val prerequisite = page != null && !it.done && when (live?.skillId) {
                 "search" -> site.curriculum.any { item -> item.id == "search" && item.done }
                 "open_item" -> it.id in setOf("expand_description", "go_back")
+                "dismiss_dialog" -> true
                 else -> false
             }
             it.retryAt <= now && (it.opportunity == "AVAILABLE" ||
