@@ -48,6 +48,8 @@ object PlannerKeyStore {
     fun clear(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         setStrongerTeacher(context, false)
+        setUnrestrictedRegular(context, false)
+        setUnrestrictedSmarter(context, false)
     }
 
     fun isConfigured(context: Context): Boolean = !load(context).isNullOrBlank()
@@ -61,6 +63,19 @@ object PlannerKeyStore {
     fun teacherEnabled(context: Context): Boolean = context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).getBoolean("teacher_enabled", true)
     fun setTeacherEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putBoolean("teacher_enabled", enabled).apply()
+    }
+
+    fun unrestrictedRegular(context: Context): Boolean = context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).getBoolean("unrestricted_regular", false)
+    fun unrestrictedSmarter(context: Context): Boolean = strongerTeacherEligible(context) &&
+        context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).getBoolean("unrestricted_smarter", false)
+    fun unrestricted(context: Context): Boolean = unrestrictedRegular(context) || unrestrictedSmarter(context)
+    fun setUnrestrictedRegular(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putBoolean("unrestricted_regular", enabled).apply()
+        if (enabled) { setTeacherEnabled(context, true); setStrongerTeacher(context, false) }
+    }
+    fun setUnrestrictedSmarter(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).edit().putBoolean("unrestricted_smarter", enabled && strongerTeacherEligible(context)).apply()
+        if (enabled && strongerTeacherEligible(context)) { setTeacherEnabled(context, true); setStrongerTeacher(context, false) }
     }
 
     fun strongerTeacherUntil(context: Context): Long = context.getSharedPreferences(SETTINGS, Context.MODE_PRIVATE).getLong("stronger_teacher_until", 0L)
@@ -89,9 +104,9 @@ object PlannerKeyStore {
 
     fun config(context: Context): PlannerConfig? {
         val key = load(context) ?: return null
-        return com.appgate.brain.planner.TemporaryTeacher.apply(
-            PlannerConfig(provider = provider(context), apiKey = key, model = model(context), endpoint = endpoint(context)),
-            strongerTeacherUntil(context), System.currentTimeMillis())
+        val base = PlannerConfig(provider = provider(context), apiKey = key, model = model(context), endpoint = endpoint(context))
+        val mode = com.appgate.brain.planner.TeacherMode.selected(unrestrictedRegular(context), unrestrictedSmarter(context))
+        return mode.apply(base)
     }
 
     private fun getOrCreateKey(): SecretKey {

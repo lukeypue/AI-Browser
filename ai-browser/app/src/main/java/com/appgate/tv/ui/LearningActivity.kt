@@ -23,6 +23,8 @@ class LearningActivity : ServiceBoundActivity() {
     private lateinit var progress: LinearLayout
     private lateinit var humanButton: android.widget.Button
     private lateinit var usageView: TextView
+    private lateinit var allowTeacher: android.widget.CheckBox
+    private lateinit var regularTeacher: android.widget.CheckBox
     private lateinit var strongerTeacher: android.widget.CheckBox
     private var updatingTeacher = false
     private val recent = ArrayDeque<String>()
@@ -41,23 +43,38 @@ class LearningActivity : ServiceBoundActivity() {
             Ui.button(this, "PAUSE") { service?.pause() },
             Ui.button(this, "STOP") { service?.stopLearning() }
         ))
-        column.addView(android.widget.CheckBox(this).apply {
+        allowTeacher = android.widget.CheckBox(this).apply {
             text = "Allow AI help: up to ${TeacherBudget.HOURLY_LIMIT} requests/hour and ${TeacherBudget.DAILY_LIMIT}/day. Off = local only."
             setTextColor(Ui.text)
             isChecked = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this@LearningActivity)
             setOnCheckedChangeListener { _, checked ->
-                com.appgate.tv.store.PlannerKeyStore.setTeacherEnabled(this@LearningActivity, checked)
-                refreshProgress()
+                if (!updatingTeacher) {
+                    com.appgate.tv.store.PlannerKeyStore.setTeacherEnabled(this@LearningActivity, checked)
+                    refreshProgress()
+                }
             }
-        })
-        strongerTeacher = android.widget.CheckBox(this).apply {
-            text = "Use stronger OpenAI help for 24 hours (GPT-5.4). Higher cost: about 3.3× mini token rates, plus reasoning tokens. Same ${TeacherBudget.HOURLY_LIMIT}/hour and ${TeacherBudget.DAILY_LIMIT}/day limits; then your usual model resumes."
+        }
+        column.addView(allowTeacher)
+        regularTeacher = android.widget.CheckBox(this).apply {
+            text = "Unrestricted regular AI help — GPT-5.4 mini with OpenAI, or your configured model with another provider. No app hourly/daily cap; API charges apply. Stays on until unchecked."
             setTextColor(Ui.text)
-            isEnabled = com.appgate.tv.store.PlannerKeyStore.strongerTeacherEligible(this@LearningActivity)
-            isChecked = com.appgate.tv.store.PlannerKeyStore.strongerTeacherActive(this@LearningActivity)
+            isChecked = com.appgate.tv.store.PlannerKeyStore.unrestrictedRegular(this@LearningActivity)
             setOnCheckedChangeListener { _, checked ->
                 if (!updatingTeacher) {
-                    com.appgate.tv.store.PlannerKeyStore.setStrongerTeacher(this@LearningActivity, checked)
+                    com.appgate.tv.store.PlannerKeyStore.setUnrestrictedRegular(this@LearningActivity, checked)
+                    refreshProgress()
+                }
+            }
+        }
+        column.addView(regularTeacher)
+        strongerTeacher = android.widget.CheckBox(this).apply {
+            text = "Unrestricted smarter AI help — GPT-5.4 with more reasoning. More expensive; requires OpenAI. No app hourly/daily cap. Stays on until unchecked; takes priority if both boxes are checked."
+            setTextColor(Ui.text)
+            isEnabled = com.appgate.tv.store.PlannerKeyStore.strongerTeacherEligible(this@LearningActivity)
+            isChecked = com.appgate.tv.store.PlannerKeyStore.unrestrictedSmarter(this@LearningActivity)
+            setOnCheckedChangeListener { _, checked ->
+                if (!updatingTeacher) {
+                    com.appgate.tv.store.PlannerKeyStore.setUnrestrictedSmarter(this@LearningActivity, checked)
                     refreshProgress()
                 }
             }
@@ -106,20 +123,26 @@ class LearningActivity : ServiceBoundActivity() {
     private fun refreshProgress() {
         if (::strongerTeacher.isInitialized) {
             updatingTeacher = true
+            allowTeacher.text = if (com.appgate.tv.store.PlannerKeyStore.unrestricted(this)) "Allow AI help. Unrestricted option selected below. Off = local only." else "Allow AI help: up to ${TeacherBudget.HOURLY_LIMIT} requests/hour and ${TeacherBudget.DAILY_LIMIT}/day. Off = local only."
+            allowTeacher.isChecked = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this)
+            regularTeacher.isChecked = com.appgate.tv.store.PlannerKeyStore.unrestrictedRegular(this)
             strongerTeacher.isEnabled = com.appgate.tv.store.PlannerKeyStore.strongerTeacherEligible(this)
-            strongerTeacher.isChecked = com.appgate.tv.store.PlannerKeyStore.strongerTeacherActive(this)
+            strongerTeacher.isChecked = com.appgate.tv.store.PlannerKeyStore.unrestrictedSmarter(this)
             updatingTeacher = false
         }
         val s = service ?: return
-        val usage = s.memory.teacherBudget.snapshot()
+        val unrestricted = com.appgate.tv.store.PlannerKeyStore.unrestricted(this)
+        val usage = s.memory.teacherBudget.snapshot(unrestricted)
         val enabled = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this)
         usageView.text = buildString {
-            append(if (enabled) "AI requests: ${usage.requests24h}/24 in the last 24 hours · ${usage.requestsHour}/6 in the last hour" else "Local-only mode · no new AI API calls")
+            append(if (enabled) "AI requests: ${usage.requests24h} in 24 hours · ${usage.requestsHour} in the last hour" else "Local-only mode · no new AI API calls")
             append("\nReported tokens: ${usage.inputTokens} in / ${usage.outputTokens} out (${usage.reportedRequests} responses)")
-            if (com.appgate.tv.store.PlannerKeyStore.strongerTeacherActive(this@LearningActivity)) {
-                val minutes = ((com.appgate.tv.store.PlannerKeyStore.strongerTeacherUntil(this@LearningActivity) - System.currentTimeMillis()) / 60_000L).coerceAtLeast(1)
-                append("\nStronger teacher: $minutes minutes remaining")
+            if (com.appgate.tv.store.PlannerKeyStore.unrestrictedSmarter(this@LearningActivity)) {
+                append("\nSelected: smarter AI · unrestricted until unchecked")
             }
+            else if (com.appgate.tv.store.PlannerKeyStore.unrestrictedRegular(this@LearningActivity)) append("\nSelected: regular AI · unrestricted until unchecked")
+            if (enabled) append(if (unrestricted) "\nNo app request cap. Provider rate and spending limits still apply." else "\nApp limits: ${TeacherBudget.HOURLY_LIMIT}/hour · ${TeacherBudget.DAILY_LIMIT}/24 hours")
+            if (enabled && !com.appgate.tv.store.PlannerKeyStore.isConfigured(this@LearningActivity)) append("\nSet an AI planner key on the home screen to use AI help.")
             if (usage.lastModel.isNotBlank()) append("\nLast model: ${usage.lastModel}")
             if (enabled && !usage.allowed) append("\n${usage.reason}")
         }

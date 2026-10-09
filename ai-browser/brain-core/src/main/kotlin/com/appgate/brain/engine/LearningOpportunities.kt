@@ -41,6 +41,8 @@ object LearningOpportunities {
             return LearningTarget("search")
         val results = page.pageType == PageType.RESULTS
         val facets = results || filterSheet
+        val canSeekPagination = results && !page.dialogOpen && page.resultKeys.isNotEmpty() &&
+            page.viewportHeight > 0 && page.scrollHeight > page.scrollY + page.viewportHeight + 200
         fun openItem(): LearningTarget? = if (!results) null else controls.firstOrNull { it.role == Role.RESULT_ITEM && it.itemKey != null && it.itemKey in page.resultKeys }
             ?.let { LearningTarget("open_item", mapOf("item" to it.itemKey!!)) }
         // Inside a filter sheet, an unexpanded opener that names a facet (the "Make" accordion) is the next prerequisite.
@@ -51,8 +53,10 @@ object LearningOpportunities {
         fun choiceValue(a: Affordance): String? = alternative(a) ?: a.name.takeIf { (a.facetKind == "toggle" || a.facetKind == "choice" && a.features["aria:option"] > 0) && !a.selected && it.isNotBlank() }
         return when (lesson) {
             "search" -> if (has(Role.SEARCH_BOX)) LearningTarget("search") else null
-            "next_page" -> if (results && has(Role.PAGE_NEXT)) LearningTarget(lesson) else null
-            "load_more" -> if (results && has(Role.LOAD_MORE)) LearningTarget(lesson) else null
+            "next_page" -> if (results && has(Role.PAGE_NEXT)) LearningTarget(lesson)
+                else if (canSeekPagination) LearningTarget("seek_pagination") else null
+            "load_more" -> if (results && has(Role.LOAD_MORE)) LearningTarget(lesson)
+                else if (canSeekPagination) LearningTarget("seek_pagination") else null
             "scroll_results" -> if (results && page.resultKeys.isNotEmpty() && page.scrollHeight > page.scrollY + page.viewportHeight + 200) LearningTarget(lesson) else null
             "sort_results" -> if (!results) null else controls.firstOrNull { it.role == Role.SORT && alternative(it) != null }
                 ?.let { LearningTarget(lesson, mapOf("order" to alternative(it)!!)) }

@@ -53,4 +53,25 @@ class TeacherBudgetTest {
         assertFalse(TeacherBudget(store) { 100_000L }.snapshot().allowed)
         assertTrue(runCatching { TeacherBudget(store) { 100_000L }.reserve("OPENAI", "model", 1200) }.exceptionOrNull() is TeacherBudgetExceeded)
     }
+    @Test fun unrestrictedReservationsBypassBothCapsButKeepDurableAccounting() {
+        val store = InMemoryStorage()
+        val budget = TeacherBudget(store) { 100_000L }
+        repeat(150) { budget.reserve("OPENAI", "test-model", 1200, unrestricted = true) }
+        val usage = TeacherBudget(store) { 100_000L }.snapshot(unrestricted = true)
+        assertEquals(150, usage.requests24h)
+        assertEquals(150, usage.requestsHour)
+        assertTrue(usage.allowed)
+        assertEquals(0L, usage.nextAllowedAt)
+        assertFalse(budget.snapshot().allowed)
+        assertTrue(runCatching { budget.reserve("OPENAI", "model", 1200) }.exceptionOrNull() is TeacherBudgetExceeded)
+    }
+
+    @Test fun unrestrictedCannotDiscardOrIgnoreCorruptUsageStorage() {
+        val store = InMemoryStorage()
+        store.write("teacher/usage", "not-json")
+        val budget = TeacherBudget(store) { 100_000L }
+        assertFalse(budget.snapshot(unrestricted = true).allowed)
+        assertTrue(runCatching { budget.reserve("OPENAI", "model", 1200, unrestricted = true) }.exceptionOrNull() is TeacherBudgetExceeded)
+    }
+
 }

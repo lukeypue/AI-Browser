@@ -117,7 +117,7 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
   host until an independently verified repair. Every action is grounded and verified again.
 - `TeacherBudget` — durable reservations before actual transport: 30 requests per rolling
   hour and 120 per rolling day, shared by learning, search and demonstration explanation.
-  Failed requests consume allowance. This is a request cap, not a dollar cap. Provider usage
+  Failed requests consume allowance. Explicit persistent unrestricted regular/smarter options bypass both app request caps, while preserving accounting and the master off switch. Smarter takes priority when both are checked. This is a request cap, not a dollar cap. Provider usage
   is recorded when returned; missing usage is distinguished from zero usage.
 
 ## 6. Safety model

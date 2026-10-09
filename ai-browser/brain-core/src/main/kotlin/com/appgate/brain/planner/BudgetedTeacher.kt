@@ -8,12 +8,13 @@ import com.appgate.brain.memory.TeacherBudgetSnapshot
 class BudgetedTeacher(
     private val budget: TeacherBudget,
     private val enabled: () -> Boolean,
+    private val unrestricted: () -> Boolean = { false },
     private val changed: (TeacherBudgetSnapshot) -> Unit = {}
 ) : PlannerRequestObserver {
     private var reservation: Long? = null
     override fun beforeRequest(provider: PlannerProvider, model: String, maxOutputTokens: Int) {
         if (!enabled()) throw TeacherBudgetExceeded("Local-only mode is enabled")
-        reservation = budget.reserve(provider.name, model, maxOutputTokens)
+        reservation = budget.reserve(provider.name, model, maxOutputTokens, unrestricted())
         notifyChanged()
     }
     override fun onUsage(usage: PlannerUsage) {
@@ -24,6 +25,6 @@ class BudgetedTeacher(
 
     /** Display/telemetry failures must not consume a reservation without sending, or discard paid output. */
     private fun notifyChanged() {
-        try { changed(budget.snapshot()) } catch (_: Exception) { /* Accounting already succeeded. */ }
+        try { changed(budget.snapshot(unrestricted())) } catch (_: Exception) { /* Accounting already succeeded. */ }
     }
 }

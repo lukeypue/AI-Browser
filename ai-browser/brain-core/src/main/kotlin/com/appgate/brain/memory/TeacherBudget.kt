@@ -20,9 +20,9 @@ data class TeacherBudgetSnapshot(
 class TeacherBudget(private val storage: BrainStorage, private val clock: () -> Long = { System.currentTimeMillis() }) {
     private data class State(val json: JsonObject, val entries: MutableList<JsonObject>, val now: Long, val valid: Boolean)
 
-    fun reserve(provider: String, model: String, maxOutputTokens: Int): Long = synchronized(storage) {
+    fun reserve(provider: String, model: String, maxOutputTokens: Int, unrestricted: Boolean = false): Long = synchronized(storage) {
         val state = read()
-        val summary = summarize(state)
+        val summary = summarize(state, unrestricted)
         if (!summary.allowed) throw TeacherBudgetExceeded(summary.reason)
         val id = state.json.optLong("sequence") + 1
         state.json.put("sequence", id)
@@ -44,10 +44,10 @@ class TeacherBudget(private val storage: BrainStorage, private val clock: () -> 
         save(state)
     }
 
-    fun snapshot(): TeacherBudgetSnapshot = synchronized(storage) {
+    fun snapshot(unrestricted: Boolean = false): TeacherBudgetSnapshot = synchronized(storage) {
         val state = read()
         if (state.valid) save(state)
-        summarize(state)
+        summarize(state, unrestricted)
     }
 
     private fun read(): State {
@@ -62,16 +62,17 @@ class TeacherBudget(private val storage: BrainStorage, private val clock: () -> 
         return State(stateJson, entries, now, valid)
     }
 
-    private fun summarize(state: State): TeacherBudgetSnapshot {
+    private fun summarize(state: State, unrestricted: Boolean = false): TeacherBudgetSnapshot {
         val hour = state.entries.filter { state.now - it.optLong("at") < HOUR_MS }
-        val allowed = state.valid && hour.size < HOURLY_LIMIT && state.entries.size < DAILY_LIMIT
+        val allowed = state.valid && (unrestricted || hour.size < HOURLY_LIMIT && state.entries.size < DAILY_LIMIT)
         val reason = when {
             !state.valid -> "AI usage record needs repair; local learning continues"
+            unrestricted -> "Unrestricted AI help available; provider billing and limits apply"
             state.entries.size >= DAILY_LIMIT -> "AI allowance reached ($DAILY_LIMIT requests per 24 hours); local learning continues"
             hour.size >= HOURLY_LIMIT -> "AI hourly allowance reached ($HOURLY_LIMIT requests); local learning continues"
             else -> "AI help available"
         }
-        val next = maxOf(
+        val next = if (unrestricted) 0L else maxOf(
             if (hour.size >= HOURLY_LIMIT) hour.sortedBy { it.optLong("at") }[hour.size - HOURLY_LIMIT].optLong("at") + HOUR_MS else 0L,
             if (state.entries.size >= DAILY_LIMIT) state.entries.sortedBy { it.optLong("at") }[state.entries.size - DAILY_LIMIT].optLong("at") + DAY_MS else 0L
         )

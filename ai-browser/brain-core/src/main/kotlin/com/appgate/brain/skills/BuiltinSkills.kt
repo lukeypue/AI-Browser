@@ -137,6 +137,16 @@ object BuiltinSkills {
         origin = SkillOrigin.BUILTIN, tags = setOf("paginate")
     )
 
+    /** Discovery scrolls prove movement, never pagination or new-results mastery. */
+    val seekPagination = Skill(
+        id = "seek_pagination", version = 1, intent = "look below the viewport for pagination controls",
+        params = emptyList(),
+        pre = listOf(Precondition.PageTypeIn(setOf(PageType.RESULTS))),
+        body = listOf(Step(StepKind.SCROLL, expect = listOf(Postcondition.ScrolledDown))),
+        post = listOf(Postcondition.ScrolledDown),
+        origin = SkillOrigin.BUILTIN, tags = setOf("navigate")
+    )
+
     val openItem = Skill(
         id = "open_item", version = 2, intent = "open a result item to its detail page",
         params = listOf("item"),
@@ -206,7 +216,7 @@ object BuiltinSkills {
 
     val all: List<Skill> = listOf(
         search, constrainNumeric, selectFacet, openFilters, openFacet, applyFilters, sortResults, nextPage, loadMore,
-        scrollResults, openItem, expandDescription, goBack, dismissDialog, prepareMessage, commitSend, openCategory
+        scrollResults, seekPagination, openItem, expandDescription, goBack, dismissDialog, prepareMessage, commitSend, openCategory
     )
 
     fun byId(id: String): Skill? = all.firstOrNull { it.id == id }

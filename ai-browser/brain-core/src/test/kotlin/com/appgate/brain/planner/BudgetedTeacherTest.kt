@@ -60,4 +60,28 @@ class BudgetedTeacherTest {
         assertEquals(100L, usage.outputTokens)
     }
 
+    @Test fun unrestrictedIsCheckedForEachTransportAndLocalOnlyStillWins() {
+        val budget = TeacherBudget(InMemoryStorage()) { 100_000L }
+        repeat(30) { budget.reserve("OPENAI", "model", 1200) }
+        var enabled = true
+        var unrestricted = true
+        var calls = 0
+        val http = object : HttpTransport() {
+            override fun postJson(url: String, body: String, headers: Map<String,String>, connectTimeoutMs: Int, readTimeoutMs: Int): String {
+                calls++
+                return """{"output_text":"{}","usage":{"input_tokens":10,"output_tokens":5}}"""
+            }
+        }
+        val client = PlannerClients.create(PlannerConfig(apiKey = "fixture"),
+            BudgetedTeacher(budget, { enabled }, { unrestricted }), http)
+        assertEquals("{}", client.complete("test", "{}", "test", JsonObject()))
+        assertEquals(31, budget.snapshot().requestsHour)
+        unrestricted = false
+        assertTrue(runCatching { client.complete("test", "{}", "test", JsonObject()) }.exceptionOrNull() is TeacherBudgetExceeded)
+        unrestricted = true
+        enabled = false
+        assertTrue(runCatching { client.complete("test", "{}", "test", JsonObject()) }.exceptionOrNull() is TeacherBudgetExceeded)
+        assertEquals(1, calls)
+    }
+
 }

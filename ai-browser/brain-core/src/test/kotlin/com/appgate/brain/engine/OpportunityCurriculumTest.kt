@@ -300,4 +300,64 @@ class OpportunityCurriculumTest {
         assertEquals(0, memory.site(fake.host).lessonOrdinal)
     }
 
+    @Test fun missingPaginationExploresBelowTheViewportWithoutClaimingCompletion() {
+        val site = siteOnly("next_page")
+        val page = results().copy(affordances = emptyList(), scrollY = 0, scrollHeight = 3000, viewportHeight = 600)
+        observe(site, page)
+        assertEquals("seek_pagination", LearningOpportunities.target(page, "next_page")?.skillId)
+        assertEquals("next_page", Curriculum.nextLesson(site, now, page))
+        assertFalse(site.curriculum.single { it.id == "next_page" }.done)
+        val bottom = page.copy(scrollY = 2400)
+        assertNull(LearningOpportunities.target(bottom, "next_page"))
+        assertNull(LearningOpportunities.target(page.copy(settle = Settle.BUSY), "next_page"))
+        assertNull(LearningOpportunities.target(page.copy(pageType = PageType.AUTH_WALL), "next_page"))
+    }
+
+    @Test fun discoveryContinuesAcrossLessonsAndOnlyRealNextPageCompletesPagination() {
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000) }
+        val memory = Memory(InMemoryStorage()) { now }
+        val site = memory.site(fake.host)
+        Curriculum.ensure(site)
+        site.curriculum.filter { it.id != "next_page" }.forEach { it.completedAt = now - 1 }
+        var scrollY = 0
+        var navigations = 0
+        val renderer = object : Renderer by fake {
+            override fun observe(timeoutMs: Long): String {
+                val raw = Json.parseObject(fake.observe(timeoutMs))
+                val elements = raw.optArray("elements")!!.objects()
+                if (scrollY < 2700) raw.put("elements", com.appgate.brain.json.JsonArray(elements.filter { it.optString("name") != "Next page" }))
+                raw.put("viewport", JsonObject().put("w", 400).put("h", 800).put("scrollY", scrollY).put("scrollH", 4000))
+                return raw.toString()
+            }
+            override fun act(command: JsonObject, timeoutMs: Long): RendererResult {
+                if (command.optString("cmd") == "scroll") scrollY += 900
+                return fake.act(command, timeoutMs)
+            }
+            override fun navigate(url: String, timeoutMs: Long): RendererResult {
+                navigations++
+                scrollY = 0
+                return fake.navigate(url, timeoutMs)
+            }
+        }
+        val engine = BrainEngine(renderer, memory, { null }, object : EngineEvents {},
+            EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0)) { now }
+        fun attempt(id: String): TaskLedger {
+            val goal = Goal(id, GoalIntent.LEARN_SITE, "practice pagination", "Ford", emptyList(),
+                budget = Budget(actions = 8, llmCalls = 0, itemsInspected = 0, wallMs = 10000))
+            val ledger = TaskLedger(id, goal, fake.host, fake.currentUrl()).also {
+                it.lesson = "next_page"; it.lastCheckpointUrl = fake.currentUrl(); it.resultsUrl = fake.currentUrl()
+            }
+            return engine.runTask(ledger, EngineMode.TRAIN)
+        }
+        val first = attempt("seek-first")
+        assertEquals(TaskStatus.PARTIAL, first.status)
+        assertEquals(1800, scrollY)
+        assertFalse(site.curriculum.single { it.id == "next_page" }.done)
+        val second = attempt("seek-second")
+        assertEquals(TaskStatus.DONE, second.status)
+        assertTrue(second.successfulSkills.contains("next_page"))
+        assertTrue(site.curriculum.single { it.id == "next_page" }.done)
+        assertEquals(0, navigations)
+    }
+
 }
