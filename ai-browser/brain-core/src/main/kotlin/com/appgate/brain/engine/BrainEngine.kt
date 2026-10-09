@@ -897,7 +897,11 @@ class BrainEngine(
             ?: return PolicyDecision.Finish(TaskStatus.PARTIAL, "lesson control not available on this page; waiting for an opportunity")
         if (target.constraints.isNotEmpty() && ledger.effectiveGoal.filterable.isEmpty()) ledger.learningConstraints = target.constraints
         val key = "__lesson_target:${target.skillId}"
-        if ((ledger.constraintAttempts[key] ?: 0) >= 2) return PolicyDecision.Finish(TaskStatus.PARTIAL, "lesson attempt complete; no new verified result")
+        // Discovery must reach a footer within this visit: rotating to another source
+        // reloads results. Movement is verified on every scroll; overall task budgets
+        // still bound the work, while other lesson/repair targets retain two attempts.
+        val targetLimit = if (target.skillId == "seek_pagination") 12 else 2
+        if ((ledger.constraintAttempts[key] ?: 0) >= targetLimit) return PolicyDecision.Finish(TaskStatus.PARTIAL, "lesson attempt complete; no new verified result")
         ledger.constraintAttempts[key] = (ledger.constraintAttempts[key] ?: 0) + 1
         if (target.skillId == "open_item" && sps.pageType == PageType.RESULTS) ledger.resultsUrl = sps.url
         if (target.skillId == "go_back" && ledger.resultsUrl.isBlank())

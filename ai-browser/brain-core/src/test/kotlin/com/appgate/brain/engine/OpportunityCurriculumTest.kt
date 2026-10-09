@@ -313,7 +313,7 @@ class OpportunityCurriculumTest {
         assertNull(LearningOpportunities.target(page.copy(pageType = PageType.AUTH_WALL), "next_page"))
     }
 
-    @Test fun discoveryContinuesAcrossLessonsAndOnlyRealNextPageCompletesPagination() {
+    @Test fun discoveryReachesDeepPaginationWithinOneVisitAndOnlyRealNextCompletesIt() {
         val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000) }
         val memory = Memory(InMemoryStorage()) { now }
         val site = memory.site(fake.host)
@@ -350,12 +350,9 @@ class OpportunityCurriculumTest {
             return engine.runTask(ledger, EngineMode.TRAIN)
         }
         val first = attempt("seek-first")
-        assertEquals(TaskStatus.PARTIAL, first.status)
-        assertEquals(1800, scrollY)
-        assertFalse(site.curriculum.single { it.id == "next_page" }.done)
-        val second = attempt("seek-second")
-        assertEquals(TaskStatus.DONE, second.status)
-        assertTrue(second.successfulSkills.contains("next_page"))
+        assertEquals("${first.terminalReason}; actions=${first.actions}; attempts=${first.constraintAttempts}; skills=${first.successfulSkills}", TaskStatus.DONE, first.status)
+        assertEquals(2700, scrollY)
+        assertTrue(first.successfulSkills.contains("next_page"))
         assertTrue(site.curriculum.single { it.id == "next_page" }.done)
         assertEquals(0, navigations)
     }

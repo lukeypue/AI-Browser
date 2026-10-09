@@ -11,8 +11,15 @@ object ProgressSupervisor {
         return true
     }
 
+    fun actionKey(sps: SemanticPageState, step: Step): String {
+        // The semantic hash intentionally ignores viewport movement. A scroll retry
+        // is a different state only after the renderer observes a new position.
+        val position = if (step.kind == StepKind.SCROLL) "|scroll:${sps.scrollY}" else ""
+        return Hashing.short("${sps.hash}|${step.toJson()}$position")
+    }
+
     fun permit(ledger: TaskLedger, sps: SemanticPageState, step: Step, limit: Int = 2): Boolean {
-        val key = Hashing.short("${sps.hash}|${step.toJson()}")
+        val key = actionKey(sps, step)
         val count = ledger.actionStates[key] ?: 0
         ledger.actionStates[key] = count + 1
         return count < limit

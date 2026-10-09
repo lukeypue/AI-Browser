@@ -145,6 +145,17 @@ class LearningUpgradeTest {
         assertNull(reloaded.skills.reusable(wrongPage, "custom", mapOf("query" to "x"), ledger()))
     }
 
+    @Test fun scrollMovementPermitsDiscoveryButStalledScrollingIsBounded() {
+        val task = ledger()
+        val sps = SpsParser().parse(FakeSite().observe(1000))
+        val step = Step(kind = StepKind.SCROLL, arg = "900")
+        assertTrue(ProgressSupervisor.permit(task, sps, step))
+        assertTrue(ProgressSupervisor.permit(task, sps, step))
+        assertFalse(ProgressSupervisor.permit(task, sps, step))
+        assertTrue(ProgressSupervisor.permit(task, sps.copy(scrollY = 900), step))
+        assertTrue(ProgressSupervisor.permit(task, sps.copy(scrollY = 1800), step))
+    }
+
     @Test fun repeatedVerifiedStateIsNotNewProgress() {
         val task = ledger()
         assertTrue(ProgressSupervisor.evidence(task, "navigation-cycle"))

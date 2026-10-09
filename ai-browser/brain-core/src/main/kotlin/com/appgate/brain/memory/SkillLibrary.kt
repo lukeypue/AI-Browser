@@ -10,6 +10,7 @@ import com.appgate.brain.model.TaskLedger
 import com.appgate.brain.model.EffectClass
 import com.appgate.brain.model.StepKind
 import com.appgate.brain.model.Postcondition
+import com.appgate.brain.engine.ProgressSupervisor
 import com.appgate.brain.engine.StepGrounder
 import com.appgate.brain.engine.GroundingOutcome
 import com.appgate.brain.skills.PortableSkills
@@ -106,7 +107,7 @@ class SkillLibrary(private val memory: Memory) {
         val step = PortableSkills.entry(skill.body) ?: return false
         val bound = step.copy(arg = step.arg?.let { StepGrounder.substitute(it, params) },
             facetKey = step.facetKey?.let { StepGrounder.substitute(it, params) })
-        if ((ledger.actionStates[Hashing.short("${sps.hash}|${bound.toJson()}")] ?: 0) >= 2) return false
+        if ((ledger.actionStates[ProgressSupervisor.actionKey(sps, bound)] ?: 0) >= 2) return false
         if (bound.facetKey != null && !PortableSkills.canonicalFacet(bound.facetKey)) return false
         if (bound.kind == StepKind.SCROLL) return sps.pageType == PageType.RESULTS
         if (bound.kind == StepKind.BACK) return true
