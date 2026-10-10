@@ -18,6 +18,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.appgate.brain.engine.BrainEngine
 import com.appgate.brain.engine.EngineConfig
+import com.appgate.brain.engine.LearningGuide
 import com.appgate.brain.engine.EngineEvents
 import com.appgate.brain.engine.EngineMode
 import com.appgate.brain.engine.LearningSession
@@ -71,7 +72,8 @@ class BrainService : Service() {
         val grantLedgerId: String = "",
         val searchId: String = "",
         val ledgerIds: List<String> = emptyList(),
-        val engineReady: Boolean = false
+        val engineReady: Boolean = false,
+        val learningGuide: LearningGuide? = null
     )
 
     interface Listener {
@@ -344,17 +346,32 @@ class BrainService : Service() {
 
     fun setTeachMode(on: Boolean) {
         val s = session ?: return
-        engineThread.execute {
-            runCatching { s.request(JsonObject().put("cmd", "teach").put("on", on), 5_000L) }
-        }
         if (on) {
-            teachTrace.clear()
-            teachBefore = null
-            s.teachListener = { event -> onTeachEvent(event) }
-            publish(state.copy(status = "Teach mode: use the page normally; the brain watches what you do"))
+            publish(state.copy(status = "Preparing teaching — wait until the recorder is ready…"))
+            engineThread.execute {
+                teachTrace.clear()
+                teachBefore = null
+                val before = runCatching {
+                    val observation = s.request(JsonObject().put("cmd", "observe"), 8_000L).optObject("observation") ?: return@runCatching null
+                    val host = com.appgate.brain.perception.UrlPatterns.host(observation.optString("url"))
+                    SpsParser(memory.site(host).facetVocabulary).parse(observation)
+                }.getOrNull()
+                if (before == null || before.isHumanOnly) {
+                    main.post { publish(state.copy(status = "Teaching is unavailable here. Finish sign-in or verification first.")) }
+                    return@execute
+                }
+                teachBefore = before
+                s.teachListener = { event -> onTeachEvent(event) }
+                val enabled = runCatching { s.request(JsonObject().put("cmd", "teach").put("on", true), 5_000L).optBoolean("ok") }.getOrDefault(false)
+                if (!enabled) { s.teachListener = null; teachBefore = null }
+                main.post { publish(state.copy(status = if (enabled) "Teaching recorder ready: demonstrate the step, then tap DONE TEACHING" else "Teaching recorder could not start. Try again.")) }
+            }
         } else {
-            s.teachListener = null
-            finishTeaching()
+            engineThread.execute {
+                runCatching { s.request(JsonObject().put("cmd", "teach").put("on", false), 5_000L) }
+                s.teachListener = null
+                finishTeaching()
+            }
         }
     }
 
@@ -370,29 +387,56 @@ class BrainService : Service() {
             val host = com.appgate.brain.perception.UrlPatterns.host(event.optString("url"))
             val site = memory.site(host)
             val parser = SpsParser(site.facetVocabulary)
-            if (teachBefore == null) teachBefore = runCatching { parser.parse(s.request(JsonObject().put("cmd", "observe"), 8_000L).optObject("observation")!!) }.getOrNull()
+            val before = teachBefore ?: return@execute
+            if (!com.appgate.brain.perception.UrlPatterns.sameSite(before.url, event.optString("url"))) return@execute
             val single = JsonObject().put("v", 3).put("url", event.optString("url")).put("host", host).put("elements", com.appgate.brain.json.JsonArray().add(raw)).put("signals", JsonObject()).put("regions", com.appgate.brain.json.JsonArray())
             val classified = parser.parse(single).affordances.firstOrNull()
-            if (classified != null && !classified.isCommit) {
+            if (classified != null && !classified.isCommit && classified.role !in setOf(com.appgate.brain.model.Role.LOGIN, com.appgate.brain.model.Role.ACCOUNT, com.appgate.brain.model.Role.UNKNOWN)) {
                 teachTrace.add(JsonObject().put("kind", event.optString("kind")).put("role", classified.role.name).put("facet", classified.facetKey)
-                    .put("name", classified.name).put("submit", event.optBoolean("submit")).put("has_value", event.optStringOrNull("value") != null))
+                    .put("submit", event.optBoolean("submit")).put("has_value", event.optStringOrNull("value") != null))
                 diagnostics.event("teach", host, "${classified.role}${classified.facetKey?.let { "[$it]" } ?: ""}")
-                main.post { listeners.forEach { it.onLog("Learned: ${classified.role.name.lowercase().replace('_', ' ')}${classified.facetKey?.let { " ($it)" } ?: ""}") } }
+                main.post { listeners.forEach { it.onLog("Recorded: ${classified.role.name.lowercase().replace('_', ' ')}${classified.facetKey?.let { " ($it)" } ?: ""}") } }
             }
         }
     }
 
+    /** Called on the same executor after all previously queued trace events. */
     private fun finishTeaching() {
         val s = session ?: return
-        if (teachTrace.size == 0) return
-        engineThread.execute {
-            val before = teachBefore ?: return@execute
-            val host = before.host
-            val after = runCatching { SpsParser(memory.site(host).facetVocabulary).parse(s.request(JsonObject().put("cmd", "observe"), 8_000L).optObject("observation")!!) }.getOrNull() ?: return@execute
-            val skill = SkillCompiler.compileFromDemonstration(memory, plannerOrNull(), host, teachTrace, before, after, System.currentTimeMillis())
-            main.post { publish(state.copy(status = if (skill != null) "Saved what you showed me as a reusable skill (${skill.body.size} steps)" else "Nothing reusable was demonstrated")) }
-            teachTrace.clear()
+        val before = teachBefore
+        if (before == null || teachTrace.size == 0) {
             teachBefore = null
+            main.post { publish(state.copy(status = "No supported step was recorded. Tap TEACH and wait for recorder ready before demonstrating.")) }
+            return
+        }
+        val host = before.host
+        val after = runCatching { SpsParser(memory.site(host).facetVocabulary).parse(s.request(JsonObject().put("cmd", "observe"), 8_000L).optObject("observation")!!) }.getOrNull()
+        val skill = after?.let { SkillCompiler.compileFromDemonstration(memory, null, host, teachTrace, before, it, System.currentTimeMillis()) }
+        teachTrace.clear()
+        teachBefore = null
+        if (skill == null) {
+            main.post { publish(state.copy(status = "Could not make a safe training procedure. Demonstrate one focused lesson on the same site.")) }
+            return
+        }
+        val eng = engine ?: return
+        val capability = skill.tags.firstOrNull { it.startsWith("capability:") }?.removePrefix("capability:") ?: return
+        val profile = SiteProfiles.forHost(host) ?: SiteProfiles.generic(host)
+        val site = memory.site(host)
+        val goal = com.appgate.brain.engine.Curriculum.nextGoal(site, profile, 0, before, capability)
+        val task = TaskLedger("demo-check-" + System.currentTimeMillis(), goal, host, before.url, lesson = capability)
+        main.post { publish(state.copy(mode = Mode.LEARNING, status = "Checking your demonstration with practice values…", host = host)) }
+        runJob {
+            val out = eng.runTask(task, EngineMode.TRAIN)
+            com.appgate.brain.engine.Curriculum.recordAttempt(site, out)
+            memory.saveSite(site)
+            val checked = memory.skills.get(skill.id)
+            val message = when {
+                checked?.tags?.contains("verified_v2") == true -> "Demonstration verified and learned. Resume when ready."
+                checked?.stat(host)?.failures?.let { it > 0.0 } == true -> "Demonstration replay did not verify. Review the lesson and last result, then try teaching again."
+                else -> "Demonstration recorded; its starting controls were not reached for a check. Teach from the results page or resume learning."
+            }
+            main.post { publish(state.copy(mode = if (out.status == TaskStatus.NEED_HUMAN) Mode.NEED_HUMAN else Mode.PAUSED,
+                status = message, humanReason = out.humanReason)) }
         }
     }
 
@@ -468,11 +512,26 @@ class BrainService : Service() {
             lastProgressAt = System.currentTimeMillis()
             diagnostics.event("verified_progress", ledger.host, reason)
         }
+        override fun guide(explanation: LearningGuide) {
+            main.post {
+                val previous = state.learningGuide
+                val next = if (previous?.ledgerId == explanation.ledgerId) explanation.copy(outcome = previous.outcome) else explanation
+                publish(state.copy(learningGuide = next))
+            }
+        }
         override fun status(text: String) { main.post { publish(state.copy(status = text)); updateNotification(text) } }
         override fun step(ledger: TaskLedger, description: String, status: VerifyStatus?) {
             // Descriptions may contain the user's query; diagnostics keep typed coordinates only.
             diagnostics.event("step", ledger.host, extra = JsonObject().put("status", status?.name).put("phase", ledger.phase.name).put("source", ledger.programSource))
-            main.post { listeners.forEach { it.onStep(description, status) } }
+            val explanation = if (ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE) LearningGuide.snapshot(ledger, ledger.currentProgram.getOrNull(ledger.cursor), status, ledger.steps.lastOrNull()?.evidence.orEmpty()) else null
+            main.post {
+                if (explanation != null) {
+                    val previous = state.learningGuide
+                    val next = if (previous?.ledgerId == explanation.ledgerId && explanation.pass.contains("not supplied")) explanation.copy(pass = previous.pass) else explanation
+                    publish(state.copy(learningGuide = next))
+                }
+                listeners.forEach { it.onStep(description, status) }
+            }
         }
         override fun needHuman(ledger: TaskLedger, reason: String, url: String) {
             diagnostics.event("need_human", ledger.host, reason)
@@ -484,6 +543,11 @@ class BrainService : Service() {
             main.post { publish(state.copy(mode = Mode.NEED_GRANT, grantPreview = previewText, grantLedgerId = ledger.id, status = "Review and approve the message")); notifyHuman(ledger.host, "A message is ready for your approval") }
         }
         override fun finished(ledger: TaskLedger, result: TaskResult?) {
+            if (ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE) {
+                val id = ledger.id
+                val outcome = if (ledger.lesson in ledger.successfulSkills) "Verified procedure saved for this lesson." else "Attempt ended without verifying this lesson. ${ledger.status.name.lowercase().replace('_', ' ')}."
+                main.post { state.learningGuide?.takeIf { it.ledgerId == id }?.let { publish(state.copy(learningGuide = it.copy(outcome = "$outcome Last step: ${it.outcome}"))) } }
+            }
             diagnostics.event("task_finished", ledger.host, "${ledger.status} actions=${ledger.actions} llm=${ledger.llmCalls} items=${ledger.verdicts.size}",
                 JsonObject().put("reason", ledger.terminalReason).put("elapsed_ms", ledger.elapsedMs).put("decisions", ledger.decisions).put("verified_skills", ledger.successfulSkills.size))
         }

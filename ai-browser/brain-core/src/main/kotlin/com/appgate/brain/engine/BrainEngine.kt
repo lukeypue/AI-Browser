@@ -42,6 +42,7 @@ interface EngineEvents {
     fun diagnostic(host: String, kind: String, data: JsonObject) {}
     fun progress(ledger: TaskLedger, reason: String) {}
     fun status(text: String) {}
+    fun guide(explanation: LearningGuide) {}
     fun step(ledger: TaskLedger, description: String, status: VerifyStatus?) {}
     fun needHuman(ledger: TaskLedger, reason: String, url: String) {}
     fun needGrant(ledger: TaskLedger, previewText: String, previewHash: String) {}
@@ -196,6 +197,7 @@ class BrainEngine(
         ledger.status = TaskStatus.RUNNING
         ledger.humanReason = ""
         memory.saveLedger(ledger)
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE) events.guide(LearningGuide.snapshot(ledger))
         events.status("Starting on ${profile.name}: ${ledger.goal.describe()}")
 
         try {
@@ -442,7 +444,7 @@ class BrainEngine(
         if (!ledger.programSource.startsWith("skill:")) return false
         // A persisted program keeps its contract even after its source skill is retired.
         val skill = memory.skills.get(ledger.programSource.removePrefix("skill:")) ?: return true
-        return skill.origin != com.appgate.brain.model.SkillOrigin.BUILTIN && "verified_v2" in skill.tags
+        return skill.origin != com.appgate.brain.model.SkillOrigin.BUILTIN && ("verified_v2" in skill.tags || "demonstrated_candidate_v2" in skill.tags)
     }
 
     private fun executeGrounded(ledger: TaskLedger, before: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode, grounded: GroundedStep, retriesLeft: Int, excludedIds: Set<String> = emptySet()) {
@@ -452,6 +454,7 @@ class BrainEngine(
             missingStep(ledger, before, site, grounded.step, "outside_task_host")
             return
         }
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE) events.guide(LearningGuide.snapshot(ledger, grounded.step.copy(expect = action.expect.ifEmpty { Verifier.defaultExpectations(action, before) })))
         val stepDesc = "${action.describe()} [${ledger.programSource}]"
         ledger.actions++
         memory.saveLedger(ledger)                       // checkpoint before acting
@@ -815,6 +818,7 @@ class BrainEngine(
     }
 
     private fun missingStep(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, step: Step, reason: String) {
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE) events.guide(LearningGuide.snapshot(ledger, step))
         diagnostic(ledger, sps, null, step, VerifyStatus.FAILED, when (reason) {
             "repeat_state_limit" -> DiagnosticCode.REPEAT_STATE_LIMIT
             "outside_task_host" -> DiagnosticCode.OUTSIDE_TASK_HOST

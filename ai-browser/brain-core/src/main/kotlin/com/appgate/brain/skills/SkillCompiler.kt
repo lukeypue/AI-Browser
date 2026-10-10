@@ -102,47 +102,60 @@ object SkillCompiler {
         return Abstracted(steps, params.toList())
     }
 
-    /**
-     * A human demonstration: (before SPS, actions on typed affordances, after SPS). The planner
-     * explains it as a program; we abstract by contrast (features present on the clicked element
-     * but absent on unclicked siblings are kept in the binding; values become parameters).
-     */
+    /** A typed human trace is a proposal, never success evidence. It must replay in TRAIN. */
     fun compileFromDemonstration(memory: Memory, planner: Planner?, host: String, trace: JsonArray, before: SemanticPageState, after: SemanticPageState, now: Long): Skill? {
-        if (trace.size == 0) return null
-        val explained = planner?.let { runCatching { it.explainDemonstration(trace, before, after) }.getOrNull() }
-        val steps = explained?.steps?.takeIf { it.isNotEmpty() } ?: stepsFromTrace(trace)
-        if (steps.isEmpty()) return null
-        val params = steps.mapNotNull { it.arg }.filter { it.startsWith("$") }.map { it.removePrefix("$") }.distinct()
-        val signature = steps.joinToString("|") { it.describe() }
-        val id = "demo_" + Hashing.short(signature).take(10)
-        val skill = memory.skills.get(id) ?: Skill(
-            id = id, version = 1,
-            intent = explained?.rationale?.ifBlank { null } ?: ("demonstrated: " + steps.joinToString(", ") { it.describe() }.take(140)),
-            params = params,
-            pre = listOf(Precondition.PageTypeIn(setOf(before.pageType))) + steps.firstOrNull()?.role?.let { listOf(Precondition.HasRole(it)) }.orEmpty(),
-            body = steps,
-            post = steps.lastOrNull()?.expect.orEmpty(),
-            origin = SkillOrigin.DEMONSTRATED,
-            statsByHost = mapOf(host to BetaStat()),
-            provenance = listOf("demo@${before.pageType}"),
-            tags = setOf("demonstrated")
-        )
+        if (trace.size !in 1..8 || before.isHumanOnly || after.isHumanOnly || before.host != host ||
+            !com.appgate.brain.perception.UrlPatterns.sameSite(before.url, after.url)) return null
+        val steps = trace.objects().map { t ->
+            val role = Role.parse(t.optStringOrNull("role"))
+            val facet = t.optStringOrNull("facet")
+            val kind = when (t.optString("kind")) {
+                "type" -> StepKind.TYPE; "select" -> StepKind.SELECT; "scroll" -> StepKind.SCROLL
+                "back" -> StepKind.BACK; "click" -> StepKind.CLICK; else -> return null
+            }
+            if (role.isCommit || role in setOf(Role.UNKNOWN, Role.LOGIN, Role.ACCOUNT)) return null
+            val arg = when {
+                kind in setOf(StepKind.TYPE, StepKind.SELECT) && role == Role.SEARCH_BOX -> "\$query"
+                kind in setOf(StepKind.TYPE, StepKind.SELECT) && role == Role.FACET && facet != null && PortableSkills.canonicalFacet(facet) -> "\$$facet"
+                role == Role.RESULT_ITEM -> "\$item"
+                kind == StepKind.SELECT && role == Role.SORT -> "\$order"
+                kind in setOf(StepKind.TYPE, StepKind.SELECT) -> return null
+                else -> null
+            }
+            val actionKind = when (kind) { StepKind.TYPE -> com.appgate.brain.model.ActionKind.TYPE; StepKind.SELECT -> com.appgate.brain.model.ActionKind.SELECT; StepKind.SCROLL -> com.appgate.brain.model.ActionKind.SCROLL; StepKind.BACK -> com.appgate.brain.model.ActionKind.BACK; else -> com.appgate.brain.model.ActionKind.CLICK }
+            val expectations = when {
+                role == Role.FACET && arg != null -> listOf(Postcondition.ValueIs(facet!!, arg))
+                role == Role.SORT -> listOf(Postcondition.ResultsChanged)
+                else -> com.appgate.brain.verify.Verifier.defaultExpectations(com.appgate.brain.model.Action(actionKind, com.appgate.brain.model.AffordanceRef(role, facet), text = arg, submit = t.optBoolean("submit")), before)
+            }
+            Step(kind, role, facet, arg, submit = t.optBoolean("submit"), expect = expectations)
+        }
+        val facets = steps.filter { it.role == Role.FACET && it.arg != null }
+        val post = if (facets.isNotEmpty()) facets.map { Postcondition.ConstraintApplied(it.facetKey!!, it.arg) } else when {
+            steps.any { it.role == Role.SEARCH_BOX } -> listOf(Postcondition.PageTypeIs(PageType.RESULTS))
+            else -> steps.last().expect
+        }
+        if (!PortableSkills.safeProgram(steps, post)) return null
+        val capability = PortableSkills.capabilities.firstOrNull { c ->
+            (c != "select_facet" || facets.any { it.kind == StepKind.SELECT }) &&
+            (c != "constrain_numeric" || facets.isNotEmpty() && facets.all { PortableSkills.numericFacet(it.facetKey!!) }) &&
+            PortableSkills.compatible(c, steps, post)
+        } ?: return null
+        val entry = PortableSkills.entry(steps) ?: return null
+        val signature = "$host|${before.pageType}|$capability|" + steps.joinToString("|") { it.toJson().toString() }
+        val id = "demo_v2_" + Hashing.short(signature).take(10)
+        val existing = memory.skills.get(id)
+        if (existing != null && "verified_v2" in existing.tags) return existing
+        val skill = Skill(id = id, version = 2, intent = "human proposal for $capability",
+            params = PortableSkills.parameters(steps, post).sorted(),
+            pre = listOf(Precondition.PageTypeIn(setOf(before.pageType)), Precondition.HasRole(entry.role!!, entry.facetKey)),
+            body = steps, post = post, origin = SkillOrigin.DEMONSTRATED,
+            statsByHost = mapOf(host to BetaStat()), provenance = listOf("demo@${before.pageType}"),
+            tags = setOf("demonstrated_candidate_v2", "capability:$capability"))
         memory.skills.put(skill)
         return skill
     }
 
-    /** Fallback without a planner: one step per recorded human action on a typed affordance. */
-    private fun stepsFromTrace(trace: JsonArray): List<Step> = trace.objects().mapNotNull { t ->
-        val role = Role.parse(t.optStringOrNull("role"))
-        if (role == Role.UNKNOWN || role.isCommit) return@mapNotNull null
-        val kind = when (t.optString("kind")) { "type" -> StepKind.TYPE; "select" -> StepKind.SELECT; "scroll" -> StepKind.SCROLL; else -> StepKind.CLICK }
-        val arg = when (kind) { StepKind.TYPE -> "\$value"; StepKind.SELECT -> "\$value"; else -> null }
-        Step(kind, role, t.optStringOrNull("facet"), arg, optional = false, submit = t.optBoolean("submit"), nameHint = t.optStringOrNull("name"),
-            expect = com.appgate.brain.verify.Verifier.defaultExpectations(
-                com.appgate.brain.model.Action(if (kind == StepKind.TYPE) com.appgate.brain.model.ActionKind.TYPE else com.appgate.brain.model.ActionKind.CLICK,
-                    com.appgate.brain.model.AffordanceRef(role, t.optStringOrNull("facet")), submit = t.optBoolean("submit")),
-                SemanticPageState("", "", "", "", PageType.UNKNOWN, 0.0, emptyList(), emptyList(), emptyList(), emptyMap(), com.appgate.brain.model.Settle.UNKNOWN, false, false, false, "")))
-    }
 }
 
 /** Structural checks shared by compilation and probationary reuse, including legacy persisted skills. */

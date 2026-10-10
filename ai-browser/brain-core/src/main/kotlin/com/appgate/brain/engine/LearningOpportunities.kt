@@ -36,6 +36,17 @@ object LearningOpportunities {
         fun has(role: Role) = controls.any { it.role == role }
         val filterSheet = page.pageType == PageType.FACET_PANEL || dialogHoldsFilters(page)
         if (page.dialogOpen && !filterSheet && has(Role.CLOSE)) return LearningTarget("dismiss_dialog")
+        // Focused demonstration checks can practice a prerequisite on its own.
+        // These do not add or complete unrelated curriculum lessons.
+        if (lesson in setOf("open_filters", "open_facet", "apply_filters", "open_category")) {
+            val role = when (lesson) {
+                "apply_filters" -> Role.FACET_APPLY
+                "open_category" -> Role.CATEGORY_LINK
+                else -> Role.FACET_OPEN
+            }
+            return controls.firstOrNull { it.role == role && (lesson != "open_facet" || canonical(it.facetKey) != null) }
+                ?.let { LearningTarget(lesson, it.facetKey?.let { key -> mapOf("key" to key) }.orEmpty()) }
+        }
         // Search is a prerequisite only while getting to a results context, never repeated on results.
         if (lesson != "dismiss_dialog" && page.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.UNKNOWN) && has(Role.SEARCH_BOX))
             return LearningTarget("search")

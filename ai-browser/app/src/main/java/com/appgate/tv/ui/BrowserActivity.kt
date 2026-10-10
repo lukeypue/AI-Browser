@@ -24,6 +24,7 @@ import org.mozilla.geckoview.GeckoView
 class BrowserActivity : ServiceBoundActivity() {
     private lateinit var geckoView: GeckoView
     private lateinit var status: TextView
+    private lateinit var lessonView: TextView
     private lateinit var urlView: TextView
     private lateinit var continueButton: Button
     private lateinit var approveRow: LinearLayout
@@ -43,6 +44,14 @@ class BrowserActivity : ServiceBoundActivity() {
         urlView = Ui.text(this, "", 11f, Ui.muted).apply { setPadding(16, 0, 16, 6); maxLines = 1 }
         root.addView(status)
         root.addView(urlView)
+        lessonView = Ui.text(this, "", 12f, Ui.accent).apply {
+            setPadding(16, 4, 16, 8)
+            maxLines = 2
+            visibility = View.GONE
+            setOnClickListener { showLessonHelp() }
+            contentDescription = "Show lesson, pass condition, and last result"
+        }
+        root.addView(lessonView)
 
         continueButton = Ui.button(this, "DONE — CONTINUE") { service?.resumeAfterHuman(); finish() }.apply { visibility = View.GONE }
         root.addView(continueButton)
@@ -86,6 +95,10 @@ class BrowserActivity : ServiceBoundActivity() {
             status.text = "The browser engine is still starting…"
         }
         onState(service.state)
+        if (intent.getBooleanExtra("show_teaching_help", false)) {
+            intent.putExtra("show_teaching_help", false)
+            showLessonHelp()
+        }
     }
 
     override fun onServiceLost() {
@@ -97,6 +110,10 @@ class BrowserActivity : ServiceBoundActivity() {
 
     override fun onState(state: BrainService.State) {
         status.text = state.status
+        val guide = state.learningGuide
+        val sameSite = guide != null && com.appgate.brain.perception.UrlPatterns.sameSite("https://${guide.host}/", state.url)
+        lessonView.visibility = if (sameSite) View.VISIBLE else View.GONE
+        lessonView.text = guide?.let { "Lesson: ${it.goal}\nTap for pass condition, last result, and teaching help" }.orEmpty()
         urlView.text = state.url
         if (!attached && state.engineReady) { service?.session?.let { it.attachTo(geckoView); attached = true } }
         val needsHuman = state.mode == BrainService.Mode.NEED_HUMAN || state.mode == BrainService.Mode.BROWSING || state.mode == BrainService.Mode.PAUSED
@@ -121,12 +138,19 @@ class BrowserActivity : ServiceBoundActivity() {
         if (s.state.mode == BrainService.Mode.SEARCHING || s.state.mode == BrainService.Mode.LEARNING) s.pause() else s.resumeAfterHuman()
     }
 
+    private fun showLessonHelp() {
+        val explanation = service?.state?.learningGuide?.text() ?: "No learning attempt is available yet."
+        AlertDialog.Builder(this).setTitle("Lesson and pass conditions")
+            .setMessage(explanation + "\n\nTo demonstrate: pause, wait for the current action to finish, tap TEACH, perform this step on the page, then tap DONE TEACHING. The app will try the procedure with practice values and report whether it verified. AI sees the goal and expected checks; the verifier decides success from the observed page.")
+            .setPositiveButton("OK", null).show()
+    }
+
     private fun toggleTeach() {
         val s = service ?: return
         teaching = !teaching
         if (teaching) {
             AlertDialog.Builder(this).setTitle("Teach mode")
-                .setMessage("Use the page normally: open the filters, set a price, search, open a listing. The brain records the kind of control you used (never what you typed into sign-in fields) and turns it into a reusable skill when you tap DONE TEACHING.")
+                .setMessage("Demonstrate the lesson shown above, from opening its control to applying the value. Wait for the current automated action to finish before demonstrating. Tap DONE TEACHING when finished; the app will check the procedure with practice values and report the result. Sign-in fields are excluded.")
                 .setPositiveButton("OK", null).show()
             if (s.state.mode == BrainService.Mode.SEARCHING || s.state.mode == BrainService.Mode.LEARNING) s.pause()
         }

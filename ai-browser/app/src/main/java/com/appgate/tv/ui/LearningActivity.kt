@@ -19,6 +19,8 @@ import com.appgate.tv.service.BrainService
  */
 class LearningActivity : ServiceBoundActivity() {
     private lateinit var status: TextView
+    private lateinit var guideView: TextView
+    private lateinit var teachStepButton: android.widget.Button
     private lateinit var stepsView: TextView
     private lateinit var progress: LinearLayout
     private lateinit var humanButton: android.widget.Button
@@ -38,6 +40,16 @@ class LearningActivity : ServiceBoundActivity() {
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("unknown")
         column.addView(Ui.text(this, "Build $version · Verified learning", 12f, Ui.muted))
         column.addView(Ui.text(this, "The brain practices focused lessons, saves verified procedures, and reuses them on later visits. Each site gets a bounded turn. Sites needing sign-in wait while other sites continue. Training only reads and filters; it does not send messages or change accounts.", 13f, Ui.muted).apply { setPadding(0, 6, 0, 10) })
+        val guideCard = Ui.card(this)
+        guideCard.addView(Ui.text(this, "What is it trying to learn?", 17f, Ui.text, true))
+        guideView = Ui.text(this, "Start learning to see the lesson, action, pass condition, and last result.", 14f, Ui.text)
+        guideCard.addView(guideView)
+        teachStepButton = Ui.button(this, "PAUSE AND TEACH THIS STEP") {
+            service?.pause()
+            startActivity(Intent(this, BrowserActivity::class.java).putExtra("show_teaching_help", true))
+        }.apply { isEnabled = false }
+        guideCard.addView(teachStepButton)
+        column.addView(guideCard, Ui.cardParams())
         column.addView(Ui.row(this,
             Ui.button(this, "START") { service?.startLearning() },
             Ui.button(this, "PAUSE") { service?.pause() },
@@ -109,6 +121,8 @@ class LearningActivity : ServiceBoundActivity() {
 
     override fun onState(state: BrainService.State) {
         status.text = state.status
+        guideView.text = state.learningGuide?.text() ?: "Start learning to see the lesson, action, pass condition, and last result."
+        teachStepButton.isEnabled = state.learningGuide != null
         humanButton.visibility = if (state.mode == BrainService.Mode.NEED_HUMAN) View.VISIBLE else View.GONE
         humanButton.text = "${state.host.ifBlank { "A site" }} needs you — open the browser"
         refreshProgress()

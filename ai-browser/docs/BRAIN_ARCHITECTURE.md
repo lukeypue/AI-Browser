@@ -106,7 +106,10 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
   controls and different procedures remain eligible. At most 64 content-free records per host.
   Site rotation still retries after thirty seconds. A verified procedure clears its failure record.
 - `SkillCompiler` — verified local/planner programs → `COMPILED` skills (values → params);
-  explained human demonstrations → `DEMONSTRATED` skills.
+  typed human demonstrations → parameterized `DEMONSTRATED` training candidates.
+  Candidates have zero success credit and can only replay on their source site in TRAIN.
+  Exact live grounding and full procedure verification promote them to `verified_v2`;
+  failed candidates are held. Recorder start, trace events, and finish share one executor.
 - `Curriculum` — per-site goals selected from observed live opportunities. Unavailable controls
   wait without creating a task or a success. An idle results page with no unfinished
   lesson targets may try one different practice search per probe; auth, busy pages,

@@ -38,7 +38,9 @@ class SkillLibrary(private val memory: Memory) {
     fun recordOutcome(skillId: String, host: String, success: Boolean) {
         val map = memory.loadSkills()
         val s = map[skillId] ?: return
-        val updated = s.withOutcome(host, success, memory.now())
+        val outcome = s.withOutcome(host, success, memory.now())
+        val updated = if (success && "demonstrated_candidate_v2" in s.tags)
+            outcome.copy(tags = outcome.tags - "demonstrated_candidate_v2" + "verified_v2") else outcome
         // Keep a failed learned procedure on hold until independent verified recompilation.
         map[skillId] = if (!success && s.origin != SkillOrigin.BUILTIN)
             updated.copy(tags = updated.tags + PortableSkills.failureTag(host)) else updated
@@ -65,7 +67,8 @@ class SkillLibrary(private val memory: Memory) {
         // The engine validates live URL/profile aliases. Outcomes use the task's site identity.
         val host = ledger.host
         val candidates = all().filter { skill ->
-            skill.origin != SkillOrigin.BUILTIN && "verified_v2" in skill.tags && "capability:$capability" in skill.tags &&
+            skill.origin != SkillOrigin.BUILTIN && ("verified_v2" in skill.tags ||
+                ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE && "demonstrated_candidate_v2" in skill.tags && host in skill.statsByHost) && "capability:$capability" in skill.tags &&
                 PortableSkills.failureTag(host) !in skill.tags && PortableSkills.safeProgram(skill.body, skill.post) &&
                 (capability == "custom" || PortableSkills.compatible(capability, skill.body, skill.post)) &&
                 (skill.params + PortableSkills.parameters(skill.body, skill.post)).all {
@@ -74,6 +77,10 @@ class SkillLibrary(private val memory: Memory) {
                 preconditionsHold(skill, sps, params) && entryMatches(skill, sps, params, ledger) &&
                 (ledger.goal.intent != com.appgate.brain.model.GoalIntent.LEARN_SITE ||
                     FailedStrategies.allowed(memory.site(ledger.host), FailedStrategies.key(sps, capability, skill.body, params), memory.now()))
+        }
+        if (ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE) {
+            candidates.filter { "demonstrated_candidate_v2" in it.tags && it.stat(host).failures == 0.0 && host in it.statsByHost }
+                .maxByOrNull { score(it, host) }?.let { return it }
         }
         candidates.filter { it.stat(host).let { local -> local.successes > 0 && local.p >= 0.5 } }
             .maxByOrNull { score(it, host) }?.let { return it }
