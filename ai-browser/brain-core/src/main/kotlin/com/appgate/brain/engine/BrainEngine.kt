@@ -117,15 +117,15 @@ class BrainEngine(
         return runCatching {
             val current = renderer.currentUrl()
             var page = if (allowedUrl(probe, current, profile)) executor.observe(clock()) else null
-            // A results page with none of the unfinished lesson controls cannot improve by
+            // A results page or non-dialog filter panel with no unfinished lesson targets cannot improve by
             // observation alone. Try one different safe practice search; no AI call,
             // lesson completion or cooldown reset is credited to this navigation.
             Curriculum.ensure(site)
-            val strandedResults = page?.let { p ->
-                p.pageType == PageType.RESULTS && p.settle == com.appgate.brain.model.Settle.IDLE && !p.dialogOpen &&
-                    site.curriculum.any { !it.done } &&
+            val strandedPage = page?.let { p ->
+                p.pageType in setOf(PageType.RESULTS, PageType.FACET_PANEL) && p.settle == com.appgate.brain.model.Settle.IDLE && !p.dialogOpen &&
+                    site.curriculum.any { !it.done && it.retryAt <= clock() } &&
                     site.curriculum.filter { !it.done }.none { LearningOpportunities.target(p, it.id) != null } &&
-                    knownSearch != null && knownSearch != current
+                    knownSearch != null && (knownSearch != current || p.pageType == PageType.FACET_PANEL)
             } == true
             // Description practice can start on this detail page. Back practice needs
             // a results checkpoint in the new lesson ledger, so first reestablish results.
@@ -137,7 +137,7 @@ class BrainEngine(
                 }
             } == true
             // Always observe an already open auth/challenge before navigating elsewhere.
-            if (page?.isHumanOnly != true && (page == null || strandedResults || (page.pageType == PageType.DETAIL && !usableDetail) ||
+            if (page?.isHumanOnly != true && (page == null || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
                     (page.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.UNKNOWN) && !page.dialogOpen &&
                         page.settle == com.appgate.brain.model.Settle.IDLE && knownSearch != null && knownSearch != current))) {
                 val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }

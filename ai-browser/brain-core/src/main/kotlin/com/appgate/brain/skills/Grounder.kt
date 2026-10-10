@@ -65,8 +65,13 @@ class Grounder(private val site: SiteModel?) {
             }
             s += 0.3 * a.roleScore
             val fails = site?.failureCount(sps.pageType, a.role, a.facetKey) ?: 0
-            if (fails > 0) { s -= (0.15 * fails).coerceAtMost(0.6); reasons += "failures $fails" }
-            if (a.regionRole.name == "FOOTER") s -= 0.5
+            if (fails > 0) {
+                // Role-wide history ranks targets; it must not permanently hide a
+                // confidently recognized live control. Procedure cooldowns still bound retries.
+                val penaltyLimit = if (a.role == role && a.roleScore >= 0.8) 0.25 else 0.6
+                s -= (0.15 * fails).coerceAtMost(penaltyLimit); reasons += "failures $fails"
+            }
+            if (a.regionRole.name == "FOOTER" && role !in setOf(Role.PAGE_NEXT, Role.PAGE_PREV, Role.LOAD_MORE)) s -= 0.5
             if (a.bbox != null && a.bbox.y < 0) s -= 0.2
             out += Grounding(a, s, reasons)
         }

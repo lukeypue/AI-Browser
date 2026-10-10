@@ -111,7 +111,7 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
   wait without creating a task or a success. An idle results page with no unfinished
   lesson targets may try one different practice search per probe; auth, busy pages,
   dialogs and live lesson controls prevent that recovery. One-minute probes continue; failed lessons back
-  off for 1/5/15/60 minutes unless relevant live controls change.
+  off for 1/5/15/60 minutes unless relevant live controls change. Pagination discovery and unrelated filter changes cannot reset that cooldown. Settled non-dialog filter panels with no unfinished targets can return to a known safe search when a lesson is due.
 - `SkillLibrary` — canonical program identity with independent host evidence; strong source
   evidence can admit a compatible procedure on a new host. A target failure blocks that
   host until an independently verified repair. Every action is grounded and verified again.

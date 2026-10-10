@@ -113,8 +113,13 @@ object LearningOpportunities {
             val target = target(page, item.id)
             // A dialog prerequisite is not evidence of the hidden page's other capabilities.
             if (target?.skillId == "dismiss_dialog" && item.id != "dismiss_dialog") continue
-            val shape = Hashing.short("${page.pageType}|${page.dialogOpen}|${target?.skillId}|" +
-                com.appgate.brain.memory.FailedStrategies.controlShape(page, target?.skillId ?: item.id))
+            // Discovery becoming unavailable at the footer is not a layout repair.
+            // Only this lesson's pagination controls can reopen its cooldown.
+            val pagination = item.id in setOf("next_page", "load_more")
+            val capability = if (pagination) item.id else target?.skillId ?: item.id
+            val targetShape = if (pagination) item.id else target?.skillId
+            val shape = Hashing.short("${page.pageType}|${page.dialogOpen}|$targetShape|" +
+                com.appgate.brain.memory.FailedStrategies.controlShape(page, capability))
             // A normal results -> drawer -> results cycle is not a repaired layout.
             val changedLayout = item.observedPage == page.pageType.name && item.opportunityShape.isNotBlank() && item.opportunityShape != shape
             val newlyExposedTarget = item.opportunity == "ABSENT" && target?.skillId == item.id

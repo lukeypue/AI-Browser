@@ -8,7 +8,7 @@ enum class DiagnosticCode { VERIFIED, NO_TARGET, REPEAT_STATE_LIMIT, OUTSIDE_TAS
 
 /** Diagnostics contain typed coordinates and counts, never action arguments or page text. */
 object SemanticDiagnostics {
-    private val capabilities = setOf("search", "constrain_numeric", "select_facet", "scroll_results", "next_page", "load_more", "sort_results", "open_item", "expand_description", "go_back", "dismiss_dialog", "open_filters", "open_facet", "apply_filters", "open_category", "prepare_message", "commit_send", "navigate", "custom")
+    private val capabilities = setOf("search", "constrain_numeric", "select_facet", "scroll_results", "seek_pagination", "next_page", "load_more", "sort_results", "open_item", "expand_description", "go_back", "dismiss_dialog", "open_filters", "open_facet", "apply_filters", "open_category", "prepare_message", "commit_send", "navigate", "custom")
     fun capability(value: String): String = value.takeIf { it in capabilities } ?: "other"
     fun host(url: String): String = runCatching { java.net.URI(url).host?.lowercase()?.take(253).orEmpty() }.getOrDefault("")
 
@@ -22,6 +22,8 @@ object SemanticDiagnostics {
         .put("facet_keys", com.appgate.brain.json.Json.arr(sps.affordances.filter { it.visible && it.role in setOf(Role.FACET, Role.FACET_OPEN) }.mapNotNull { FailedStrategies.facet(it.facetKey) }.distinct().sorted()))
         .put("dialog_roles", JsonObject().apply { sps.affordances.filter { it.visible && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) }.groupingBy { it.role.name }.eachCount().forEach { (role, count) -> put(role, count) } })
         .put("dialog_controls", sps.affordances.count { it.visible && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) })
+        .put("next_controls", sps.byRole(Role.PAGE_NEXT).size).put("load_more_controls", sps.byRole(Role.LOAD_MORE).size)
+        .put("scroll_y", sps.scrollY).put("scroll_height", sps.scrollHeight).put("viewport_height", sps.viewportHeight)
         .put("closers", sps.byRole(Role.CLOSE).size).put("dialog", sps.dialogOpen)
         .put("auth_wall", sps.authWall).put("challenge", sps.challenge).put("settle", sps.settle.name)
 
