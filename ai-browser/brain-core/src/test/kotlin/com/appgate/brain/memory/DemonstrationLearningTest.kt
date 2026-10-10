@@ -72,6 +72,14 @@ class DemonstrationLearningTest {
             assertNull(LearningOpportunities.target(p.copy(authWall = true), capability))
         }
     }
+    @Test fun approvedHostAliasUsesCanonicalOutcomeIdentity() {
+        val memory = Memory(InMemoryStorage()) { 1000L }
+        val p = page().copy(host = "www.example.com", url = "https://www.example.com/")
+        val skill = SkillCompiler.compileFromDemonstration(memory, null, "example.com", trace(), p, p, 1000)!!
+        assertTrue("example.com" in skill.statsByHost)
+        assertFalse("www.example.com" in skill.statsByHost)
+        assertNotNull(memory.skills.reusable(p, "search", mapOf("query" to "cars"), ledger()))
+    }
     @Test fun unsafeAndCrossSiteDemonstrationsAreRejected() {
         val memory = Memory(InMemoryStorage()) { 1000L }; val p = page()
         assertNull(SkillCompiler.compileFromDemonstration(memory, null, p.host, trace(Role.LOGIN), p, p, 1000))

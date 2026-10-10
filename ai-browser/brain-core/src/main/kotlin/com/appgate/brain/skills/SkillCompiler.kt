@@ -104,7 +104,7 @@ object SkillCompiler {
 
     /** A typed human trace is a proposal, never success evidence. It must replay in TRAIN. */
     fun compileFromDemonstration(memory: Memory, planner: Planner?, host: String, trace: JsonArray, before: SemanticPageState, after: SemanticPageState, now: Long): Skill? {
-        if (trace.size !in 1..8 || before.isHumanOnly || after.isHumanOnly || before.host != host ||
+        if (trace.size !in 1..8 || before.isHumanOnly || after.isHumanOnly || !com.appgate.brain.perception.UrlPatterns.sameSite("https://$host/", before.url) ||
             !com.appgate.brain.perception.UrlPatterns.sameSite(before.url, after.url)) return null
         val steps = trace.objects().map { t ->
             val role = Role.parse(t.optStringOrNull("role"))

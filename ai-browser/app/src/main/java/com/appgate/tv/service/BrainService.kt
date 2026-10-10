@@ -409,7 +409,8 @@ class BrainService : Service() {
             main.post { publish(state.copy(status = "No supported step was recorded. Tap TEACH and wait for recorder ready before demonstrating.")) }
             return
         }
-        val host = before.host
+        val profile = SiteProfiles.forHost(before.host) ?: SiteProfiles.generic(before.host)
+        val host = memory.site(profile.hosts.first()).host
         val after = runCatching { SpsParser(memory.site(host).facetVocabulary).parse(s.request(JsonObject().put("cmd", "observe"), 8_000L).optObject("observation")!!) }.getOrNull()
         val skill = after?.let { SkillCompiler.compileFromDemonstration(memory, null, host, teachTrace, before, it, System.currentTimeMillis()) }
         teachTrace.clear()
@@ -420,7 +421,6 @@ class BrainService : Service() {
         }
         val eng = engine ?: return
         val capability = skill.tags.firstOrNull { it.startsWith("capability:") }?.removePrefix("capability:") ?: return
-        val profile = SiteProfiles.forHost(host) ?: SiteProfiles.generic(host)
         val site = memory.site(host)
         val goal = com.appgate.brain.engine.Curriculum.nextGoal(site, profile, 0, before, capability)
         val task = TaskLedger("demo-check-" + System.currentTimeMillis(), goal, host, before.url, lesson = capability)
