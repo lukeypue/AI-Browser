@@ -113,7 +113,7 @@ class OpportunityCurriculumTest {
         assertEquals("next_page", Curriculum.nextLesson(restored, now + 2))
     }
 
-    @Test fun absentPaginationGetsMinuteObservationsWithoutGenericTaskChurn() {
+    @Test fun absentPaginationGetsOneBoundedRehearsalPerVisitWithoutFalseCredit() {
         var time = now
         val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000); page = 2 }
         val raw = fake.observe(1000)
@@ -132,8 +132,8 @@ class OpportunityCurriculumTest {
         val engine = BrainEngine(renderer, memory, { null }, events, config) { time }
         val session = LearningSession(engine, memory, events, listOf(profile()), clock = { time })
         repeat(60) { session.run(maxSites = 1); time += 60_000L }
-        assertEquals("an absent control must not launch generic learning tasks", 0, finished)
-        assertEquals(0, site.lessonOrdinal)
+        assertEquals("one available-capability rehearsal is allowed per visit", 60, finished)
+        assertEquals(60, site.lessonOrdinal)
         assertTrue("every minute still observes the site", observations >= 60)
         assertFalse(site.curriculum.single { it.id == "next_page" }.done)
     }

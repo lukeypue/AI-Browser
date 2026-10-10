@@ -124,7 +124,7 @@ class BrainEngine(
             val strandedPage = page?.let { p ->
                 p.pageType in setOf(PageType.RESULTS, PageType.FACET_PANEL) && p.settle == com.appgate.brain.model.Settle.IDLE && !p.dialogOpen &&
                     site.curriculum.any { !it.done && it.retryAt <= clock() } &&
-                    site.curriculum.filter { !it.done }.none { LearningOpportunities.target(p, it.id) != null } &&
+                    site.curriculum.filter { !it.done && it.retryAt <= clock() }.none { LearningOpportunities.target(p, it.id) != null } &&
                     knownSearch != null && (knownSearch != current || p.pageType == PageType.FACET_PANEL)
             } == true
             // Description practice can start on this detail page. Back practice needs

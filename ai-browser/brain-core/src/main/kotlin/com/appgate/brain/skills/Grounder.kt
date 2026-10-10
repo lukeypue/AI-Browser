@@ -73,6 +73,10 @@ class Grounder(private val site: SiteModel?) {
             }
             if (a.regionRole.name == "FOOTER" && role !in setOf(Role.PAGE_NEXT, Role.PAGE_PREV, Role.LOAD_MORE)) s -= 0.5
             if (a.bbox != null && a.bbox.y < 0) s -= 0.2
+            // A uniquely recognized, same-site Close on an observed dialog remains
+            // actionable despite role-wide history. Generic buttons and weak roles do not.
+            if (role == Role.CLOSE && sps.dialogOpen && a.role == Role.CLOSE && a.roleScore >= 0.7 &&
+                a.sameSite && !a.isCommit && sps.byRole(Role.CLOSE).size == 1) s = maxOf(s, 0.95)
             out += Grounding(a, s, reasons)
         }
         return out.sortedByDescending { it.score }

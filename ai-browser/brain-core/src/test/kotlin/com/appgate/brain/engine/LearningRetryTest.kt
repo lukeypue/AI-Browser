@@ -12,13 +12,13 @@ class LearningRetryTest {
     private val config = EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0, maxDecisionsWithoutProgress = 0)
     private fun profile(host: String) = SiteProfile("fake", "Fake", listOf(host), "https://$host/")
 
-    @Test fun ordinaryNoProgressRetriesAfterOneMinute() {
+    @Test fun ordinaryNoProgressRetriesAfterThirtySeconds() {
         val fake = FakeSite().apply { dialogShown = false }; val memory = Memory(InMemoryStorage())
         val events = object : EngineEvents {}
         LearningSession(BrainEngine(fake, memory, { null }, events, config, clock = { now }), memory, events,
             listOf(profile(fake.host)), clock = { now }).run(maxSites = 1)
         assertEquals("one failed opportunity should defer without duplicate tasks", 1, memory.site(fake.host).lessonOrdinal)
-        assertEquals(now + 60_000L, memory.site(fake.host).learningBlockedUntil)
+        assertEquals(now + 30_000L, memory.site(fake.host).learningBlockedUntil)
     }
 
     @Test fun existingOrdinaryCooldownIsShortenedWithoutErasingLearning() {
@@ -28,12 +28,12 @@ class LearningRetryTest {
         val events = object : EngineEvents {}
         LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events,
             listOf(profile(fake.host)), clock = { now }).run(maxSites = 1)
-        assertEquals(now + 60_000L, site.learningBlockedUntil)
+        assertEquals(now + 30_000L, site.learningBlockedUntil)
         assertTrue(site.curriculum.single { it.id == "search" }.done)
         assertTrue(fake.log.isEmpty())
     }
 
-    @Test fun pendingLessonCooldownSurvivesMigrationAndAvoidsEmptyProbes() {
+    @Test fun pendingLessonCooldownAdoptsThirtySecondsWithoutEmptyProbes() {
         val fake = FakeSite(); val memory = Memory(InMemoryStorage()); val site = memory.site(fake.host)
         Curriculum.ensure(site)
         site.curriculum.forEach { it.completedAt = now - 1 }
@@ -42,9 +42,9 @@ class LearningRetryTest {
         val events = object : EngineEvents {}
         LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events,
             listOf(profile(fake.host)), clock = { now }).run(maxSites = 1)
-        assertEquals(now + 15 * 60_000L, site.learningBlockedUntil)
+        assertEquals(now + 30_000L, site.learningBlockedUntil)
         assertTrue(fake.log.isEmpty())
-        assertEquals("cooldown:15m", Curriculum.unavailableReason(site, now,
+        assertEquals("cooldown:30s", Curriculum.unavailableReason(site, now,
             com.appgate.brain.perception.SpsParser().parse(fake.observe(1000))))
     }
 
@@ -83,7 +83,7 @@ class LearningRetryTest {
                 listOf(profile(fake.host), profile("review.market")), clock = { now })
             session.run()
             val countdown = messages.single { it.contains("next automatic retry") }
-            assertTrue(countdown, countdown.contains("1 min"))
+            assertTrue(countdown, countdown.contains("30 sec"))
             assertEquals(countdown, needsHuman, countdown.contains("need your review"))
             assertFalse(countdown, countdown.contains("sign-in"))
             assertTrue(fake.log.isEmpty())

@@ -6,10 +6,10 @@ import com.appgate.brain.util.Hashing
 
 /** Short-lived, content-free circuit breaker for overnight practice across task ledgers.
  * A changed control layout or a different procedure can be tried immediately. A repeated
- * failure is retried after five minutes; the site's one-minute scheduler is unchanged.
+ * failure is retried after thirty seconds; the site's thirty-second scheduler is unchanged.
  */
 object FailedStrategies {
-    private const val WINDOW_MS = 5 * 60_000L
+    private const val WINDOW_MS = com.appgate.brain.engine.Curriculum.RETRY_MS
     private const val LIMIT = 2
     private const val MAX_RECORDS = 64
 

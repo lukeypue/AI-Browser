@@ -59,10 +59,11 @@ class LearningStallRegressionTest {
         assertFalse(lesson.done)
     }
 
-    private fun probePanel(sameUrl: Boolean = false, cooling: Boolean = false, dialog: Boolean = false, live: Boolean = false, auth: Boolean = false): Pair<SemanticPageState?, Int> {
+    private fun probePanel(sameUrl: Boolean = false, cooling: Boolean = false, dialog: Boolean = false, live: Boolean = false, auth: Boolean = false, cooledTarget: Boolean = false): Pair<SemanticPageState?, Int> {
         val fake = FakeSite().apply { dialogShown = false; navigate(if (sameUrl) "https://fake.market/search?q=mountain+bike" else "https://fake.market/panel", 1000) }
         val memory = Memory(InMemoryStorage()) { now }; val site = memory.site(fake.host); Curriculum.ensure(site)
-        site.curriculum.filter { it.id != if (live) "constrain_numeric" else "next_page" }.forEach { it.completedAt = now - 1 }
+        site.curriculum.filter { it.id !in (if (cooledTarget) setOf("constrain_numeric", "select_facet") else setOf(if (live) "constrain_numeric" else "next_page")) }.forEach { it.completedAt = now - 1 }
+        if (cooledTarget) site.curriculum.single { it.id == "constrain_numeric" }.retryAt = now + 30_000
         if (cooling) site.curriculum.filter { !it.done }.forEach { it.retryAt = now + 60_000 }
         val raw = Json.parseObject(fake.observe(1000)).put("items", JsonArray())
             .put("elements", JsonArray(listOf("price", "distance", "year").map { key ->
@@ -77,7 +78,7 @@ class LearningStallRegressionTest {
         val engine = BrainEngine(renderer, memory, { null }, object : EngineEvents {}, EngineConfig(pacingOverrideMs = 0)) { now }
         val profile = SiteProfile("fake", "Fake", listOf(fake.host), "https://fake.market/", searchUrl = "https://fake.market/search?q={q}")
         val observed = engine.probeLearning(profile)
-        assertFalse(site.curriculum.single { it.id == if (live) "constrain_numeric" else "next_page" }.done)
+        assertFalse(site.curriculum.single { it.id == if (cooledTarget) "select_facet" else if (live) "constrain_numeric" else "next_page" }.done)
         assertEquals(0, site.lessonOrdinal)
         return observed to navigations
     }
@@ -88,6 +89,10 @@ class LearningStallRegressionTest {
     }
     @Test fun strandedPanelCanReloadItsExistingSearchUrl() {
         val (page, navigations) = probePanel(sameUrl = true)
+        assertEquals(PageType.RESULTS, page?.pageType); assertEquals(1, navigations)
+    }
+    @Test fun cooledFacetTargetDoesNotStrandOtherDueLessons() {
+        val (page, navigations) = probePanel(cooledTarget = true)
         assertEquals(PageType.RESULTS, page?.pageType); assertEquals(1, navigations)
     }
     @Test fun coolingPanelDoesNotNavigate() {

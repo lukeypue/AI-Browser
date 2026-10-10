@@ -84,7 +84,7 @@ class LearningSession(
         private set
     @Volatile var activeSince: Long = 0L
         private set
-    private val lessonRetryMs = 60_000L
+    private val lessonRetryMs = Curriculum.RETRY_MS
 
     fun stop() { stopRequested = true; engine.requestStop() }
 
@@ -120,6 +120,7 @@ class LearningSession(
             }
             if (site.challengeDay != clock() / 86_400_000L) { site.challengeDay = clock() / 86_400_000L; site.challengesToday = 0 }
             val now = clock()
+            Curriculum.migrateRetries(site, now)
             // Migrate old generic cooldowns, but never shorten a pending lesson's retry.
             if (!site.learningNeedsHuman && site.challengesToday < 3 && !Curriculum.allLessonsComplete(site) &&
                 site.learningBlockedUntil > now + lessonRetryMs && site.learningBlockedUntil <= now + 30 * 60_000L) {
@@ -141,10 +142,11 @@ class LearningSession(
             var blockedInARow = 0
             events.status("Learning ${profile.name} — ${Curriculum.progress(site)}")
             while (!stopRequested && clock() - startedAt < perSiteChunkMs && goalsThisVisit < 4) {
-                // A minute recheck is an observation, not a new generic finding task.
+                // A retry recheck is an observation, not a new generic finding task.
                 val page = engine.probeLearning(profile)
                 if (page != null) Curriculum.observe(site, page, clock())
                 val lesson = if (page == null || site.learningNeedsHuman) "" else Curriculum.nextLesson(site, clock(), page)
+                    .ifBlank { Curriculum.practiceLesson(site, clock(), page) }
                 if (lesson.isBlank()) {
                     site.learningBlockedUntil = maxOf(clock() + lessonRetryMs, Curriculum.earliestRetryAt(site, clock()))
                     if (!site.learningNeedsHuman) site.lastLearningStatus = "Waiting for an observed lesson opportunity"
@@ -152,6 +154,9 @@ class LearningSession(
                     memory.saveSite(site)
                     break
                 }
+                val rehearsing = !Curriculum.allLessonsComplete(site) && site.curriculum.any { it.id == lesson && it.done }
+                if (rehearsing) events.diagnostic(site.host, "learning_recheck",
+                    SemanticDiagnostics.learningRecheck(site, page, clock()).put("rehearsal", SemanticDiagnostics.capability(lesson)))
                 val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal++, page, lesson)
                 goalsThisVisit++
                 val ledger = TaskLedger(Hashing.short("learn" + System.nanoTime()), goal, profile.hosts.first(), page!!.url)
@@ -176,7 +181,12 @@ class LearningSession(
                     TaskStatus.PAUSED -> return null
                     else -> if (out.successfulSkills.none { it !in masteredBefore }) blockedInARow++ else blockedInARow = 0
                 }
-                if (blockedInARow >= 3) { site.learningBlockedUntil = clock() + lessonRetryMs; memory.saveSite(site); events.log("info", "${profile.name}: three goals without a new verified skill; retry in 1 min"); break }
+                if (rehearsing) {
+                    site.learningBlockedUntil = clock() + lessonRetryMs
+                    memory.saveSite(site)
+                    break
+                }
+                if (blockedInARow >= 3) { site.learningBlockedUntil = clock() + lessonRetryMs; memory.saveSite(site); events.log("info", "${profile.name}: three goals without a new verified skill; retry in 30 sec"); break }
                 if (Curriculum.allLessonsComplete(site)) { site.learningBlockedUntil = clock() + 24 * 60 * 60_000L; memory.saveSite(site); break }
             }
             siteIndex++
@@ -202,7 +212,7 @@ class LearningSession(
                 val reviewNote = if (sites.any { memory.site(it.hosts.first()).learningNeedsHuman })
                     " Some sites need your review; use their Review buttons." else ""
                 val status = if (next == null) "Learning is waiting for you. Open a site's Review button, complete sign-in or verification, then tap Done."
-                    else "Learning is still active; next automatic retry in ${((next - now + 59_999L) / 60_000L).coerceAtLeast(1)} min.$reviewNote"
+                    else "Learning is still active; next automatic retry in ${((next - now + 999L) / 1_000L).coerceAtLeast(1)} sec.$reviewNote"
                 if (status != lastStatus) { events.status(status); lastStatus = status }
                 Thread.sleep(if (next == null) 1_000L else (next - now).coerceIn(1L, 1_000L))
             }

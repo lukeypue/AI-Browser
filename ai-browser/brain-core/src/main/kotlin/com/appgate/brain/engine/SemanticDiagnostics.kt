@@ -17,6 +17,13 @@ object SemanticDiagnostics {
         .put("controls", sps.affordances.count { it.visible && it.enabled })
         .put("search_boxes", sps.byRole(Role.SEARCH_BOX).size).put("result_links", sps.byRole(Role.RESULT_ITEM).size)
         .put("facet_controls", sps.byRole(Role.FACET).size)
+        .put("filter_shapes", com.appgate.brain.json.Json.arr(sps.affordances.filter { it.visible && it.role in setOf(Role.FACET, Role.FACET_OPEN) }.map {
+            JsonObject().put("role", it.role.name).put("key", FailedStrategies.facet(it.facetKey)).put("kind", it.facetKind)
+                .put("tag", it.tag).put("expanded", it.features["expanded"] == 1.0)
+        }.distinctBy { it.toString() }.take(32)))
+        .put("close_shapes", com.appgate.brain.json.Json.arr(sps.byRole(Role.CLOSE).take(8).map {
+            JsonObject().put("score", it.roleScore).put("region", it.regionRole.name).put("same_site", it.sameSite).put("commit", it.isCommit)
+        }))
         .put("facet_openers", sps.byRole(Role.FACET_OPEN).size)
         .put("filter_dialog", LearningOpportunities.dialogHoldsFilters(sps))
         .put("facet_keys", com.appgate.brain.json.Json.arr(sps.affordances.filter { it.visible && it.role in setOf(Role.FACET, Role.FACET_OPEN) }.mapNotNull { FailedStrategies.facet(it.facetKey) }.distinct().sorted()))

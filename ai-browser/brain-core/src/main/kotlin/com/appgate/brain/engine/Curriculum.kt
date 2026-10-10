@@ -19,6 +19,7 @@ import com.appgate.brain.util.Hashing
  * goals in a row are blocked. Items are keyed by the skill whose verified success completes them.
  */
 object Curriculum {
+    const val RETRY_MS = 30_000L
     private val items = listOf(
         "search" to "Search verifies (query typed, results change)",
         "constrain_numeric" to "A numeric facet (price/mileage/year) applies and verifies",
@@ -82,6 +83,23 @@ object Curriculum {
         return eligible.filter { !it.done }.minWithOrNull(compareBy<CurriculumItem> { it.blocked + it.unavailable }.thenBy { order.indexOf(it.id) })?.id.orEmpty()
     }
 
+    /** Local rehearsal keeps available skills usable while an absent capability waits. */
+    fun practiceLesson(site: SiteModel, now: Long, page: SemanticPageState): String {
+        if (page.isHumanOnly || page.dialogOpen || page.settle != com.appgate.brain.model.Settle.IDLE ||
+            page.pageType != com.appgate.brain.model.PageType.RESULTS || allLessonsComplete(site)) return ""
+        if (site.curriculum.any { !it.done && LearningOpportunities.target(page, it.id) != null }) return ""
+        return site.curriculum.filter { it.done && it.retryAt <= now &&
+            LearningOpportunities.target(page, it.id)?.skillId == it.id && it.id != "search" }
+            .minByOrNull { it.completedAt }?.id.orEmpty()
+    }
+
+    /** Ordinary saved failure delays adopt the user's new retry interval. */
+    fun migrateRetries(site: SiteModel, now: Long) {
+        if (site.learningNeedsHuman || site.challengesToday >= 3 || allLessonsComplete(site)) return
+        site.curriculum.filter { !it.done && it.retryAt > now + RETRY_MS }.forEach { it.retryAt = now + RETRY_MS }
+        if (site.learningBlockedUntil > now + RETRY_MS) site.learningBlockedUntil = now + RETRY_MS
+    }
+
     /**
      * Why no lesson is available right now. Typed so an hour of "available=false" rechecks can be
      * diagnosed from the log alone (review finding, September 30 2026): distinguish a cooldown
@@ -95,7 +113,7 @@ object Curriculum {
         val pending = site.curriculum.filter { !it.done }
         if (pending.isEmpty()) return "all_lessons_complete"
         val cooling = pending.filter { it.retryAt > now }
-        if (cooling.size == pending.size) return "cooldown:" + ((cooling.minOf { it.retryAt } - now + 59_999L) / 60_000L) + "m"
+        if (cooling.size == pending.size) return "cooldown:" + ((cooling.minOf { it.retryAt } - now + 999L) / 1_000L) + "s"
         val absent = pending.filter { it.retryAt <= now && LearningOpportunities.target(page, it.id) == null }
         if (absent.size == pending.count { it.retryAt <= now }) return "no_target_on_${page.pageType.name.lowercase()}"
         return "not_observed_available"
@@ -150,17 +168,16 @@ object Curriculum {
         ensure(site)
         val verifiedSkills = ledger.successfulSkills
         if (ledger.done && ledger.lesson.isNotBlank() && ledger.lesson !in ledger.attemptedSkills) {
-            site.curriculum.firstOrNull { it.id == ledger.lesson && !it.done }?.let { it.unavailable++; it.retryAt = now + retryDelay(it.unavailable) }
+            site.curriculum.firstOrNull { it.id == ledger.lesson && !it.done }?.let { it.unavailable++; it.retryAt = now + RETRY_MS }
         }
         site.curriculum.forEach { item ->
             if (item.done || item.id !in ledger.attemptedSkills) return@forEach
             item.attempts++
             if (item.id in verifiedSkills) { item.completedAt = ledger.updatedAt.takeIf { it > 0 } ?: now; item.retryAt = 0L }
-            else { item.blocked++; item.retryAt = now + retryDelay(item.blocked) }
+            else { item.blocked++; item.retryAt = now + RETRY_MS }
         }
     }
 
-    private fun retryDelay(attempts: Int): Long = listOf(60_000L, 5 * 60_000L, 15 * 60_000L, 60 * 60_000L)[(attempts - 1).coerceIn(0, 3)]
 
     fun progress(site: SiteModel): String {
         ensure(site)

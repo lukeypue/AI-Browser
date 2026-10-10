@@ -54,9 +54,9 @@ object LearningOpportunities {
         return when (lesson) {
             "search" -> if (has(Role.SEARCH_BOX)) LearningTarget("search") else null
             "next_page" -> if (results && has(Role.PAGE_NEXT)) LearningTarget(lesson)
-                else if (canSeekPagination) LearningTarget("seek_pagination") else null
+                else if (canSeekPagination && !has(Role.LOAD_MORE)) LearningTarget("seek_pagination") else null
             "load_more" -> if (results && has(Role.LOAD_MORE)) LearningTarget(lesson)
-                else if (canSeekPagination) LearningTarget("seek_pagination") else null
+                else if (canSeekPagination && !has(Role.PAGE_NEXT)) LearningTarget("seek_pagination") else null
             "scroll_results" -> if (results && page.resultKeys.isNotEmpty() && page.scrollHeight > page.scrollY + page.viewportHeight + 200) LearningTarget(lesson) else null
             "sort_results" -> if (!results) null else controls.firstOrNull { it.role == Role.SORT && alternative(it) != null }
                 ?.let { LearningTarget(lesson, mapOf("order" to alternative(it)!!)) }

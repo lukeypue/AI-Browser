@@ -86,13 +86,13 @@ class LearningReliabilityTest {
         }
         val first = run("first"); val firstCalls = calls
         assertTrue(firstCalls > 0)
-        now += 60_000L
+        now += 1_000L
         val second = run("second")
         assertTrue("a fresh ledger must not reset failed AI repairs", calls - firstCalls < firstCalls)
         assertTrue("a fresh ledger must avoid the same broken control", second.actions < first.actions)
         assertNotEquals(TaskStatus.DONE, second.status)
         val beforeRetry = calls
-        now += 6 * 60_000L
+        now += 30_000L
         run("later")
         assertTrue("failures must expire so repaired pages can recover", calls > beforeRetry)
     }
