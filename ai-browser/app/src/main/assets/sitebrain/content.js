@@ -229,7 +229,7 @@
 
   function dialogElements() {
     const out = [];
-    document.querySelectorAll("[role=dialog], [role=alertdialog], [aria-modal=true], dialog[open]").forEach((d) => { if (visible(d)) out.push(d); });
+    document.querySelectorAll("[role=dialog], [role=alertdialog], [aria-modal=true], dialog[open]").forEach((d) => { if (visible(d) && inViewport(d.getBoundingClientRect())) out.push(d); });
     // Nonsemantic overlays need visible interactive content. Fixed page chrome and
     // empty decorative layers are not dialogs merely because they have a large box.
     const vh = window.innerHeight || 1, vw = window.innerWidth || 1;

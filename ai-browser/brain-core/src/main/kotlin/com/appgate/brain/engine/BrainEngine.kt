@@ -85,6 +85,7 @@ class BrainEngine(
     private var programBefore: SemanticPageState? = null
     private var lessonsBefore: Set<String> = emptySet()
     private val learningBusySince = mutableMapOf<String, Long>()
+    private val emptyLandingRecoveryAt = mutableMapOf<String, Long>()
 
     fun requestStop() { stopRequested.set(true) }
     fun clearStop() { stopRequested.set(false) }
@@ -141,6 +142,17 @@ class BrainEngine(
                     site.curriculum.filter { !it.done && it.retryAt <= clock() }.none { LearningOpportunities.target(p, it.id) != null } &&
                     knownSearch != null && (knownSearch != current || p.pageType == PageType.FACET_PANEL)
             } == true
+            // A sparse landing at the expected URL is still stranded. Observe it safely,
+            // then allow one read-only reload per retry interval, never on auth/dialogs.
+            val emptyLanding = page?.let { p ->
+                p.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.UNKNOWN) &&
+                    p.settle == com.appgate.brain.model.Settle.IDLE && !p.dialogOpen && !p.isHumanOnly &&
+                    p.resultKeys.isEmpty() && site.curriculum.none { LearningOpportunities.target(p, it.id) != null }
+            } == true
+            val emptyLandingDue = emptyLanding && !site.learningNeedsHuman && site.challengesToday < 3 &&
+                site.learningBlockedUntil <= clock() && knownSearch != null && knownSearch == current &&
+                (emptyLandingRecoveryAt[host]?.let { clock() - it >= Curriculum.RETRY_MS } ?: true)
+            if (!emptyLanding && page != null) emptyLandingRecoveryAt.remove(host)
             // Description practice can start on this detail page. Back practice needs
             // a results checkpoint in the new lesson ledger, so first reestablish results.
             val usableDetail = page?.let { p ->
@@ -151,19 +163,20 @@ class BrainEngine(
                 }
             } == true
             // Always observe an already open auth/challenge before navigating elsewhere.
-            if (page?.isHumanOnly != true && (page == null || recoveryDue || (page.pageType == PageType.ERROR && page.settle == com.appgate.brain.model.Settle.IDLE && !page.dialogOpen) || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
+            if (page?.isHumanOnly != true && (page == null || recoveryDue || emptyLandingDue || (page.pageType == PageType.ERROR && page.settle == com.appgate.brain.model.Settle.IDLE && !page.dialogOpen) || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
                     (page.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.UNKNOWN) && !page.dialogOpen &&
                         page.settle == com.appgate.brain.model.Settle.IDLE && knownSearch != null && knownSearch != current))) {
                 val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }
                     ?: profile.startUrl.takeIf { allowedUrl(probe, it, profile) } ?: return@runCatching null
+                if (emptyLandingDue) emptyLandingRecoveryAt[host] = clock()
                 val outcome = executor.execute(Action(ActionKind.NAVIGATE, url = target,
                     effect = com.appgate.brain.model.EffectClass.NAVIGATE), emptySps(host), EngineMode.TRAIN, emptyList(), null, clock())
                 page = (outcome as? ExecOutcome.Done)?.after ?: return@runCatching null
-                if (recoveryDue) {
+                if (recoveryDue || emptyLandingDue) {
                     learningBusySince.remove(host)
                     site.lastLearningStatus = "Rechecked safe search after a stalled page"
                     events.diagnostic(host, "learning_recovery", JsonObject()
-                        .put("reason", if (busyExpired) "busy_timeout" else "failed_approach")
+                        .put("reason", if (emptyLandingDue) "empty_landing" else if (busyExpired) "busy_timeout" else "failed_approach")
                         .put("page_type", page!!.pageType.name))
                 }
             }

@@ -258,3 +258,14 @@ test('a delayed listing response cannot settle the departing results document', 
     await page.waitForURL('**/item/100001', {timeout:3000});
   } finally { await page.close(); }
 });
+
+test('offscreen explicit dialog leaves current results available', async () => {
+  const page = await fixture(style + '<header><button>Close</button></header>' +
+    '<div role="dialog" style="position:fixed;top:-950px;height:100px;width:412px"><button>Close</button></div>' +
+    '<main>' + cards(2) + '</main>');
+  try {
+    const obs = await page.evaluate(() => window.__brainObserve());
+    assert.equal(obs.signals.dialog, false);
+    assert.equal(obs.items.length, 2);
+  } finally { await page.close(); }
+});

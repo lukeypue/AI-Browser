@@ -47,3 +47,7 @@ test('full-screen click-through wrapper is not a blocking dialog', () => {
 test('transparent auto-z layout wrapper remains excluded', () => {
   assert.equal(detect([element({height: 915, transparentAuto: true})]).length, 0);
 });
+
+test('explicit dialog outside the viewport does not block live results', () => {
+  assert.equal(detect([element({explicit: true, top: -950, height: 100})]).length, 0);
+});

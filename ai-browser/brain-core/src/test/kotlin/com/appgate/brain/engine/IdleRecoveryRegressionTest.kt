@@ -94,4 +94,52 @@ class IdleRecoveryRegressionTest {
         assertTrue(Curriculum.progress(site).contains("not present"))
         assertFalse(Curriculum.allLessonsComplete(site))
     }
+    @Test fun emptyHomeAtKnownSearchUrlGetsBoundedRecoveryWithoutTeacherOrCredit() {
+        val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/?q=Ford", 1000) }
+        var now = initial
+        var navigations = 0
+        val raw = Json.parseObject(fake.observe(1000)).put("elements", JsonArray()).put("items", JsonArray())
+            .put("signals", JsonObject())
+        assertEquals(PageType.HOME, com.appgate.brain.perception.SpsParser().parse(raw.toString(), now).pageType)
+        val renderer = object : Renderer by fake {
+            override fun observe(timeoutMs: Long) = raw.toString()
+            override fun navigate(url: String, timeoutMs: Long): RendererResult { navigations++; return fake.navigate(url, timeoutMs) }
+        }
+        val memory = Memory(InMemoryStorage()) { now }
+        val engine = BrainEngine(renderer, memory, { error("empty page must not call teacher") }, object : EngineEvents {}, config) { now }
+        engine.probeLearning(profile(fake).copy(searchUrl = "https://fake.market/?q={q}"))
+        assertEquals("same URL must not strand a blank landing page", 1, navigations)
+        engine.probeLearning(profile(fake).copy(searchUrl = "https://fake.market/?q={q}"))
+        assertEquals("do not reload on every observation", 1, navigations)
+        now += Curriculum.RETRY_MS
+        engine.probeLearning(profile(fake).copy(searchUrl = "https://fake.market/?q={q}"))
+        assertEquals(2, navigations)
+        assertTrue(memory.site(fake.host).curriculum.none { it.done })
+        assertEquals(0, memory.site(fake.host).lessonOrdinal)
+    }
+
+    @Test fun emptyLandingRecoveryRespectsHumanDialogBusyAndCooldownBoundaries() {
+        for (state in listOf("auth", "challenge", "dialog", "busy", "hold", "cooldown", "challenge_limit")) {
+            val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/?q=Ford", 1000) }
+            val raw = Json.parseObject(fake.observe(1000)).put("elements", JsonArray()).put("items", JsonArray())
+                .put("signals", JsonObject().put("passwordFields", if (state == "auth") 1 else 0)
+                    .put("sparse", true).put("challengeWidget", state == "challenge").put("dialog", state == "dialog"))
+            if (state == "busy") raw.put("settle", JsonObject().put("state", "BUSY"))
+            val memory = Memory(InMemoryStorage()) { initial }
+            val site = memory.site(fake.host)
+            if (state == "hold") site.learningNeedsHuman = true
+            if (state == "cooldown") site.learningBlockedUntil = initial + Curriculum.RETRY_MS
+            if (state == "challenge_limit") site.challengesToday = 3
+            var navigations = 0
+            val renderer = object : Renderer by fake {
+                override fun observe(timeoutMs: Long) = raw.toString()
+                override fun navigate(url: String, timeoutMs: Long): RendererResult { navigations++; return fake.navigate(url, timeoutMs) }
+            }
+            BrainEngine(renderer, memory, { error("probe is local only") }, object : EngineEvents {}, config) { initial }
+                .probeLearning(profile(fake).copy(searchUrl = "https://fake.market/?q={q}"))
+            assertEquals("leave $state untouched", 0, navigations)
+            assertTrue(site.curriculum.none { it.done })
+        }
+    }
+
 }
