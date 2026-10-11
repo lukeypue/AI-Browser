@@ -94,7 +94,8 @@ class LearningReliabilityTest {
         val beforeRetry = calls
         now += 30_000L
         run("same-shape-retry")
-        assertEquals("site cooldown must not erase the failed procedure", beforeRetry, calls)
+        assertTrue("ordinary retry must admit a fresh teacher repair", calls > beforeRetry)
+        assertTrue("fresh repairs must keep the repeated failure history", Memory(storage) { now }.site(fake.host).strategyFailures.values.any { it.count >= 2 })
         now += 6 * 60 * 60_000L
         run("later")
         assertTrue("failures must expire so repaired pages can recover", calls > beforeRetry)

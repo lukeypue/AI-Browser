@@ -52,6 +52,15 @@ object FailedStrategies {
         return (site.strategyFailures[key]?.count ?: 0) < LIMIT
     }
 
+    /** A repair proposes a new procedure; holding every proposal for six hours can
+     * strand an otherwise usable page. Keep its history, but admit one fresh model
+     * attempt after the ordinary learning retry. record() reserves that slot before
+     * transport. Individual failed programs remain held by allowed(). */
+    fun repairAllowed(site: SiteModel, key: String, now: Long): Boolean {
+        if (allowed(site, key, now)) return true
+        return now - site.strategyFailures.getValue(key).at >= com.appgate.brain.engine.Curriculum.RETRY_MS
+    }
+
     fun record(site: SiteModel, key: String, success: Boolean, now: Long) {
         prune(site, now)
         if (success) site.strategyFailures.remove(key)

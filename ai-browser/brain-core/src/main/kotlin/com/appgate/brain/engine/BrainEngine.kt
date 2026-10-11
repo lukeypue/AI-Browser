@@ -138,7 +138,7 @@ class BrainEngine(
                 }
             } == true
             // Always observe an already open auth/challenge before navigating elsewhere.
-            if (page?.isHumanOnly != true && (page == null || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
+            if (page?.isHumanOnly != true && (page == null || (page.pageType == PageType.ERROR && page.settle == com.appgate.brain.model.Settle.IDLE && !page.dialogOpen) || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
                     (page.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.UNKNOWN) && !page.dialogOpen &&
                         page.settle == com.appgate.brain.model.Settle.IDLE && knownSearch != null && knownSearch != current))) {
                 val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }
@@ -764,7 +764,7 @@ class BrainEngine(
         if (ledger.llmCalls >= ledger.goal.budget.llmCalls) { ledger.note("planner budget exhausted"); return false }
         if (ledger.lastPlannerStateHash == sps.hash && ledger.plannerCallsOnSameState >= config.maxPlannerCallsSameState) { ledger.note("planner already tried this state twice"); return false }
         val plannerKey = FailedStrategies.key(sps, capability)
-        if (ledger.goal.intent == GoalIntent.LEARN_SITE && !FailedStrategies.allowed(site, plannerKey, clock())) {
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && !FailedStrategies.repairAllowed(site, plannerKey, clock())) {
             ledger.note("recent AI repairs failed on this page; waiting for a changed page or cooldown")
             return false
         }

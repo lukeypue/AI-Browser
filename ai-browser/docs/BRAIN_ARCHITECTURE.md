@@ -102,8 +102,9 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
 - `BetaStat` — Beta(α, β) with daily decay 0.98; routing uses posterior mean *and* count.
 - `Consolidation` — retire bindings (p<0.3 after 5 trials, 60 days unseen), shadow weak legacy version bindings, prune failures/edges, dedupe compiled skills, budgets, **Brier > 0.25 ⇒ quarantine**.
 - `FailedStrategies` — overnight practice remembers failed procedure shapes and AI repair attempts
-  across task ledgers. Two unsuccessful attempts hold that unchanged shape for six hours; changed
-  controls and different procedures remain eligible. At most 64 content-free records per host.
+  across task ledgers. Two unsuccessful attempts hold an unchanged concrete procedure for six hours; changed
+  controls and different procedures remain eligible. AI proposal history is retained, but a fresh
+  repair proposal may be reserved after thirty seconds, within existing task/teacher budgets. At most 64 content-free records per host.
   Site rotation still retries after thirty seconds. A verified procedure clears its failure record.
 - `SkillCompiler` — verified local/planner programs → `COMPILED` skills (values → params);
   typed human demonstrations → parameterized `DEMONSTRATED` training candidates.
@@ -113,7 +114,7 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
 - `Curriculum` — per-site goals selected from observed live opportunities. Unavailable controls
   wait without creating a task or a success. An idle results page with no unfinished
   lesson targets may try one different practice search per probe; auth, busy pages,
-  dialogs and live lesson controls prevent that recovery. Thirty-second probes and ordinary lesson retries continue unless human/challenge boundaries hold the site. Available completed skills can be rehearsed while absent unfinished capabilities wait, without awarding those missing capabilities. Pagination discovery and unrelated filter changes cannot reset that cooldown. Settled non-dialog filter panels with no unfinished targets can return to a known safe search when a lesson is due.
+  dialogs and live lesson controls prevent that recovery. Thirty-second probes and ordinary lesson retries continue unless human/challenge boundaries hold the site. A settled non-dialog error page gets one safe navigation retry per probe, even when already at the known search URL; navigation does not award learning credit. Available completed skills can be rehearsed while absent unfinished capabilities wait, without awarding those missing capabilities. Pagination discovery and unrelated filter changes cannot reset that cooldown. Settled non-dialog filter panels with no unfinished targets can return to a known safe search when a lesson is due.
 - `SkillLibrary` — canonical program identity with independent host evidence; strong source
   evidence can admit a compatible procedure on a new host. A target failure blocks that
   host until an independently verified repair. Every action is grounded and verified again.
