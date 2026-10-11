@@ -182,6 +182,8 @@ object Curriculum {
     fun progress(site: SiteModel): String {
         ensure(site)
         val done = site.curriculum.count { it.done }
-        return "$done/${site.curriculum.size} curriculum goals verified"
+        val absent = site.curriculum.count { !it.done && it.opportunity == "ABSENT" }
+        return "$done/${site.curriculum.size} curriculum goals verified" +
+            if (absent > 0) "; $absent lesson control(s) not present on the observed page" else ""
     }
 }

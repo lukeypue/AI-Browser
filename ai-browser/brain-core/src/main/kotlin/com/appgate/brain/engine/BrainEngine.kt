@@ -84,6 +84,7 @@ class BrainEngine(
     private var latestPage: SemanticPageState? = null
     private var programBefore: SemanticPageState? = null
     private var lessonsBefore: Set<String> = emptySet()
+    private val learningBusySince = mutableMapOf<String, Long>()
 
     fun requestStop() { stopRequested.set(true) }
     fun clearStop() { stopRequested.set(false) }
@@ -118,6 +119,18 @@ class BrainEngine(
         return runCatching {
             val current = renderer.currentUrl()
             var page = if (allowedUrl(probe, current, profile)) executor.observe(clock()) else null
+            // Background requests can keep an otherwise stranded page BUSY forever.
+            // Measure across site visits, then try one read-only reset at the next probe.
+            val busyExpired = if (page?.settle == com.appgate.brain.model.Settle.BUSY && page?.isHumanOnly != true) {
+                clock() - learningBusySince.getOrPut(host) { clock() } >= 60_000L
+            } else { if (page != null) learningBusySince.remove(host); false }
+            val failedApproach = site.lastLearningStatus.startsWith("FAILED:") || site.lastLearningStatus.startsWith("PARTIAL:")
+            val resetFailedPage = failedApproach && (site.lastLearningStatus.contains("recently failed approaches") ||
+                site.lastLearningStatus.contains("no verified procedure available")) &&
+                page?.settle == com.appgate.brain.model.Settle.IDLE
+            val recoveryDue = !site.learningNeedsHuman && site.challengesToday < 3 &&
+                site.learningBlockedUntil <= clock() && page?.isHumanOnly != true &&
+                page?.pageType !in setOf(PageType.MESSAGES, PageType.PROFILE) && (resetFailedPage || busyExpired)
             // A results page or non-dialog filter panel with no unfinished lesson targets cannot improve by
             // observation alone. Try one different safe practice search; no AI call,
             // lesson completion or cooldown reset is credited to this navigation.
@@ -138,7 +151,7 @@ class BrainEngine(
                 }
             } == true
             // Always observe an already open auth/challenge before navigating elsewhere.
-            if (page?.isHumanOnly != true && (page == null || (page.pageType == PageType.ERROR && page.settle == com.appgate.brain.model.Settle.IDLE && !page.dialogOpen) || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
+            if (page?.isHumanOnly != true && (page == null || recoveryDue || (page.pageType == PageType.ERROR && page.settle == com.appgate.brain.model.Settle.IDLE && !page.dialogOpen) || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
                     (page.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.UNKNOWN) && !page.dialogOpen &&
                         page.settle == com.appgate.brain.model.Settle.IDLE && knownSearch != null && knownSearch != current))) {
                 val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }
@@ -146,6 +159,13 @@ class BrainEngine(
                 val outcome = executor.execute(Action(ActionKind.NAVIGATE, url = target,
                     effect = com.appgate.brain.model.EffectClass.NAVIGATE), emptySps(host), EngineMode.TRAIN, emptyList(), null, clock())
                 page = (outcome as? ExecOutcome.Done)?.after ?: return@runCatching null
+                if (recoveryDue) {
+                    learningBusySince.remove(host)
+                    site.lastLearningStatus = "Rechecked safe search after a stalled page"
+                    events.diagnostic(host, "learning_recovery", JsonObject()
+                        .put("reason", if (busyExpired) "busy_timeout" else "failed_approach")
+                        .put("page_type", page!!.pageType.name))
+                }
             }
             val observed = page ?: return@runCatching null
             if (!allowedUrl(probe, observed.url, profile) || UrlPatterns.host(observed.url).removePrefix("www.") != observed.host.removePrefix("www.")) {
@@ -163,6 +183,8 @@ class BrainEngine(
                 memory.saveSite(site)
                 return@runCatching null
             }
+            if (observed.settle == com.appgate.brain.model.Settle.BUSY) learningBusySince.getOrPut(host) { clock() }
+            else learningBusySince.remove(host)
             Curriculum.observe(site, observed, clock())
             memory.saveSite(site)
             observed

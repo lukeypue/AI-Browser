@@ -181,6 +181,13 @@ class LearningSession(
                     TaskStatus.PAUSED -> return null
                     else -> if (out.successfulSkills.none { it !in masteredBefore }) blockedInARow++ else blockedInARow = 0
                 }
+                if (!Curriculum.allLessonsComplete(site) && out.actions == 0 && out.successfulSkills.isEmpty() &&
+                    out.status in setOf(TaskStatus.FAILED, TaskStatus.PARTIAL)) {
+                    site.learningBlockedUntil = clock() + lessonRetryMs
+                    memory.saveSite(site)
+                    events.log("info", "${profile.name}: no browser action; yielding until the next recovery probe")
+                    break
+                }
                 if (rehearsing) {
                     site.learningBlockedUntil = clock() + lessonRetryMs
                     memory.saveSite(site)
