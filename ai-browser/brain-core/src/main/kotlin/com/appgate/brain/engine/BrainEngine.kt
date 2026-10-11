@@ -152,7 +152,6 @@ class BrainEngine(
             val emptyLandingDue = emptyLanding && !site.learningNeedsHuman && site.challengesToday < 3 &&
                 site.learningBlockedUntil <= clock() && knownSearch != null && knownSearch == current &&
                 (emptyLandingRecoveryAt[host]?.let { clock() - it >= Curriculum.RETRY_MS } ?: true)
-            if (!emptyLanding && page != null) emptyLandingRecoveryAt.remove(host)
             // Description practice can start on this detail page. Back practice needs
             // a results checkpoint in the new lesson ledger, so first reestablish results.
             val usableDetail = page?.let { p ->

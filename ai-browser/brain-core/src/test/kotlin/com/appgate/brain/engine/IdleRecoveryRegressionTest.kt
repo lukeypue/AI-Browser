@@ -111,6 +111,12 @@ class IdleRecoveryRegressionTest {
         assertEquals("same URL must not strand a blank landing page", 1, navigations)
         engine.probeLearning(profile(fake).copy(searchUrl = "https://fake.market/?q={q}"))
         assertEquals("do not reload on every observation", 1, navigations)
+        raw.put("settle", JsonObject().put("state", "BUSY"))
+        now += 1_000
+        engine.probeLearning(profile(fake).copy(searchUrl = "https://fake.market/?q={q}"))
+        raw.put("settle", JsonObject().put("state", "IDLE"))
+        engine.probeLearning(profile(fake).copy(searchUrl = "https://fake.market/?q={q}"))
+        assertEquals("a transient busy observation must not erase the retry deadline", 1, navigations)
         now += Curriculum.RETRY_MS
         engine.probeLearning(profile(fake).copy(searchUrl = "https://fake.market/?q={q}"))
         assertEquals(2, navigations)
