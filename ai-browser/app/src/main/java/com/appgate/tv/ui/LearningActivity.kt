@@ -18,6 +18,7 @@ import com.appgate.tv.service.BrainService
  * screen only shows progress per site and offers Start / Stop / open browser.
  */
 class LearningActivity : ServiceBoundActivity() {
+    private lateinit var testSummary: TextView
     private lateinit var status: TextView
     private lateinit var guideView: TextView
     private lateinit var teachStepButton: android.widget.Button
@@ -55,6 +56,17 @@ class LearningActivity : ServiceBoundActivity() {
             Ui.button(this, "PAUSE") { service?.pause() },
             Ui.button(this, "STOP") { service?.stopLearning() }
         ))
+        column.addView(Ui.text(this, "Timed learning test", 18f, Ui.text, true))
+        column.addView(Ui.text(this, "Practice automatically for 30 or 60 minutes, then stop and record the results. Human review and pauses count toward the limit. Keeps the phone awake during the test. Opening the browser ends the test so you can teach. A service restart ends the test. Your current AI-help settings apply.", 13f, Ui.muted))
+        column.addView(Ui.row(this,
+            Ui.button(this, "TEST 30 MIN") { service?.startLearning(30) },
+            Ui.button(this, "TEST 60 MIN") { service?.startLearning(60) }
+        ))
+        testSummary = Ui.text(this, "", 13f, Ui.text)
+        column.addView(testSummary)
+        column.addView(Ui.button(this, "SHARE TEST DIAGNOSTICS") {
+            service?.diagnostics?.shareIntent()?.let { startActivity(Intent.createChooser(it, "Share test diagnostics")) }
+        })
         allowTeacher = android.widget.CheckBox(this).apply {
             text = "Allow AI help: up to ${TeacherBudget.HOURLY_LIMIT} requests/hour and ${TeacherBudget.DAILY_LIMIT}/day. Off = local only."
             setTextColor(Ui.text)
@@ -145,6 +157,7 @@ class LearningActivity : ServiceBoundActivity() {
             updatingTeacher = false
         }
         val s = service ?: return
+        testSummary.text = s.learningTestSummary()
         val unrestricted = com.appgate.tv.store.PlannerKeyStore.unrestricted(this)
         val usage = s.memory.teacherBudget.snapshot(unrestricted)
         val enabled = com.appgate.tv.store.PlannerKeyStore.teacherEnabled(this)

@@ -102,7 +102,7 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
 - `BetaStat` — Beta(α, β) with daily decay 0.98; routing uses posterior mean *and* count.
 - `Consolidation` — retire bindings (p<0.3 after 5 trials, 60 days unseen), shadow weak legacy version bindings, prune failures/edges, dedupe compiled skills, budgets, **Brier > 0.25 ⇒ quarantine**.
 - `FailedStrategies` — overnight practice remembers failed procedure shapes and AI repair attempts
-  across task ledgers. Two unsuccessful attempts defer that shape for thirty seconds; changed
+  across task ledgers. Two unsuccessful attempts hold that unchanged shape for six hours; changed
   controls and different procedures remain eligible. At most 64 content-free records per host.
   Site rotation still retries after thirty seconds. A verified procedure clears its failure record.
 - `SkillCompiler` — verified local/planner programs → `COMPILED` skills (values → params);
@@ -172,3 +172,27 @@ This update strengthens procedural memory, planning and verification; it does no
 foundation-model weights. The core stays pure Kotlin. An optional on-device model remains
 a measured follow-up requiring phone memory, thermal, latency and task-success evidence.
 See [the research report](research/2026-09-29-brain-research.md) for sources and limitations.
+
+## 10. Bounded live learning tests
+
+The Overnight Learning screen offers 30- and 60-minute tests using the existing
+service, site rotation and teacher settings. The service keeps its partial wake lock
+until the monotonic deadline, including pauses; expiry requests an engine stop,
+interrupts its job, releases the lock and records `learning_test_end`. Starting a
+search/message task or opening the browser ends the test first. Ordinary overnight
+learning can still resume after a browser handoff. Service death marks the test
+interrupted on restart; it does not silently resume a paid teacher run.
+
+Counters distinguish verified actions, failed actions, completed attempts and verified
+procedure uses. Repeated procedure uses are not new lessons. Callbacks are associated
+with the worker's test instance so canceled runs cannot add results to a later run.
+Existing task and teacher diagnostics retain planner calls and reported token usage.
+Logs and the summary stay local, with explicit Share/Save buttons. There is no phone
+upload endpoint, remote-control channel or unattended Android update installation.
+The complete live test cannot be claimed until actual phone diagnostics are reviewed.
+
+An hourly review automation checks new repository test failures or supplied sanitized
+diagnostics, reproduces a demonstrated bug before a fix, and uses the existing signed
+release checks. It cannot obtain unshared phone logs or assume browser AI sessions are
+available. Held-out parameter replay with the planner disabled and a memory-removal
+baseline remains the stronger test of reusable learning than repeated practice counts.

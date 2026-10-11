@@ -101,6 +101,10 @@ class BrainService : Service() {
     private var engine: BrainEngine? = null
     private var coordinator: SearchCoordinator? = null
     private var learning: LearningSession? = null
+    @Volatile private var timedTest: com.appgate.brain.engine.TimedLearningTest? = null
+    private val executingTest = ThreadLocal<com.appgate.brain.engine.TimedLearningTest?>()
+    private val testDeadline = Runnable { finishTimedTest("deadline", stop = true) }
+    fun learningTestSummary(): String = getSharedPreferences("brain_jobs", MODE_PRIVATE).getString("test_summary", "No timed test completed yet.")!!
     private var currentGoal: Goal? = null
     private var currentLedgers: List<TaskLedger> = emptyList()
     private var lastOutcome: SearchOutcome? = null
@@ -119,6 +123,11 @@ class BrainService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification("Starting the browser engine…"))
         memory = Memory(FileBrainStorage(File(filesDir, "brain")))
         diagnostics = DiagnosticsLog(this)
+        val savedTest = getSharedPreferences("brain_jobs", MODE_PRIVATE)
+        if (savedTest.getBoolean("test_running", false)) {
+            savedTest.edit().putBoolean("test_running", false).putString("test_summary", "Previous test was interrupted when the service ended. Existing diagnostics are available; start a new timed test.").apply()
+            diagnostics.event("learning_test_interrupted")
+        }
         val runtime = BrainRuntime.get(this)
         BrainRuntime.whenExtensionReady { ext ->
             if (ext == null) { publish(state.copy(status = "The Site Brain bridge failed to install. Please reinstall the app.")); return@whenExtensionReady }
@@ -150,6 +159,7 @@ class BrainService : Service() {
 
     override fun onDestroy() {
         main.removeCallbacks(watchdog)
+        finishTimedTest("service ended", stop = true)
         engine?.requestStop()
         job?.cancel(true)
         engineThread.shutdownNow()
@@ -177,6 +187,8 @@ class BrainService : Service() {
     fun startSearch(goal: Goal, preferredSources: List<String>): String? {
         val coord = coordinator ?: return null
         if (job?.isDone == false) return null
+        finishTimedTest("search started", stop = false)
+        learning = null
         val sources = SiteProfiles.sourcesFor(goal, preferredSources)
         val ledgers = coord.newLedgers(goal, sources)
         currentGoal = goal
@@ -218,6 +230,7 @@ class BrainService : Service() {
 
     /** Continue whatever was waiting on a person (sign-in / verification / approval). */
     fun resumeAfterHuman() {
+        if (timedTest?.expired(android.os.SystemClock.elapsedRealtime()) == true) { finishTimedTest("deadline", stop = true); return }
         val s = session ?: return
         s.closePopups()
         val reviewedHost = com.appgate.brain.perception.UrlPatterns.host(s.currentUrl).removePrefix("www.")
@@ -272,6 +285,8 @@ class BrainService : Service() {
     fun prepareMessage(url: String, text: String) {
         val eng = engine ?: return
         if (job?.isDone == false) { pendingPrepare = url to text; return }
+        finishTimedTest("message task started", stop = false)
+        learning = null
         val host = com.appgate.brain.perception.UrlPatterns.host(url)
         val goal = Goal(id = "m" + System.currentTimeMillis(), intent = com.appgate.brain.model.GoalIntent.PREPARE_MESSAGE, rawText = "message seller", query = "", constraints = emptyList(), messageDraft = text, targetUrl = url)
         val ledger = TaskLedger("m" + System.currentTimeMillis(), goal, host, url)
@@ -294,14 +309,23 @@ class BrainService : Service() {
     fun startBrowsing(url: String) {
         val s = session ?: return
         if (job?.isDone == false) pause()
+        if (timedTest != null) { finishTimedTest("browser opened", stop = false); learning = null }
         s.setNetworkMode("OFF", emptyList(), emptyList())
         s.loadUri(url)
         publish(state.copy(mode = Mode.BROWSING, status = "Browsing", host = com.appgate.brain.perception.UrlPatterns.host(url), url = url))
     }
 
-    fun startLearning() {
+    fun startLearning(testMinutes: Int? = null) {
+        require(testMinutes == null || testMinutes == 30 || testMinutes == 60)
         val eng = engine ?: return
         if (job?.isDone == false) return
+        finishTimedTest("replaced", stop = false)
+        if (testMinutes != null) {
+            timedTest = com.appgate.brain.engine.TimedLearningTest(testMinutes, android.os.SystemClock.elapsedRealtime())
+            main.postDelayed(testDeadline, testMinutes * 60_000L)
+            getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", true).putString("test_summary", "$testMinutes-minute test running. Pauses and human review count toward the time limit.").apply()
+            diagnostics.event("learning_test_start", extra = JsonObject().put("minutes", testMinutes))
+        }
         val includeAccountSites = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("learn_account_sites", false)
         val sites = SiteProfiles.training.filter { includeAccountSites || !it.requiresLogin }
         val sess = LearningSession(eng, memory, engineEvents, sites)
@@ -320,11 +344,13 @@ class BrainService : Service() {
             if (learning !== sess || state.mode == Mode.BROWSING) return@post
             if (needs != null) publish(state.copy(mode = Mode.NEED_HUMAN, humanReason = needs.humanReason, host = needs.host, status = "${needs.host}: ${needs.humanReason}"))
             else if (sess.stopRequested) publish(state.copy(mode = Mode.PAUSED, status = "Learning paused"))
-            else { learning = null; publish(state.copy(mode = Mode.IDLE, status = "Learning session ended; verified lessons are saved")) }
+            else { learning = null; finishTimedTest("session ended", stop = false); publish(state.copy(mode = Mode.IDLE, status = "Learning session ended; verified lessons are saved")) }
         }
     }
 
     fun stopLearning() {
+        finishTimedTest("stopped", stop = false)
+        engine?.requestStop()
         learning?.stop()
         learning = null
         publish(state.copy(mode = Mode.IDLE, status = "Learning stopped; everything learned is saved"))
@@ -337,11 +363,32 @@ class BrainService : Service() {
     }
 
     fun stopWork() {
+        finishTimedTest("stopped", stop = false)
         engine?.requestStop()
         learning?.stop()
         learning = null
         job?.cancel(true)
         publish(state.copy(mode = Mode.IDLE, status = "Stopped"))
+    }
+
+    private fun finishTimedTest(reason: String, stop: Boolean) {
+        val run = timedTest ?: return
+        timedTest = null
+        main.removeCallbacks(testDeadline)
+        val result = run.finish(android.os.SystemClock.elapsedRealtime(), reason)
+        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses. Repeated uses are not new lessons. Save diagnostics for review."
+        getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", false).putString("test_summary", summary).apply()
+        diagnostics.event("learning_test_end", extra = JsonObject().put("reason", reason).put("elapsed_ms", result.elapsedMs)
+            .put("tasks", result.tasks).put("verified_actions", result.verified).put("failed_actions", result.failed).put("verified_procedure_uses", result.verifiedSkills))
+        releaseWakeLock()
+        if (stop) {
+            engine?.requestStop()
+            learning?.stop()
+            learning = null
+            job?.cancel(true)
+            publish(state.copy(mode = Mode.IDLE, status = summary))
+            updateNotification("Learning test completed; diagnostics ready")
+        }
     }
 
     fun setTeachMode(on: Boolean) {
@@ -459,16 +506,19 @@ class BrainService : Service() {
     private fun runJob(block: () -> Unit) {
         acquireWakeLock()
         lastProgressAt = System.currentTimeMillis()
+        val owner = timedTest
         job = engineThread.submit {
+            executingTest.set(owner)
             try { block() }
             catch (t: InterruptedException) { Thread.currentThread().interrupt() }
-            catch (t: Throwable) { Log.e(TAG, "job failed", t); diagnostics.event("job_error", detail = t.toString()); main.post { publish(state.copy(mode = Mode.IDLE, status = "Stopped: ${t.javaClass.simpleName}")) } }
-            finally { main.post { if (job?.isDone != false) releaseWakeLock() } }
+            catch (t: Throwable) { Log.e(TAG, "job failed", t); diagnostics.event("job_error", detail = t.toString()); main.post { if (owner == null || timedTest === owner) publish(state.copy(mode = Mode.IDLE, status = "Stopped: ${t.javaClass.simpleName}")) } }
+            finally { executingTest.remove(); main.post { if (job?.isDone != false) releaseWakeLock() } }
         }
     }
 
     private val watchdog = object : Runnable {
         override fun run() {
+            if (timedTest?.expired(android.os.SystemClock.elapsedRealtime()) == true) finishTimedTest("deadline", stop = true)
             val running = job?.isDone == false
             val learner = learning
             // Read the published waiting flag before the baseline written when waiting ends.
@@ -513,18 +563,26 @@ class BrainService : Service() {
             diagnostics.event("verified_progress", ledger.host, reason)
         }
         override fun guide(explanation: LearningGuide) {
+            val owner = executingTest.get()
             main.post {
+                if (owner != null && timedTest !== owner) return@post
                 val previous = state.learningGuide
                 val next = if (previous?.ledgerId == explanation.ledgerId) explanation.copy(outcome = previous.outcome) else explanation
                 publish(state.copy(learningGuide = next))
             }
         }
-        override fun status(text: String) { main.post { publish(state.copy(status = text)); updateNotification(text) } }
+        override fun status(text: String) {
+            val owner = executingTest.get()
+            main.post { if (owner == null || timedTest === owner) { publish(state.copy(status = text)); updateNotification(text) } }
+        }
         override fun step(ledger: TaskLedger, description: String, status: VerifyStatus?) {
             // Descriptions may contain the user's query; diagnostics keep typed coordinates only.
             diagnostics.event("step", ledger.host, extra = JsonObject().put("status", status?.name).put("phase", ledger.phase.name).put("source", ledger.programSource))
+            val testOwner = executingTest.get()
             val explanation = if (ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE) LearningGuide.snapshot(ledger, ledger.currentProgram.getOrNull(ledger.cursor), status, ledger.steps.lastOrNull()?.evidence.orEmpty()) else null
             main.post {
+                if (testOwner != null && timedTest !== testOwner) return@post
+                if (timedTest === testOwner && ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE) testOwner?.step(status)
                 if (explanation != null) {
                     val previous = state.learningGuide
                     val next = if (previous?.ledgerId == explanation.ledgerId && explanation.pass.contains("not supplied")) explanation.copy(pass = previous.pass) else explanation
@@ -535,8 +593,13 @@ class BrainService : Service() {
         }
         override fun needHuman(ledger: TaskLedger, reason: String, url: String) {
             diagnostics.event("need_human", ledger.host, reason)
-            if (learning != null) { main.post { notifyHuman(ledger.host, reason) }; return }
-            main.post { publish(state.copy(mode = Mode.NEED_HUMAN, humanReason = reason, host = ledger.host, url = url, status = "${ledger.host}: $reason")); notifyHuman(ledger.host, reason) }
+            val owner = executingTest.get()
+            val learner = learning
+            main.post {
+                if (owner != null && timedTest !== owner) return@post
+                if (learner == null) publish(state.copy(mode = Mode.NEED_HUMAN, humanReason = reason, host = ledger.host, url = url, status = "${ledger.host}: $reason"))
+                notifyHuman(ledger.host, reason)
+            }
         }
         override fun needGrant(ledger: TaskLedger, previewText: String, previewHash: String) {
             diagnostics.event("need_grant", ledger.host)
@@ -545,8 +608,11 @@ class BrainService : Service() {
         override fun finished(ledger: TaskLedger, result: TaskResult?) {
             if (ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE) {
                 val id = ledger.id
+                val verifiedUses = ledger.successfulSkills.size
+                val testOwner = executingTest.get()
+                main.post { if (timedTest === testOwner) testOwner?.task(id, verifiedUses) }
                 val outcome = if (ledger.lesson in ledger.successfulSkills) "Verified procedure saved for this lesson." else "Attempt ended without verifying this lesson. ${ledger.status.name.lowercase().replace('_', ' ')}."
-                main.post { state.learningGuide?.takeIf { it.ledgerId == id }?.let { publish(state.copy(learningGuide = it.copy(outcome = "$outcome Last step: ${it.outcome}"))) } }
+                main.post { if (testOwner != null && timedTest !== testOwner) return@post; state.learningGuide?.takeIf { it.ledgerId == id }?.let { publish(state.copy(learningGuide = it.copy(outcome = "$outcome Last step: ${it.outcome}"))) } }
             }
             diagnostics.event("task_finished", ledger.host, "${ledger.status} actions=${ledger.actions} llm=${ledger.llmCalls} items=${ledger.verdicts.size}",
                 JsonObject().put("reason", ledger.terminalReason).put("elapsed_ms", ledger.elapsedMs).put("decisions", ledger.decisions).put("verified_skills", ledger.successfulSkills.size))
@@ -635,6 +701,8 @@ class BrainService : Service() {
     }
 
     private fun releaseWakeLock() {
+        // Keep the monotonic deadline running even while a timed test is paused.
+        if (timedTest != null) return
         wakeLock?.let { if (it.isHeld) runCatching { it.release() } }
         wakeLock = null
     }

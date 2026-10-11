@@ -44,11 +44,13 @@ class FastLearningRetryTest {
             assertEquals(now + 30_000, site.curriculum.single { it.id == "next_page" }.retryAt)
         }
     }
-    @Test fun identicalFailedProcedureRemainsBlockedUntilThirtySecondRetry() {
+    @Test fun identicalFailedProcedureStaysBlockedAcrossThirtySecondSiteRetries() {
         val site = SiteModel("fake.market"); val key = FailedStrategies.key(results(), "search")
         repeat(2) { FailedStrategies.record(site, key, false, now) }
         assertFalse(FailedStrategies.allowed(site, key, now + 29_999))
-        assertTrue(FailedStrategies.allowed(site, key, now + 30_000))
+        repeat(120) { assertFalse(FailedStrategies.allowed(site, key, now + 30_000L * (it + 1))) }
+        FailedStrategies.record(site, key, true, now + 3_600_001)
+        assertTrue(FailedStrategies.allowed(site, key, now + 3_600_002))
     }
     @Test fun absentNextLessonDoesNotPreventVerifiedLoadMorePractice() {
         val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000) }

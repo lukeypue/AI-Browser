@@ -93,6 +93,9 @@ class LearningReliabilityTest {
         assertNotEquals(TaskStatus.DONE, second.status)
         val beforeRetry = calls
         now += 30_000L
+        run("same-shape-retry")
+        assertEquals("site cooldown must not erase the failed procedure", beforeRetry, calls)
+        now += 6 * 60 * 60_000L
         run("later")
         assertTrue("failures must expire so repaired pages can recover", calls > beforeRetry)
     }
