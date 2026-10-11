@@ -945,16 +945,20 @@ class BrainEngine(
 
     private fun tryLocalRepair(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, capability: String): Boolean {
         val plan = LocalRecoveryPlanner.propose(ledger, sps, site, capability) ?: return false
-        val key = FailedStrategies.key(sps, capability, plan.steps, plan.params)
+        // Discovery executes as open_filters, so its preflight must use the same
+        // capability and bindings as startProgram. A held discovery should leave
+        // the bounded teacher opportunity available for a different procedure.
+        val actualCapability = if (plan.completesCapability) capability else "open_filters"
+        val params = skillParams(ledger) + plan.params
+        val key = FailedStrategies.key(sps, actualCapability, plan.steps, params)
         val attempt = "__local:$key"
         if ((ledger.constraintAttempts[attempt] ?: 0) >= 1 || !FailedStrategies.allowed(site, key, clock())) return false
         ledger.constraintAttempts[attempt] = 1
         ledger.constraintAttempts.keys.removeAll { it.startsWith("__discovery:") }
         // A canonical continuation survives pause/process resume without persisting page values.
         if (!plan.completesCapability) ledger.constraintAttempts["__discovery:$capability"] = 1
-        val actualCapability = if (plan.completesCapability) capability else "open_filters"
         ledger.attemptedSkills += actualCapability
-        startProgram(ledger, plan.steps, skillParams(ledger) + plan.params, "local", "local repair: $capability", actualCapability, plan.postconditions)
+        startProgram(ledger, plan.steps, params, "local", "local repair: $capability", actualCapability, plan.postconditions)
         return true
     }
 

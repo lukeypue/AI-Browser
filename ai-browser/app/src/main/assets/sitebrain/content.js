@@ -230,16 +230,32 @@
   function dialogElements() {
     const out = [];
     document.querySelectorAll("[role=dialog], [role=alertdialog], [aria-modal=true], dialog[open]").forEach((d) => { if (visible(d)) out.push(d); });
-    // Fixed overlays that cover a large share of the viewport behave like dialogs.
+    // Nonsemantic overlays need visible interactive content. Fixed page chrome and
+    // empty decorative layers are not dialogs merely because they have a large box.
     const vh = window.innerHeight || 1, vw = window.innerWidth || 1;
     document.querySelectorAll("div, section").forEach((d) => {
       if (out.length > 6) return;
       const st = window.getComputedStyle(d);
       if (st.position !== "fixed") return;
+      if (d.closest("header, nav, [role=banner], [role=navigation]")) return;
       const r = d.getBoundingClientRect();
-      if (r.width * r.height > 0.35 * vw * vh && visible(d) && !out.some((o) => o.contains(d) || d.contains(o))) {
+      const coverage = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) *
+        Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+      const interactive = Array.from(d.querySelectorAll("button, input, select, textarea, a[href], [role=button], [role=checkbox], [role=combobox]"))
+        .some((c) => visible(c) && inViewport(c.getBoundingClientRect()));
+      if (coverage > 0.35 * vw * vh && interactive && visible(d) && !out.some((o) => o.contains(d) || d.contains(o))) {
         const z = parseInt(st.zIndex || "0", 10);
-        if (z > 5 || st.backgroundColor !== "rgba(0, 0, 0, 0)") out.push(d);
+        if (!(z > 5 || st.backgroundColor !== "rgba(0, 0, 0, 0)")) return;
+        // Hit-testing resolves stacking contexts and click-through wrappers. A
+        // large bounding box alone says nothing about whether it blocks content.
+        let hits = 0;
+        const left = Math.max(r.left, 0), top = Math.max(r.top, 0);
+        const width = Math.min(r.right, vw) - left, height = Math.min(r.bottom, vh) - top;
+        for (const x of [0.2, 0.5, 0.8]) for (const y of [0.2, 0.5, 0.8]) {
+          const hit = document.elementFromPoint(left + x * width, top + y * height);
+          if (hit && d.contains(hit)) hits++;
+        }
+        if (hits >= 6) out.push(d);
       }
     });
     return out;

@@ -20,6 +20,37 @@ async function fixture(html, url = 'https://fixtures.test/search') {
 const style = '<style>a.card{display:block;height:150px;width:300px;margin:10px}aside{width:300px;height:120px}</style>';
 const cards = count => Array.from({length: count}, (_, i) => `<a class="card" href="/item/${100001 + i}"><span>Mountain bike ${i + 1}</span><span>$${100 + i}</span></a>`).join('');
 
+test('fixed page chrome and empty layers do not block results learning', async () => {
+  for (const layer of [
+    '<header><div style="position:fixed;top:0;width:100%;height:400px;background:white;z-index:20"><button>Close</button></div></header>',
+    '<div style="position:fixed;top:0;width:100%;height:400px;background:white;z-index:20"></div>',
+    '<div style="position:fixed;top:-950px;width:100%;height:1000px;background:white;z-index:20"><button>Close</button></div>',
+    '<div style="position:fixed;inset:0;pointer-events:none;z-index:50"><button style="pointer-events:auto">Close</button></div>',
+    '<div style="position:fixed;inset:0"><button>Close</button></div>'
+  ]) {
+    const page = await fixture(style + layer + '<main>' + cards(2) + '</main>');
+    try {
+      const obs = await page.evaluate(() => window.__brainObserve());
+      assert.equal(obs.signals.dialog, false);
+      assert.equal(obs.items.length, 2);
+    } finally { await page.close(); }
+  }
+});
+
+test('explicit dialogs inside headers and unlabeled interactive overlays remain detectable', async () => {
+  for (const layer of [
+    '<header><div role="dialog" style="position:fixed;top:0;width:100%;height:100px"><button>Close</button></div></header>',
+    '<div style="position:fixed;top:0;width:100%;height:600px;background:white;z-index:20"><button>Close</button><input placeholder="Maximum price"></div>'
+  ]) {
+    const page = await fixture(style + layer + '<main>' + cards(2) + '</main>');
+    try {
+      const obs = await page.evaluate(() => window.__brainObserve());
+      assert.equal(obs.signals.dialog, true);
+      assert.ok(obs.elements.some(e => e.name === 'Close' && e.inDialog));
+    } finally { await page.close(); }
+  }
+});
+
 test('whole-card links have matching actionable IDs and open the intended listing', async () => {
   const page = await fixture(style + '<main><input type="search" placeholder="Search"><section>' + cards(3) + '</section></main>');
   try {

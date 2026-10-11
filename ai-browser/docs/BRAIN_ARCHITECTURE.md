@@ -197,3 +197,7 @@ diagnostics, reproduces a demonstrated bug before a fix, and uses the existing s
 release checks. It cannot obtain unshared phone logs or assume browser AI sessions are
 available. Held-out parameter replay with the planner disabled and a memory-removal
 baseline remains the stronger test of reusable learning than repeated practice counts.
+
+### Dialog perception and repair preflight
+
+Explicit visible dialog semantics remain authoritative. Nonsemantic fixed overlays use viewport-clipped coverage, require a visible interactive descendant in the viewport, exclude header/navigation chrome, and require hit-testing to show that they intercept most sampled points in their visible box. This avoids routing results lessons through dismissal for empty fixed layers. Unlabeled overlays nested inside page chrome may require better explicit semantics; this fallback does not prove every overlay is modal. Local drawer discovery checks failure history using its actual `open_filters` execution capability and the same bound parameters before reserving an attempt, so a held discovery cannot consume an eligible alternate teacher opportunity. A handled request is never verification credit.
