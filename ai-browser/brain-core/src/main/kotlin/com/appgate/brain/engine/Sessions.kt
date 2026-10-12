@@ -145,12 +145,16 @@ class LearningSession(
                 // A retry recheck is an observation, not a new generic finding task.
                 val page = engine.probeLearning(profile)
                 if (page != null) Curriculum.observe(site, page, clock())
-                val lesson = if (page == null || site.learningNeedsHuman) "" else Curriculum.nextLesson(site, clock(), page)
-                    .ifBlank { Curriculum.practiceLesson(site, clock(), page) }
+                var heldProcedure = false
+                val canAttempt: (String) -> Boolean = { id ->
+                    engine.learningLessonAvailable(profile, page!!, id).also { if (!it) heldProcedure = true }
+                }
+                val lesson = if (page == null || site.learningNeedsHuman) "" else Curriculum.nextLesson(site, clock(), page, canAttempt)
+                    .ifBlank { Curriculum.practiceLesson(site, clock(), page, canAttempt) }
                 if (lesson.isBlank()) {
                     site.learningBlockedUntil = maxOf(clock() + lessonRetryMs, Curriculum.earliestRetryAt(site, clock()))
                     if (!site.learningNeedsHuman) site.lastLearningStatus = "Waiting for an observed lesson opportunity"
-                    events.diagnostic(site.host, "learning_recheck", SemanticDiagnostics.learningRecheck(site, page, clock()))
+                    events.diagnostic(site.host, "learning_recheck", SemanticDiagnostics.learningRecheck(site, page, clock()).also { if (heldProcedure) it.put("available", false).put("reason", "procedure_cooldown") })
                     memory.saveSite(site)
                     break
                 }

@@ -107,6 +107,7 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
   first alternative repair proposal may be reserved after thirty seconds. Further unchanged failures
   back off to 60, 120, 240, and at most 300 seconds, within existing task/teacher budgets.
   Failure counts survive reload (bounded at 64). At most 64 content-free records per host.
+  Before allocating a learning lesson, the scheduler checks concrete learned/builtin and local repair holds for the live target (including shared prerequisites), then the teacher backoff. A fully held target yields without a task or ordinal increment; diagnostics report `procedure_cooldown`.
   Site rotation still retries after thirty seconds. A verified procedure clears its failure record.
 - Learning a loading/pagination capability requires newly observed result keys across that program.
   Atomically verified end-of-list navigation without new keys earns no mastery and does not count

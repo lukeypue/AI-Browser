@@ -208,6 +208,29 @@ class BrainEngine(
         }
     }
 
+    /** Check the live prerequisite against the executor's failure holds before allocating a lesson.
+     * This does not execute, reserve teacher budget, persist a ledger, or award credit. */
+    fun learningLessonAvailable(profile: SiteProfile, page: SemanticPageState, lesson: String): Boolean {
+        val target = LearningOpportunities.target(page, lesson) ?: return false
+        val site = memory.site(profile.hosts.first())
+        val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal, page, lesson)
+        val ledger = TaskLedger("eligibility", goal, site.host, page.url).apply {
+            this.lesson = lesson
+            if (page.pageType == PageType.RESULTS) resultsUrl = page.url
+        }
+        val params = skillParams(ledger) + target.params
+        val learned = memory.skills.reusable(page, target.skillId, params, ledger)
+        if (listOfNotNull(learned, memory.skills.get(target.skillId)).any {
+                FailedStrategies.allowed(site, FailedStrategies.key(page, target.skillId, it.body, params), clock())
+            }) return true
+        val local = LocalRecoveryPlanner.propose(ledger, page, site, target.skillId)
+        if (local != null) {
+            val capability = if (local.completesCapability) target.skillId else "open_filters"
+            if (FailedStrategies.allowed(site, FailedStrategies.key(page, capability, local.steps, params + local.params), clock())) return true
+        }
+        return FailedStrategies.repairAllowed(site, FailedStrategies.key(page, target.skillId), clock()) && plannerFactory() != null
+    }
+
     fun runTask(ledger: TaskLedger, mode: EngineMode = EngineMode.ASSIST): TaskLedger {
         if (ledger.done) return ledger
         stopRequested.set(false)

@@ -62,7 +62,7 @@ object Curriculum {
     }
 
     /** Empty means recheck later; a live page also guards against stale opportunities. */
-    fun nextLesson(site: SiteModel, now: Long = System.currentTimeMillis(), page: SemanticPageState? = null): String {
+    fun nextLesson(site: SiteModel, now: Long = System.currentTimeMillis(), page: SemanticPageState? = null, canAttempt: (String) -> Boolean = { true }): String {
         ensure(site)
         val order = listOf("search", "constrain_numeric", "open_item", "next_page", "load_more", "scroll_results", "select_facet", "sort_results", "expand_description", "go_back", "dismiss_dialog")
         val eligible = site.curriculum.filter {
@@ -77,19 +77,19 @@ object Curriculum {
             }
             it.retryAt <= now && (it.opportunity == "AVAILABLE" ||
                 (site.learningObservedAt == 0L && it.opportunity == "UNKNOWN") || prerequisite) &&
-                (page == null || live != null)
+                (page == null || live != null) && canAttempt(it.id)
         }
         if (allLessonsComplete(site)) return eligible.minByOrNull { it.completedAt }?.id.orEmpty()
         return eligible.filter { !it.done }.minWithOrNull(compareBy<CurriculumItem> { it.blocked + it.unavailable }.thenBy { order.indexOf(it.id) })?.id.orEmpty()
     }
 
     /** Local rehearsal keeps available skills usable while an absent capability waits. */
-    fun practiceLesson(site: SiteModel, now: Long, page: SemanticPageState): String {
+    fun practiceLesson(site: SiteModel, now: Long, page: SemanticPageState, canAttempt: (String) -> Boolean = { true }): String {
         if (page.isHumanOnly || page.dialogOpen || page.settle != com.appgate.brain.model.Settle.IDLE ||
             page.pageType != com.appgate.brain.model.PageType.RESULTS || allLessonsComplete(site)) return ""
         if (site.curriculum.any { !it.done && LearningOpportunities.target(page, it.id) != null }) return ""
         return site.curriculum.filter { it.done && it.retryAt <= now &&
-            LearningOpportunities.target(page, it.id)?.skillId == it.id && it.id != "search" }
+            LearningOpportunities.target(page, it.id)?.skillId == it.id && it.id != "search" && canAttempt(it.id) }
             .minByOrNull { it.completedAt }?.id.orEmpty()
     }
 

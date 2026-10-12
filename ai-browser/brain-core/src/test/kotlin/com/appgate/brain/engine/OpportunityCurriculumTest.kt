@@ -113,7 +113,7 @@ class OpportunityCurriculumTest {
         assertEquals("next_page", Curriculum.nextLesson(restored, now + 2))
     }
 
-    @Test fun absentPaginationGetsOneBoundedRehearsalPerVisitWithoutFalseCredit() {
+    @Test fun absentPaginationRehearsesThenYieldsHeldProceduresWithoutFalseCredit() {
         var time = now
         val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000); page = 2 }
         val raw = fake.observe(1000)
@@ -131,9 +131,18 @@ class OpportunityCurriculumTest {
         val config = EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0)
         val engine = BrainEngine(renderer, memory, { null }, events, config) { time }
         val session = LearningSession(engine, memory, events, listOf(profile()), clock = { time })
-        repeat(60) { session.run(maxSites = 1); time += 60_000L }
-        assertEquals("one available-capability rehearsal is allowed per visit", 60, finished)
-        assertEquals(60, site.lessonOrdinal)
+        // The frozen observation never verifies the delegated actions. These failed
+        // rehearsal routes must eventually hold instead of allocating one task forever.
+        repeat(30) {
+            val before = finished
+            session.run(maxSites = 1); time += 60_000L
+            assertTrue("at most one rehearsal per visit", finished - before <= 1)
+        }
+        val heldAt = finished
+        assertTrue("available procedures get bounded initial attempts", heldAt in 1 until 30)
+        repeat(30) { session.run(maxSites = 1); time += 60_000L }
+        assertEquals("held rehearsals create no further failed tasks", heldAt, finished)
+        assertEquals(finished, site.lessonOrdinal)
         assertTrue("every minute still observes the site", observations >= 60)
         assertFalse(site.curriculum.single { it.id == "next_page" }.done)
     }
