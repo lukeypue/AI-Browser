@@ -104,8 +104,16 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
 - `FailedStrategies` — overnight practice remembers failed procedure shapes and AI repair attempts
   across task ledgers. Two unsuccessful attempts hold an unchanged concrete procedure for six hours; changed
   controls and different procedures remain eligible. AI proposal history is retained, but a fresh
-  repair proposal may be reserved after thirty seconds, within existing task/teacher budgets. At most 64 content-free records per host.
+  first alternative repair proposal may be reserved after thirty seconds. Further unchanged failures
+  back off to 60, 120, 240, and at most 300 seconds, within existing task/teacher budgets.
+  Failure counts survive reload (bounded at 64). At most 64 content-free records per host.
   Site rotation still retries after thirty seconds. A verified procedure clears its failure record.
+- Learning a loading/pagination capability requires newly observed result keys across that program.
+  Atomically verified end-of-list navigation without new keys earns no mastery and does not count
+  as a broken procedure, including replaying a saved program already at the bottom. Causal
+  program-step evidence remains separate from atomic predicate satisfaction.
+- Non-numeric applied choice values match normalized full labels, never substrings;
+  numeric display formatting still uses the existing amount normalization.
 - `SkillCompiler` — verified local/planner programs → `COMPILED` skills (values → params);
   typed human demonstrations → parameterized `DEMONSTRATED` training candidates.
   Candidates have zero success credit and can only replay on their source site in TRAIN.

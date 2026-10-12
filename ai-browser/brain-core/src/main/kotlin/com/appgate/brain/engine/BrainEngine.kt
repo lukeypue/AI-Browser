@@ -83,6 +83,8 @@ class BrainEngine(
     private var lastPlannerCallAt = 0L
     private var latestPage: SemanticPageState? = null
     private var programBefore: SemanticPageState? = null
+    // Atomic predicate satisfaction is separate from causal evidence for mastery.
+    private val programSatisfiedSteps = mutableSetOf<Int>()
     private var lessonsBefore: Set<String> = emptySet()
     private val learningBusySince = mutableMapOf<String, Long>()
     private val emptyLandingRecoveryAt = mutableMapOf<String, Long>()
@@ -214,6 +216,7 @@ class BrainEngine(
         programBefore = null
         // A partial program cannot carry verification credit across a process/task resume.
         ledger.programVerifiedSteps.clear()
+        programSatisfiedSteps.clear()
         ledger.programCompleted = false
         ledger.cursor = 0
         val runStarted = System.nanoTime()
@@ -434,6 +437,7 @@ class BrainEngine(
         programBefore = latestPage
         ledger.programPage = latestPage?.pageType
         ledger.programVerifiedSteps.clear()
+        programSatisfiedSteps.clear()
         ledger.programCompleted = false
         ledger.programCapability = capability
         ledger.programPost = post.ifEmpty { steps.lastOrNull { !it.optional }?.expect.orEmpty() }.map { bindExpect(it, params) }
@@ -567,6 +571,7 @@ class BrainEngine(
                 learnFromOutcome(ledger, site, before, after, grounded, verified)
                 if (verified) {
                     ledger.consecutiveFailures = 0
+                    programSatisfiedSteps += ledger.cursor
                     if (grounded.action.kind != ActionKind.WAIT && verifiedChange(grounded.action, before, after))
                         ledger.programVerifiedSteps += ledger.cursor
                     if (verifiedChange(grounded.action, before, after))
@@ -640,21 +645,33 @@ class BrainEngine(
                 }
             }
             "open_item" -> sps.pageType == PageType.DETAIL
+            "load_more", "scroll_results", "next_page" -> ledger.goal.intent != GoalIntent.LEARN_SITE ||
+                before != null && sps.pageType == PageType.RESULTS &&
+                Verifier.holds(Postcondition.NewResults, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
             else -> true
         }
-        val verified = success && capabilityHolds && before != null && required.isNotEmpty() && required.all { it in ledger.programVerifiedSteps } &&
+        val programEvidence = success && before != null && required.isNotEmpty() && required.all { it in ledger.programVerifiedSteps } &&
             ledger.programPost.isNotEmpty() && ledger.programPost.all {
                 Verifier.holds(it, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
             }
+        val verified = programEvidence && capabilityHolds
+        // A verified end-of-list is useful navigation, but no evidence that this
+        // program loaded new listings. Neither award mastery nor punish a valid
+        // learned procedure for reaching the ordinary end of a collection.
+        val terminalEnd = success && !capabilityHolds && before != null && required.isNotEmpty() &&
+            required.all { it in programSatisfiedSteps } && ledger.programPost.isNotEmpty() &&
+            ledger.programPost.all { Verifier.holds(it, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf()) } &&
+            ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.programCapability in setOf("load_more", "scroll_results", "next_page") &&
+            Verifier.holds(Postcondition.EndOfResults, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
         ledger.programCompleted = verified
         val source = ledger.programSource
-        if (ledger.goal.intent == GoalIntent.LEARN_SITE && before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked) {
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked && !terminalEnd) {
             FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability, ledger.currentProgram), verified, clock())
             if (verified) FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability), true, clock())
         }
         if (source.startsWith("skill:")) {
             val id = source.removePrefix("skill:")
-            memory.skills.recordOutcome(id, ledger.host, verified)
+            if (!terminalEnd) memory.skills.recordOutcome(id, ledger.host, verified)
             if (verified) {
                 ledger.successfulSkills += ledger.programCapability
                 Curriculum.markSkillVerified(site, ledger.programCapability, clock())
@@ -664,10 +681,11 @@ class BrainEngine(
             ledger.successfulSkills += ledger.programCapability
             Curriculum.markSkillVerified(site, ledger.programCapability, clock())
         }
-        if (!verified && success) ledger.consecutiveFailures++
-        if (!verified && (source.startsWith("skill:") || source == "local") && !ledger.blocked)
+        if (terminalEnd) ledger.note("end of results verified; no new loading lesson credited")
+        if (!verified && success && !terminalEnd) ledger.consecutiveFailures++
+        if (!verified && !terminalEnd && (source.startsWith("skill:") || source == "local") && !ledger.blocked)
             ledger.repairReason = "repair failed ${ledger.programCapability} procedure"
-        if (!verified && source == "planner") ledger.plannerFailures++
+        if (!verified && !terminalEnd && source == "planner") ledger.plannerFailures++
         ledger.currentProgram = emptyList()
         ledger.cursor = 0
         ledger.programSource = ""

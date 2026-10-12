@@ -13,9 +13,17 @@ import com.appgate.brain.model.Settle
 import com.appgate.brain.model.VerifyStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class VerifierTest {
+    @Test fun choiceValuesDoNotMatchOppositesOrBroaderLabels() {
+        assertFalse(Verifier.valuesMatch("used", "unused"))
+        assertFalse(Verifier.valuesMatch("Ford", "Ford Mustang"))
+        assertFalse(Verifier.valuesMatch("AWD", "FWD"))
+        assertTrue(Verifier.valuesMatch("  Used  ", "USED"))
+        assertTrue(Verifier.valuesMatch("8000", "$8,000"))
+    }
     private fun sps(page: PageType = PageType.RESULTS, keys: List<String> = emptyList(), dialog: Boolean = false, url: String = "https://x.test/search?q=a",
                     constraints: Map<String, String> = emptyMap(), roles: List<Role> = emptyList(), settle: Settle = Settle.IDLE, textLength: Int = 1000, scrollY: Int = 0) =
         SemanticPageState(

@@ -52,19 +52,22 @@ object FailedStrategies {
         return (site.strategyFailures[key]?.count ?: 0) < LIMIT
     }
 
-    /** A repair proposes a new procedure; holding every proposal for six hours can
-     * strand an otherwise usable page. Keep its history, but admit one fresh model
-     * attempt after the ordinary learning retry. record() reserves that slot before
-     * transport. Individual failed programs remain held by allowed(). */
+    /** Admit the first alternative repair after thirty seconds, then back off
+     * unchanged failed states (60s, 120s, 240s, at most 5 minutes). Relevant new
+     * controls get a different key and remain eligible immediately. Concrete
+     * failed programs retain their six-hour hold; site probes keep their cadence. */
     fun repairAllowed(site: SiteModel, key: String, now: Long): Boolean {
         if (allowed(site, key, now)) return true
-        return now - site.strategyFailures.getValue(key).at >= com.appgate.brain.engine.Curriculum.RETRY_MS
+        val failure = site.strategyFailures.getValue(key)
+        val delay = (com.appgate.brain.engine.Curriculum.RETRY_MS *
+            (1L shl (failure.count - LIMIT).coerceIn(0, 4))).coerceAtMost(5 * 60_000L)
+        return now - failure.at >= delay
     }
 
     fun record(site: SiteModel, key: String, success: Boolean, now: Long) {
         prune(site, now)
         if (success) site.strategyFailures.remove(key)
-        else site.strategyFailures[key] = StrategyFailure(key, (site.strategyFailures[key]?.count ?: 0) + 1, now)
+        else site.strategyFailures[key] = StrategyFailure(key, ((site.strategyFailures[key]?.count ?: 0) + 1).coerceAtMost(64), now)
         if (site.strategyFailures.size > MAX_RECORDS) {
             site.strategyFailures.values.sortedBy { it.at }.take(site.strategyFailures.size - MAX_RECORDS).forEach { site.strategyFailures.remove(it.key) }
         }

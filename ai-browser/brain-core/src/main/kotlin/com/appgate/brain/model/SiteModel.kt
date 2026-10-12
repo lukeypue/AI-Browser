@@ -203,7 +203,7 @@ class SiteModel(val host: String) {
             o.optArray("failures")?.objects()?.forEach { f -> FailureRecord.fromJson(f).let { m.failures[it.key] = it } }
             o.optArray("strategy_failures")?.objects()?.takeLast(64)?.forEach { f ->
                 val key = f.optString("key")
-                if (key.matches(Regex("[a-f0-9]{8,64}"))) m.strategyFailures[key] = StrategyFailure(key, f.optInt("count").coerceIn(0, 2), f.optLong("at"))
+                if (key.matches(Regex("[a-f0-9]{8,64}"))) m.strategyFailures[key] = StrategyFailure(key, f.optInt("count").coerceIn(0, 64), f.optLong("at"))
             }
             o.optArray("curriculum")?.objects()?.forEach { c -> m.curriculum += CurriculumItem.fromJson(c) }
             m.learningFacetKeys += o.optStrings("learning_facets").filter { it in LEARNING_FACET_KEYS }

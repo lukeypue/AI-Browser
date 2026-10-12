@@ -108,7 +108,7 @@ class MainActivity : AppCompatActivity() {
         column.addView(Ui.text(this, "Diagnostics contain only the brain's own semantic events (page types, control roles, verified/failed, timings). No listing text, no searches, no account data.", 12f, Ui.muted).apply { setPadding(0, 2, 0, 8) })
 
         column.addView(Ui.text(this, "What is new in $versionName", 18f, Ui.text, true).apply { setPadding(0, 20, 0, 8) })
-        column.addView(Ui.text(this, "• Learning retries after one minute and remembers recently failed approaches.\n• Working controls stay remembered through pagination and popup changes.\n• Better recognition of clickable listing cards and popup close buttons.\n• An AI guess about sign-in no longer creates a permanent hold. Start rechecks saved review requests against the current page.\n• Empty or unreadable results are reported honestly. Diagnostics now explain failed actions and count newly learned lessons.", 14f, Ui.muted))
+        column.addView(Ui.text(this, "• Learning rechecks sites every 30 seconds. Repeated failed AI repairs gradually wait longer, up to 5 minutes.\n• Filter checks distinguish look-alike values such as Used and Unused.\n• Reaching the end of a list stays valid navigation, but only new results earn loading-skill credit.\n• Saved scroll procedures can reach the end without losing their learned status.\n• Repeated procedure uses are separate from new lessons. A missing Next page button is still reported honestly.", 14f, Ui.muted))
 
         root.addView(column)
         setContentView(root)
