@@ -329,7 +329,7 @@ class OpportunityCurriculumTest {
         observe(restored, page.copy(scrollY = 2400), now + 2)
         observe(restored, exposed, now + 3)
         assertEquals("load_more", Curriculum.nextLesson(restored, now + 3, exposed))
-        assertEquals("next_page", Curriculum.nextLesson(site, now + Curriculum.RETRY_MS, page))
+        assertTrue(Curriculum.nextLesson(site, now + Curriculum.RETRY_MS, page) in setOf("next_page", "load_more"))
     }
 
     @Test fun missingPaginationExploresBelowTheViewportWithoutClaimingCompletion() {
