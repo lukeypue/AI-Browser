@@ -309,6 +309,29 @@ class OpportunityCurriculumTest {
         assertEquals(0, memory.site(fake.host).lessonOrdinal)
     }
 
+    @Test fun exhaustedPaginationDiscoverySharesItsDelayAcrossBothLessons() {
+        val site = siteOnly("next_page", "load_more")
+        val page = results().copy(affordances = emptyList(), scrollY = 0, scrollHeight = 3000, viewportHeight = 600)
+        observe(site, page)
+        val ledger = TaskLedger("discovery", Curriculum.nextGoal(site, profile(), 0, page, "next_page"), site.host, page.url).apply {
+            lesson = "next_page"; status = TaskStatus.PARTIAL; attemptedSkills += "seek_pagination"
+            successfulSkills += "seek_pagination"
+        }
+        Curriculum.recordAttempt(site, ledger, now)
+        observe(site, page, now + 1)
+        assertEquals("the same discovery must not restart as load_more", "", Curriculum.nextLesson(site, now + 1, page))
+        assertEquals(now + Curriculum.RETRY_MS, site.curriculum.single { it.id == "load_more" }.retryAt)
+        assertFalse(site.curriculum.single { it.id == "load_more" }.done)
+        assertFalse(site.curriculum.single { it.id == "next_page" }.done)
+        val restored = SiteModel.fromJson(Json.parseObject(site.toJson().toString()))
+        assertEquals("", Curriculum.nextLesson(restored, now + 1, page))
+        val exposed = page.copy(affordances = listOf(Affordance("more", Role.LOAD_MORE)))
+        observe(restored, page.copy(scrollY = 2400), now + 2)
+        observe(restored, exposed, now + 3)
+        assertEquals("load_more", Curriculum.nextLesson(restored, now + 3, exposed))
+        assertTrue(Curriculum.nextLesson(site, now + Curriculum.RETRY_MS, page) in setOf("next_page", "load_more"))
+    }
+
     @Test fun missingPaginationExploresBelowTheViewportWithoutClaimingCompletion() {
         val site = siteOnly("next_page")
         val page = results().copy(affordances = emptyList(), scrollY = 0, scrollHeight = 3000, viewportHeight = 600)
