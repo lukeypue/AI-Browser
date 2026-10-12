@@ -159,7 +159,8 @@ object Verifier {
         if (e == a) return true
         val en = Text.parseAmount(e); val an = Text.parseAmount(a)
         if (en != null && an != null) return en == an
-        return a.contains(e) || e.contains(a) || Text.containsAll(a, e)
+        // A partial label is not evidence that the requested value was applied.
+        return Text.clean(a) == Text.clean(e)
     }
 
     /** Default expectations for an action when its author gave none (used by exploration). */

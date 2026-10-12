@@ -88,6 +88,35 @@ class VerifierTest {
     }
 
     @Test
+    fun constraintAppliedRejectsSubstringChoice() {
+        val action = Action(ActionKind.SELECT, AffordanceRef(Role.FACET, "condition"), text = "Used",
+            expect = listOf(Postcondition.ConstraintApplied("condition", "Used")))
+        assertEquals(VerifyStatus.FAILED, Verifier.verify(action, sps(),
+            sps(constraints = mapOf("condition" to "Unused"))).status)
+        assertEquals(VerifyStatus.VERIFIED, Verifier.verify(action, sps(),
+            sps(constraints = mapOf("condition" to " used "))).status)
+    }
+
+    @Test
+    fun valueIsRejectsPartialChoiceInEitherDirection() {
+        val action = Action(ActionKind.SELECT, AffordanceRef(Role.FACET, "model"), text = "Ford Mustang",
+            expect = listOf(Postcondition.ValueIs("model", "Ford Mustang")))
+        assertEquals(VerifyStatus.FAILED, Verifier.verify(action, sps(),
+            sps(constraints = mapOf("model" to "Ford"))).status)
+        val shorter = action.copy(expect = listOf(Postcondition.ValueIs("model", "Ford")))
+        assertEquals(VerifyStatus.FAILED, Verifier.verify(shorter, sps(),
+            sps(constraints = mapOf("model" to "Ford Mustang"))).status)
+    }
+
+    @Test
+    fun completeChoiceAllowsNormalizedWhitespace() {
+        val action = Action(ActionKind.SELECT, AffordanceRef(Role.FACET, "sort"), text = "Price Low to High",
+            expect = listOf(Postcondition.ValueIs("sort", "Price Low to High")))
+        assertEquals(VerifyStatus.VERIFIED, Verifier.verify(action, sps(),
+            sps(constraints = mapOf("sort" to " PRICE  LOW\tTO HIGH "))).status)
+    }
+
+    @Test
     fun dialogAndTextPredicates() {
         val close = Action(ActionKind.DISMISS, AffordanceRef(Role.CLOSE), expect = listOf(Postcondition.DialogClosed))
         assertEquals(VerifyStatus.VERIFIED, Verifier.verify(close, sps(dialog = true), sps(dialog = false)).status)
