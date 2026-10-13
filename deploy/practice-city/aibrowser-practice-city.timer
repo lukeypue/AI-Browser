@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the AI Browser synthetic practice city periodically
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=1h
+AccuracySec=1min
+Unit=aibrowser-practice-city.service
+
+[Install]
+WantedBy=timers.target

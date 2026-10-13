@@ -19,7 +19,16 @@ class SimulationMarket(val scenario: Scenario) : Renderer {
         SimListing("k6", scenario.query, 6200, 125000, "4.10"),
         SimListing("k7", scenario.query, 7900, 149000, null),
         SimListing("k8", scenario.query, 9000, 160000, null)
-    ).map { if (scenario.missingRareEvidence) it.copy(axle = null) else it }
+     ).let { original ->
+        val distractors = (9..scenario.catalogSize).map { index ->
+            when (index % 3) {
+                0 -> SimListing("k$index", "Honda Civic", 4000 + index, 90000, null)
+                1 -> SimListing("k$index", scenario.query, 9000 + index, 100000, "3.73")
+                else -> SimListing("k$index", scenario.query, 6000, 180000 + index, "3.73")
+            }
+        }
+        (original + distractors).let { if (scenario.catalogSize > 8) it.shuffled(kotlin.random.Random(scenario.seed)) else it }
+    }.map { if (scenario.missingRareEvidence) it.copy(axle = null) else it }
 
     var appliedQuery = ""; private set
     val appliedFilters = linkedMapOf<String, String>()
@@ -183,7 +192,8 @@ class SimulationMarket(val scenario: Scenario) : Renderer {
                         }
                     }
                     val all = results()
-                    val visible = all.drop((page - 1) * 2).take(2)
+                    val visible = if (scenario.pagination == SimulationPagination.LOAD_MORE) all.take(page * scenario.pageSize)
+                        else all.drop((page - 1) * scenario.pageSize).take(scenario.pageSize)
                     visible.forEach { listing ->
                         val href = "https://${scenario.host}/item/${listing.key}"
                         val aff = element("item:${listing.key}", "a", "2010 ${listing.vehicle}", props = mapOf(
@@ -193,8 +203,11 @@ class SimulationMarket(val scenario: Scenario) : Renderer {
                             .put("href", href).put("aff", aff))
                     }
                     signals.put("priceCount", visible.size)
-                    if (all.size > page * 2) element("next", "a", if (synonym) "Older" else "Next page",
-                        props = mapOf("href" to "https://${scenario.host}/search?q=${encode(appliedQuery)}&page=${page+1}", "rel" to "next"))
+                    if (all.size > page * scenario.pageSize) {
+                        if (scenario.pagination == SimulationPagination.LOAD_MORE) element("next", "button", "Load more results")
+                        else element("next", "a", if (synonym) "Older" else "Next page",
+                            props = mapOf("href" to "https://${scenario.host}/search?q=${encode(appliedQuery)}&page=${page+1}", "rel" to "next"))
+                    }
                 } else if (path.startsWith("/item/")) {
                     val listing = catalog.firstOrNull { it.key == path.substringAfterLast('/') }
                     if (listing != null) {

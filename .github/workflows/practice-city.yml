@@ -1,0 +1,68 @@
+name: Site Brain Practice City
+
+on:
+  push:
+    paths:
+      - 'ai-browser/brain-core/**'
+      - 'scripts/practice-city.py'
+      - 'scripts/tests/test_practice_city_runner.py'
+      - '.github/workflows/practice-city.yml'
+  pull_request:
+    paths:
+      - 'ai-browser/brain-core/**'
+      - 'scripts/practice-city.py'
+      - 'scripts/tests/test_practice_city_runner.py'
+      - '.github/workflows/practice-city.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: practice-city
+  cancel-in-progress: false
+
+jobs:
+  practice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ ((github.event_name == 'schedule' || github.ref == 'refs/heads/main') && 'ai-browser-v6-deep-search') || github.ref }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '9.3.1'
+      - name: Test bounded runner
+        run: python3 -m unittest discover -s scripts/tests -p 'test_practice_city_runner.py'
+      - name: Verify core and prepare dependencies
+        run: gradle -p ai-browser/brain-core test --no-daemon --console=plain
+      - name: Run synthetic city session
+        run: python3 scripts/practice-city.py --project "$GITHUB_WORKSPACE" --output-dir "$RUNNER_TEMP/practice-city-reports"
+      - name: Print aggregate exam results
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          report = Path(os.environ['RUNNER_TEMP']) / 'practice-city-reports/latest.json'
+          if report.exists():
+              data = json.loads(report.read_text())
+              for key in ('source', 'manifest', 'city_manifest', 'baseline', 'after_training', 'unseen_baseline', 'unseen_after_training', 'city_baseline', 'city_after_training', 'automation'):
+                  print(key + ': ' + json.dumps(data.get(key), sort_keys=True))
+          PY
+      - name: Save synthetic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: practice-city-report
+          path: ${{ runner.temp }}/practice-city-reports/latest.json
+          if-no-files-found: warn
+          retention-days: 2

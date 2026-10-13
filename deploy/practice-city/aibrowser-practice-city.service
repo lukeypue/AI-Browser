@@ -1,0 +1,24 @@
+[Unit]
+Description=AI Browser synthetic practice city
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=aibrowserlab
+Group=aibrowserlab
+Environment=HOME=/var/lib/aibrowser-practice-city
+Environment=GRADLE_USER_HOME=/var/lib/aibrowser-practice-city/gradle-cache
+WorkingDirectory=/var/lib/aibrowser-practice-city/source
+ExecStart=/usr/bin/python3 /var/lib/aibrowser-practice-city/source/scripts/practice-city.py --project /var/lib/aibrowser-practice-city/source --output-dir /var/lib/aibrowser-practice-city/reports --episodes 3600 --timeout-seconds 1800
+TimeoutStartSec=35min
+KillMode=control-group
+Nice=10
+CPUQuota=200%
+MemoryMax=3G
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aibrowser-practice-city
+RestrictSUIDSGID=true

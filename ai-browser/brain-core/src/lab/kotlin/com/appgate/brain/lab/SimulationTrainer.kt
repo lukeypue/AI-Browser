@@ -43,7 +43,9 @@ class SimulationTrainer {
         val curriculum = SimulationCurriculum()
         val rows = (1..count).map { index ->
             val level = curriculum.level
-            val scenario = Scenario(-10000 - index, level, twoStepSearch = true,
+            val scenario = Scenario(-10000 - index, level, host = "district-${index % 8}.sim.invalid", twoStepSearch = true,
+                catalogSize = listOf(32, 64, 96, 128)[index % 4], pageSize = index % 4 + 1,
+                pagination = SimulationPagination.entries[index % 2], queryVariant = (index / 2) % 4,
                 missingMileage = level >= 5, missingRareEvidence = level >= 5,
                 fault = if (level >= 8) SimulationFault.STALE_ONCE else if (level >= 6) SimulationFault.LOADING_ONCE else SimulationFault.NONE)
             val row = run(scenario, store, true)
@@ -88,22 +90,30 @@ class SimulationTrainer {
         // Known developer-owned fixtures, hidden from the student/training loop; not a secure external benchmark.
         val fixed = evaluationCases("practice.sim.invalid", 1000)
         val unseen = evaluationCases("unseen.sim.invalid", 2000)
+        val city = cityCases()
+        val cityBaseline = evaluate(city, emptyMap())
         val baseline = evaluate(fixed, emptyMap())
         val unseenBaseline = evaluate(unseen, emptyMap())
         val (snapshot, training, achievedLevel) = progressiveTraining(trainingEpisodes)
         val trainingCases = training.map { it.scenario }
-        require((fixed + unseen).none { e -> trainingCases.any { it.id == e.id || it.seed == e.seed } })
+        require((fixed + unseen + city).none { e -> trainingCases.any { it.id == e.id || it.seed == e.seed } })
         val after = evaluate(fixed, snapshot)
         val transfer = evaluate(unseen, snapshot)
+        val cityAfter = evaluate(city, snapshot)
         fun manifest(cases: List<Scenario>) = MessageDigest.getInstance("SHA-256")
             .digest(cases.joinToString("\n") { it.id }.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
-        return JsonObject().put("schema_version", 1).put("environment", "offline stateful marketplace wire format; real Kotlin engine/parser/verifier; no browser or external model")
+        return JsonObject().put("schema_version", 2).put("environment", "offline stateful marketplace wire format; real Kotlin engine/parser/verifier; no browser or external model")
             .put("learning", "verified parameterized procedural memory; no foundation-model weight training")
             .put("evaluation_isolation", "each case starts from a fresh fork of the frozen pre/post memory; no evaluation writes enter training")
             .put("real_world_validated", false).put("synthetic_memory_imported_to_android", false)
             .put("manifest", JsonObject().put("fixed_sha256", manifest(fixed)).put("unseen_sha256", manifest(unseen))
                 .put("training_sha256", manifest(trainingCases)).put("training_episodes", trainingCases.size))
+            .put("city_manifest", JsonObject().put("sha256", manifest(city)).put("districts", 8)
+                .put("episodes", city.size).put("max_catalog_size", 128).put("min_page_size", 1).put("max_page_size", 4)
+                .put("pagination_modes", "next_page,load_more").put("training_hosts_disjoint", true))
+            .put("city_baseline", summary(cityBaseline)).put("city_after_training", summary(cityAfter))
+            .put("city_pairs", JsonArray(cityBaseline.zip(cityAfter).map { (a,b) -> JsonObject().put("before", a.toJson()).put("after", b.toJson()) }))
             .put("baseline", summary(baseline)).put("after_training", summary(after))
             .put("unseen_baseline", summary(unseenBaseline)).put("unseen_after_training", summary(transfer))
             .put("training_teacher_demonstrations", training.sumOf { it.teacherDemonstrations })
@@ -118,6 +128,18 @@ class SimulationTrainer {
 
     companion object {
         const val NOW = 1_800_000_000_000L
+        /** Same exam each run. Training seeds are negative, exam seeds positive; exam hosts are never trained. */
+        fun cityCases(): List<Scenario> = (0..7).flatMap { district -> (1..9).flatMap { level ->
+            SimulationPagination.entries.map { pagination ->
+                Scenario(30000 + district * 1000 + level * 10 + pagination.ordinal, level,
+                    host = "exam-district-$district.sim.invalid", twoStepSearch = district % 2 == 0,
+                    missingMileage = level >= 5, missingRareEvidence = district % 3 == 0,
+                    fault = if (level >= 8) SimulationFault.STALE_ONCE else if (level >= 6) SimulationFault.LOADING_ONCE else SimulationFault.NONE,
+                    catalogSize = listOf(32, 64, 96, 128)[district % 4], pageSize = district % 4 + 1,
+                    pagination = pagination, queryVariant = district % 4)
+            }
+        } }
+
         fun evaluationCases(host: String, seedOffset: Int): List<Scenario> = (1..9).flatMap { level ->
             listOf(Scenario(seedOffset + level * 10 + 1, level, host, missingMileage = level >= 5,
                     missingRareEvidence = level >= 5, fault = if (level >= 6) SimulationFault.STALE_ONCE else SimulationFault.NONE),

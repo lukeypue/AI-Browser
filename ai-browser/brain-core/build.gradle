@@ -39,5 +39,6 @@ tasks.register('simulationExperiment', JavaExec) {
     description = 'Frozen-memory baseline, training and held-out marketplace evaluation (no network).'
     classpath = sourceSets.lab.runtimeClasspath
     mainClass = 'com.appgate.brain.lab.SimulationMainKt'
-    args layout.buildDirectory.file('reports/brain/simulation.json').get().asFile.absolutePath
+    args layout.buildDirectory.file('reports/brain/simulation.json').get().asFile.absolutePath,
+        providers.gradleProperty('brainTrainingEpisodes').getOrElse('1200')
 }
