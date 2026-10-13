@@ -8,11 +8,11 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.appgate.tv"
-        minSdk 22
+        applicationId "com.aibrowser.universal"
+        minSdk 26
         targetSdk 34
-        versionCode 3
-        versionName "1.0.0"
+        versionCode 9
+        versionName "4.2.0-certified-source-beta"
     }
 
     buildTypes {

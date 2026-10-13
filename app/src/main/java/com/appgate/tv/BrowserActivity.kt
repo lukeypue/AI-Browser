@@ -1,743 +1,416 @@
 package com.appgate.tv
 
 import android.annotation.SuppressLint
-import android.content.ComponentCallbacks2
-import android.content.Context
-import android.graphics.Canvas
+import android.content.Intent
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Rect
-import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
-import android.view.InputDevice
-import android.view.KeyEvent
-import android.view.MotionEvent
+import android.os.Handler
+import android.os.Looper
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowManager
-import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
-import android.webkit.PermissionRequest
-import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.EditText
-import android.widget.FrameLayout
-import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONArray
+import org.json.JSONTokener
 
-/**
- * AppGate v1: one lightweight, remote-friendly TikTok web experience.
- *
- * There is no URL bar and no generic site launcher. D-pad moves AppGate's
- * pointer, OK clicks, Channel Down/Fast Forward move to the next feed item,
- * Channel Up/Rewind return to the previous item, and Menu opens AppGate help,
- * Home and verified hashtag/profile search.
- */
+private data class FoundResult(val source: String, val title: String, val url: String, val deepVerified: Boolean)
+private data class CandidateResult(val source: String, val sourceKey: String, val title: String, val url: String)
+private enum class ScanMode { SOURCES, DEEP }
+
 class BrowserActivity : AppCompatActivity() {
-
-    private lateinit var root: FrameLayout
     private lateinit var webView: WebView
-    private lateinit var cursor: CursorView
+    private lateinit var status: TextView
+    private lateinit var progress: ProgressBar
+    private lateinit var resumeButton: Button
 
-    private var cursorX = 0f
-    private var cursorY = 0f
-    private var keyboardRequested = false
-    private var feedMoveInProgress = false
-    private var activeDialog: AlertDialog? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var names = arrayListOf<String>()
+    private var keys = arrayListOf<String>()
+    private var urls = arrayListOf<String>()
+    private var index = 0
+    private var waitingForHuman = false
+    private var stopped = false
+    private var rememberSignIns = true
+    private var mode = ScanMode.SOURCES
+    private lateinit var parsed: ParsedSearch
 
-    private var customView: View? = null
-    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
-    private var lastGoodUrl: String = TikTokNavigation.HOME_URL
+    private val candidates = LinkedHashMap<String, CandidateResult>()
+    private val results = LinkedHashMap<String, FoundResult>()
+    private val failures = mutableListOf<String>()
+    private val sourceCounts = linkedMapOf<String, Int>()
+    private var deepQueue = listOf<CandidateResult>()
+    private var deepIndex = 0
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        title = "AI Browser Deep Search"
+        names = intent.getStringArrayListExtra("sourceNames") ?: arrayListOf()
+        keys = intent.getStringArrayListExtra("sourceKeys") ?: arrayListOf()
+        urls = intent.getStringArrayListExtra("sourceUrls") ?: arrayListOf()
+        rememberSignIns = intent.getBooleanExtra("rememberSignIns", true)
+        parsed = SearchIntentParser.parse(intent.getStringExtra("query").orEmpty())
 
-        root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        cursor = CursorView(this).apply {
-            isClickable = false
-            isFocusable = false
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(11, 16, 24))
         }
+
+        status = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            setPadding(18, 14, 18, 10)
+        }
+        root.addView(status)
+
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = if (names.isEmpty()) 1 else names.size
+            progress = 0
+        }
+        root.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 10))
+
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        resumeButton = Button(this).apply {
+            text = "Resume"
+            isEnabled = false
+            setOnClickListener {
+                waitingForHuman = false
+                isEnabled = false
+                inspectCurrentPage()
+            }
+        }
+        controls.addView(resumeButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        controls.addView(Button(this).apply {
+            text = "Skip"
+            setOnClickListener {
+                if (mode == ScanMode.SOURCES) {
+                    failures.add("${currentName()}: skipped")
+                    nextSource()
+                } else {
+                    nextDeepCandidate()
+                }
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        controls.addView(Button(this).apply {
+            text = "Show Results"
+            setOnClickListener { showCombinedResults() }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        root.addView(controls)
+
+        webView = WebView(this).apply {
+            setBackgroundColor(Color.WHITE)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            webChromeClient = WebChromeClient()
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    if (rememberSignIns) CookieManager.getInstance().flush()
+                    if (!stopped && !waitingForHuman) handler.postDelayed({ inspectCurrentPage() }, 1100L)
+                }
+
+                override fun onReceivedError(view: WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                    super.onReceivedError(view, request, error)
+                    if (request?.isForMainFrame == true && mode == ScanMode.SOURCES) {
+                        failures.add("${currentName()}: page error")
+                    }
+                }
+            }
+        }
+        root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
 
-        val restoreUrl = savedInstanceState?.getString(STATE_URL)
-            ?.takeUnless { TikTokNavigation.shouldBlock(it) }
-            ?: TikTokNavigation.HOME_URL
-        lastGoodUrl = restoreUrl
-        buildWebView(restoreUrl)
-
-        root.addView(
-            cursor,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
-
-        root.post {
-            cursorX = savedInstanceState?.getFloat(STATE_CURSOR_X)
-                ?.takeIf { it > 0f } ?: root.width / 2f
-            cursorY = savedInstanceState?.getFloat(STATE_CURSOR_Y)
-                ?.takeIf { it > 0f } ?: root.height / 2f
-            cursor.setPos(cursorX, cursorY)
-        }
-
-        root.postDelayed({
-            Toast.makeText(
-                this,
-                "Menu: AppGate controls/search  •  CH ↓ or FF: next  •  CH ↑ or RW: previous",
-                Toast.LENGTH_LONG
-            ).show()
-        }, 800L)
+        if (urls.isEmpty()) showCombinedResults() else loadCurrentSource()
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun buildWebView(restoreUrl: String) {
-        webView = WebView(this)
-        root.addView(
-            webView,
-            0,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
-
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            mediaPlaybackRequiresUserGesture = false
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            builtInZoomControls = false
-            displayZoomControls = false
-            setSupportZoom(false)
-            javaScriptCanOpenWindowsAutomatically = false
-            setSupportMultipleWindows(false)
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            allowFileAccess = false
-            allowContentAccess = false
-            setGeolocationEnabled(false)
-            cacheMode = WebSettings.LOAD_DEFAULT
-            loadsImagesAutomatically = true
-            // Deliberately keep Amazon WebView's real/default user-agent. Silk
-            // was stable on the test Fire TV; spoofing a different Chrome build
-            // can give modern TikTok contradictory UA/client-hint information.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) offscreenPreRaster = false
+    private fun loadCurrentSource() {
+        if (stopped) return
+        if (index >= urls.size) {
+            finishSourcePhase()
+            return
         }
-        webView.setInitialScale(0)
-
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView, true)
-        }
-
-        webView.isFocusable = true
-        webView.isFocusableInTouchMode = true
-        webView.requestFocus()
-
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView,
-                request: WebResourceRequest
-            ): Boolean {
-                val url = request.url.toString()
-                if (TikTokNavigation.shouldBlock(url)) {
-                    if (request.isForMainFrame) showBlockedLinkMessage()
-                    return true
-                }
-                return false
-            }
-
-            @Deprecated("Required for WebView navigation on API 22")
-            override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
-                if (TikTokNavigation.shouldBlock(url)) {
-                    showBlockedLinkMessage()
-                    return true
-                }
-                return false
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                if (!TikTokNavigation.shouldBlock(url)) lastGoodUrl = url
-                injectTvCleanup()
-            }
-
-            override fun onReceivedError(
-                view: WebView,
-                request: WebResourceRequest,
-                error: WebResourceError
-            ) {
-                if (request.isForMainFrame) {
-                    Toast.makeText(
-                        this@BrowserActivity,
-                        "TikTok did not load. Press Menu for Home or Search.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-
-            override fun onRenderProcessGone(
-                view: WebView,
-                detail: RenderProcessGoneDetail
-            ): Boolean {
-                val restore = view.url
-                    ?.takeUnless { TikTokNavigation.shouldBlock(it) }
-                    ?: lastGoodUrl
-                root.removeView(view)
-                view.destroy()
-                buildWebView(restore)
-                Toast.makeText(
-                    this@BrowserActivity,
-                    "AppGate reloaded TikTok after low memory",
-                    Toast.LENGTH_SHORT
-                ).show()
-                return true
-            }
-        }
-
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-                if (customView != null) {
-                    callback.onCustomViewHidden()
-                    return
-                }
-                customView = view
-                customViewCallback = callback
-                webView.visibility = View.GONE
-                cursor.visibility = View.GONE
-                root.addView(
-                    view,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                )
-            }
-
-            override fun onHideCustomView() {
-                customView?.let { root.removeView(it) }
-                customView = null
-                customViewCallback = null
-                webView.visibility = View.VISIBLE
-                cursor.visibility = View.VISIBLE
-            }
-
-            override fun onPermissionRequest(request: PermissionRequest) {
-                // v1 needs no camera/microphone/device permissions.
-                request.deny()
-            }
-        }
-
-        webView.loadUrl(restoreUrl)
+        mode = ScanMode.SOURCES
+        waitingForHuman = false
+        resumeButton.isEnabled = false
+        progress.max = names.size.coerceAtLeast(1)
+        progress.progress = index
+        status.text = "Searching ${index + 1} of ${urls.size}: ${currentName()}"
+        webView.loadUrl(urls[index])
     }
 
-    /**
-     * Keep cleanup intentionally narrow. Do not resize html/body, force 100vh,
-     * or scale the whole document: those approaches moved hit targets and cut
-     * off controls during earlier Fire TV testing.
-     */
-    private fun injectTvCleanup() {
-        val script = """
+    private fun finishSourcePhase() {
+        if (parsed.requiredTerms.isEmpty() || candidates.isEmpty()) {
+            showCombinedResults()
+            return
+        }
+        mode = ScanMode.DEEP
+        deepQueue = candidates.values.take(30)
+        deepIndex = 0
+        progress.max = deepQueue.size.coerceAtLeast(1)
+        loadDeepCandidate()
+    }
+
+    private fun loadDeepCandidate() {
+        if (stopped) return
+        if (deepIndex >= deepQueue.size) {
+            showCombinedResults()
+            return
+        }
+        mode = ScanMode.DEEP
+        waitingForHuman = false
+        resumeButton.isEnabled = false
+        progress.progress = deepIndex
+        val candidate = deepQueue[deepIndex]
+        status.text = "Deep checking ${deepIndex + 1} of ${deepQueue.size}: ${candidate.source}\nLooking for: ${parsed.requiredTerms.joinToString()}"
+        webView.loadUrl(candidate.url)
+    }
+
+    private fun inspectCurrentPage() {
+        if (stopped || waitingForHuman) return
+        val challengeScript = """
             (function(){
-              var style = document.getElementById('appgate-tv-css');
-              if (!style) {
-                style = document.createElement('style');
-                style.id = 'appgate-tv-css';
-                (document.head || document.documentElement).appendChild(style);
-              }
-              style.textContent = `
-                [class*="download-app"], [class*="app-banner"], [class*="AppBanner"],
-                [class*="open-app"], [class*="OpenApp"], [class*="smart-banner"],
-                [id*="smart-banner"], [data-e2e="download-app"],
-                [data-e2e="download-guide"], [class*="DivDownload"],
-                [class*="GuideContainer"], [class*="BottomBanner"] {
-                  display: none !important;
-                }
-              `;
+              var t=((document.title||'')+' '+((document.body&&document.body.innerText)||'')).toLowerCase();
+              return t.slice(0,12000);
             })();
         """.trimIndent()
-        webView.evaluateJavascript(script, null)
+        webView.evaluateJavascript(challengeScript) { raw ->
+            val text = decodeJsString(raw).lowercase()
+            val human = listOf(
+                "captcha", "verify you are human", "security check", "checkpoint",
+                "unusual traffic", "confirm your identity", "log in to facebook", "login to facebook"
+            ).any { text.contains(it) }
+            if (human) {
+                waitingForHuman = true
+                resumeButton.isEnabled = true
+                status.text = "${if (mode == ScanMode.SOURCES) currentName() else deepQueue.getOrNull(deepIndex)?.source ?: "Site"}: sign-in or human verification needed. Complete it in the page, then tap Resume.\n\nIf Remember Sign-ins is ON, the website session is kept on this device."
+                return@evaluateJavascript
+            }
+            if (mode == ScanMode.SOURCES) extractSourceResults() else inspectDeepListing()
+        }
     }
 
-    // ---------------- Remote handling ----------------
-
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        activeDialog?.takeIf { it.isShowing }?.let {
-            return super.dispatchKeyEvent(event)
-        }
-
-        val inputMethod = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        if ((keyboardRequested || inputMethod.isAcceptingText) &&
-            event.keyCode != KeyEvent.KEYCODE_BACK
-        ) {
-            return super.dispatchKeyEvent(event)
-        }
-
-        if (event.action != KeyEvent.ACTION_DOWN) {
-            return if (HANDLED_KEYS.contains(event.keyCode)) true
-            else super.dispatchKeyEvent(event)
-        }
-
-        val baseMovement = if (event.repeatCount > 3) 44f else 19f
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT -> {
-                moveCursor(-baseMovement, 0f); return true
-            }
-            KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                moveCursor(baseMovement, 0f); return true
-            }
-            KeyEvent.KEYCODE_DPAD_UP -> {
-                moveCursor(0f, -baseMovement); return true
-            }
-            KeyEvent.KEYCODE_DPAD_DOWN -> {
-                moveCursor(0f, baseMovement); return true
-            }
-            KeyEvent.KEYCODE_DPAD_CENTER,
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_BUTTON_A -> {
-                clickAt(cursorX, cursorY); return true
-            }
-            KeyEvent.KEYCODE_CHANNEL_DOWN,
-            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-            KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                moveFeed(next = true); return true
-            }
-            KeyEvent.KEYCODE_CHANNEL_UP,
-            KeyEvent.KEYCODE_MEDIA_REWIND,
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                moveFeed(next = false); return true
-            }
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-            KeyEvent.KEYCODE_MEDIA_PLAY,
-            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                runJs(JS_TOGGLE_VIDEO); return true
-            }
-            KeyEvent.KEYCODE_MENU -> {
-                showAppGateMenu(); return true
-            }
-            KeyEvent.KEYCODE_BACK -> {
-                handleBack(); return true
-            }
-        }
-        return super.dispatchKeyEvent(event)
-    }
-
-    private fun showAppGateMenu() {
-        if (activeDialog?.isShowing == true) return
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("AppGate")
-            .setMessage(
-                "TikTok web experience — supported now\n" +
-                    "More web services coming later.\n\n" +
-                    "D-pad: move pointer\n" +
-                    "OK: click\n" +
-                    "Channel Down or Fast Forward: next video\n" +
-                    "Channel Up or Rewind: previous video\n" +
-                    "Play/Pause: play or pause\n" +
-                    "Back: previous page / exit\n" +
-                    "Menu: AppGate controls\n\n" +
-                    "Search uses TV-friendly TikTok hashtag/profile pages. " +
-                    "Comments can be read; posting is not guaranteed in this first version."
-            )
-            .setPositiveButton("Search") { _, _ -> root.post { showSearchDialog() } }
-            .setNeutralButton("Home") { _, _ -> webView.loadUrl(TikTokNavigation.HOME_URL) }
-            .setNegativeButton("Close", null)
-            .create()
-        dialog.setOnDismissListener { if (activeDialog === dialog) activeDialog = null }
-        activeDialog = dialog
-        dialog.show()
-    }
-
-    private fun showSearchDialog() {
-        if (activeDialog?.isShowing == true) return
-        val input = EditText(this).apply {
-            hint = "cats or @username"
-            isSingleLine = true
-            setPadding(32, 12, 32, 12)
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Search TikTok")
-            .setMessage("Enter a topic/hashtag, or type @username for a profile.")
-            .setView(input)
-            .setPositiveButton("Go") { _, _ ->
-                val target = TikTokNavigation.destinationForSearch(input.text?.toString().orEmpty())
-                if (target == null) {
-                    Toast.makeText(this, "Enter a topic or @username", Toast.LENGTH_SHORT).show()
-                } else {
-                    webView.loadUrl(target)
+    private fun extractSourceResults() {
+        val js = """
+            (function(){
+              var out=[]; var seen={}; var links=document.querySelectorAll('a[href]');
+              function clean(s){return (s||'').replace(/\s+/g,' ').trim();}
+              function cardText(a){
+                var best=clean(a.innerText||a.getAttribute('aria-label')||'');
+                var n=a;
+                for(var d=0; d<5 && n; d++,n=n.parentElement){
+                  var t=clean(n.innerText||'');
+                  if(t.length>=best.length && t.length<=750) best=t;
+                  if(n.matches && n.matches('article,li,[role="article"],[class*="listing"],[class*="result"],[class*="card"]')) break;
                 }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        dialog.setOnShowListener {
-            input.requestFocus()
-            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
-            input.postDelayed({
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
-            }, 120L)
-        }
-        dialog.setOnDismissListener { if (activeDialog === dialog) activeDialog = null }
-        activeDialog = dialog
-        dialog.show()
-    }
+                return best;
+              }
+              for(var i=0;i<links.length && out.length<40;i++){
+                var a=links[i], href=a.href||'', txt=cardText(a);
+                if(!href.startsWith('http') || txt.length<8 || txt.length>750) continue;
+                var low=txt.toLowerCase();
+                if(low==='sign in'||low==='log in'||low.includes('privacy policy')||low.includes('terms of use')) continue;
+                if(seen[href]) continue; seen[href]=1;
+                out.push({title:txt,url:href});
+              }
+              return JSON.stringify(out);
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(js) { raw ->
+            var accepted = 0
+            try {
+                val decoded = decodeJsString(raw)
+                val array = JSONArray(decoded)
+                val sourceName = currentName()
+                val sourceKey = currentKey()
+                for (i in 0 until array.length()) {
+                    if (parsed.requiredTerms.isNotEmpty() && accepted >= 6) break
+                    val o = array.optJSONObject(i) ?: continue
+                    val title = o.optString("title").trim()
+                    val url = o.optString("url").trim()
+                    if (title.length < 8 || !url.startsWith("http")) continue
+                    if (!expectedDomainMatches(sourceKey, url)) continue
+                    if (!SearchMatcher.summaryCouldMatch(title, parsed)) continue
 
-    private fun showBlockedLinkMessage() {
-        Toast.makeText(
-            this,
-            "TikTok tried to open its phone app. AppGate kept you on TV. Use Menu → Search if needed.",
-            Toast.LENGTH_LONG
-        ).show()
-    }
-
-    private fun moveFeed(next: Boolean) {
-        if (feedMoveInProgress) return
-        feedMoveInProgress = true
-
-        webView.evaluateJavascript(FEED_FINGERPRINT) { before ->
-            dispatchWebArrow(next)
-            webView.postDelayed({
-                webView.evaluateJavascript(FEED_FINGERPRINT) { afterArrow ->
-                    if (before != afterArrow) {
-                        feedMoveInProgress = false
-                        return@evaluateJavascript
-                    }
-
-                    runJs(if (next) JS_FEED_NEXT else JS_FEED_PREVIOUS)
-                    webView.postDelayed({
-                        webView.evaluateJavascript(FEED_FINGERPRINT) { afterJs ->
-                            if (before == afterJs) swipeFeed(next)
-                            webView.postDelayed({ feedMoveInProgress = false }, 380L)
+                    if (parsed.requiredTerms.isEmpty()) {
+                        if (!results.containsKey(url)) {
+                            results[url] = FoundResult(sourceName, title, url, false)
+                            accepted++
                         }
-                    }, 420L)
+                    } else if (!candidates.containsKey(url)) {
+                        candidates[url] = CandidateResult(sourceName, sourceKey, title, url)
+                        accepted++
+                    }
                 }
-            }, 460L)
-        }
-    }
-
-    /** Sends a real key event to the web renderer before using fallbacks. */
-    private fun dispatchWebArrow(next: Boolean) {
-        val keyCode = if (next) KeyEvent.KEYCODE_DPAD_DOWN else KeyEvent.KEYCODE_DPAD_UP
-        val downTime = SystemClock.uptimeMillis()
-        webView.dispatchKeyEvent(KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, keyCode, 0))
-        webView.dispatchKeyEvent(KeyEvent(downTime, downTime + 20, KeyEvent.ACTION_UP, keyCode, 0))
-    }
-
-    /** Last-resort in-process touch flick for a feed that ignores keys/scroll. */
-    private fun swipeFeed(next: Boolean) {
-        val x = root.width / 2f
-        val height = root.height.toFloat()
-        val startY = if (next) height * 0.78f else height * 0.22f
-        val endY = if (next) height * 0.22f else height * 0.78f
-        val downTime = SystemClock.uptimeMillis()
-        var eventTime = downTime
-
-        fun send(action: Int, y: Float) {
-            val motion = MotionEvent.obtain(downTime, eventTime, action, x, y, 0)
-            motion.source = InputDevice.SOURCE_TOUCHSCREEN
-            webView.dispatchTouchEvent(motion)
-            motion.recycle()
-        }
-
-        send(MotionEvent.ACTION_DOWN, startY)
-        for (step in 1..10) {
-            eventTime += 10
-            send(MotionEvent.ACTION_MOVE, startY + (endY - startY) * step / 10f)
-        }
-        eventTime += 10
-        send(MotionEvent.ACTION_UP, endY)
-    }
-
-    private fun handleBack() {
-        when {
-            customView != null -> customViewCallback?.onCustomViewHidden()
-            keyboardRequested || isKeyboardVisible() -> hideKeyboard()
-            webView.canGoBack() -> webView.goBack()
-            else -> finish()
-        }
-    }
-
-    private fun isKeyboardVisible(): Boolean {
-        val visible = Rect()
-        root.getWindowVisibleDisplayFrame(visible)
-        return root.height > 0 && root.height - visible.height() > root.height * 0.18f
-    }
-
-    private fun hideKeyboard() {
-        val inputMethod = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        inputMethod.hideSoftInputFromWindow(webView.windowToken, 0)
-        keyboardRequested = false
-        runJs(JS_BLUR_EDITOR)
-        webView.clearFocus()
-        webView.requestFocus()
-    }
-
-    private fun moveCursor(dx: Float, dy: Float) {
-        val margin = 8f
-        cursorX = (cursorX + dx).coerceIn(margin, (root.width - margin).coerceAtLeast(margin))
-        cursorY = (cursorY + dy).coerceIn(margin, (root.height - margin).coerceAtLeast(margin))
-        cursor.setPos(cursorX, cursorY)
-    }
-
-    private fun clickAt(x: Float, y: Float) {
-        if (root.width <= 0 || root.height <= 0) return
-        val downTime = SystemClock.uptimeMillis()
-        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
-        val up = MotionEvent.obtain(downTime, downTime + 65, MotionEvent.ACTION_UP, x, y, 0)
-        down.source = InputDevice.SOURCE_TOUCHSCREEN
-        up.source = InputDevice.SOURCE_TOUCHSCREEN
-        webView.dispatchTouchEvent(down)
-        webView.dispatchTouchEvent(up)
-        down.recycle()
-        up.recycle()
-        cursor.pulse()
-
-        // Login/search text fields should still get the Fire TV keyboard if the
-        // page makes one active. Comment posting is deliberately not promised.
-        webView.postDelayed({
-            webView.evaluateJavascript(JS_ACTIVE_EDITOR) { result ->
-                if (result == "true") showKeyboard()
+                if (parsed.requiredTerms.isEmpty() && accepted > 0) {
+                    sourceCounts[sourceName] = (sourceCounts[sourceName] ?: 0) + accepted
+                }
+                if (accepted == 0) failures.add("$sourceName: no matching cards read")
+                status.text = "$sourceName: kept $accepted plausible listing${if (accepted == 1) "" else "s"} after hard filters"
+            } catch (_: Exception) {
+                failures.add("${currentName()}: could not read result cards")
             }
-        }, 180L)
-    }
-
-    private fun showKeyboard() {
-        keyboardRequested = true
-        webView.requestFocus()
-        val inputMethod = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        webView.post {
-            inputMethod.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)
-            webView.postDelayed({
-                inputMethod.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)
-            }, 180L)
+            handler.postDelayed({ nextSource() }, 450L)
         }
     }
 
-    private fun runJs(code: String) {
-        if (::webView.isInitialized) webView.evaluateJavascript(code, null)
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        if (::webView.isInitialized) outState.putString(STATE_URL, webView.url ?: lastGoodUrl)
-        outState.putFloat(STATE_CURSOR_X, cursorX)
-        outState.putFloat(STATE_CURSOR_Y, cursorY)
-        super.onSaveInstanceState(outState)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (::webView.isInitialized) webView.onResume()
-    }
-
-    override fun onPause() {
-        if (::webView.isInitialized) {
-            runJs(JS_PAUSE_ALL_VIDEOS)
-            webView.onPause()
+    private fun inspectDeepListing() {
+        val candidate = deepQueue.getOrNull(deepIndex) ?: run {
+            showCombinedResults(); return
         }
-        CookieManager.getInstance().flush()
-        super.onPause()
+        val js = """
+            (function(){
+              var title=(document.title||'');
+              var body=((document.body&&document.body.innerText)||'');
+              return (title+'\n'+body).slice(0,60000);
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(js) { raw ->
+            val text = decodeJsString(raw)
+            if (SearchMatcher.deepTextMatches(text, parsed)) {
+                results[candidate.url] = FoundResult(candidate.source, candidate.title, candidate.url, true)
+                sourceCounts[candidate.source] = (sourceCounts[candidate.source] ?: 0) + 1
+            }
+            handler.postDelayed({ nextDeepCandidate() }, 300L)
+        }
     }
 
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        if (::webView.isInitialized && level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
-            webView.clearCache(false)
+    private fun nextSource() {
+        if (stopped) return
+        index++
+        loadCurrentSource()
+    }
+
+    private fun nextDeepCandidate() {
+        if (stopped) return
+        deepIndex++
+        loadDeepCandidate()
+    }
+
+    private fun expectedDomainMatches(key: String, url: String): Boolean {
+        val required = when (key) {
+            "truecar" -> "truecar.com"
+            "cargurus" -> "cargurus.com"
+            "edmunds" -> "edmunds.com"
+            "autolist" -> "autolist.com"
+            "hemmings" -> "hemmings.com"
+            "cars_bids" -> "carsandbids.com"
+            "bringatrailer" -> "bringatrailer.com"
+            else -> null
         }
+        return required == null || url.contains(required, ignoreCase = true)
+    }
+
+    private fun showCombinedResults() {
+        if (stopped) return
+        stopped = true
+        handler.removeCallbacksAndMessages(null)
+        webView.stopLoading()
+        if (rememberSignIns) CookieManager.getInstance().flush()
+
+        val root = ScrollView(this).apply { setBackgroundColor(Color.rgb(11, 16, 24)) }
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 24, 24, 40)
+        }
+        list.addView(label("Deep Search Results", 26f, Color.WHITE, true))
+        val constraintText = buildString {
+            parsed.maxPrice?.let { append("Price ≤ $${"%,d".format(it)}  ") }
+            parsed.maxMileage?.let { append("Mileage ≤ ${"%,d".format(it)}  ") }
+            if (parsed.requiredTerms.isNotEmpty()) append("Deep match: ${parsed.requiredTerms.joinToString()}")
+        }.ifBlank { "No hard constraints detected" }
+        list.addView(label(constraintText, 14f, Color.rgb(175, 195, 220), false).apply { setPadding(0, 6, 0, 6) })
+        list.addView(label("${results.size} verified result${if (results.size == 1) "" else "s"} after searching ${index.coerceAtMost(names.size)} sources", 14f, Color.rgb(175, 195, 220), false).apply { setPadding(0, 0, 0, 14) })
+
+        if (sourceCounts.isNotEmpty()) {
+            list.addView(label("Matches by source", 17f, Color.WHITE, true))
+            sourceCounts.forEach { (source, count) -> list.addView(label("• $source: $count", 13f, Color.rgb(150, 205, 160), false)) }
+        }
+
+        if (results.isEmpty()) {
+            list.addView(label("No listing passed every requested condition yet. That is better than showing expensive or irrelevant listings as matches. Source notes below show which sites may need a stronger adapter or login.", 15f, Color.rgb(230, 210, 150), false).apply { setPadding(0, 14, 0, 14) })
+        }
+
+        results.values.take(100).forEach { result ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(16, 14, 16, 14)
+                setBackgroundColor(Color.rgb(28, 37, 52))
+            }
+            card.addView(label(result.source, 13f, Color.rgb(135, 190, 255), true))
+            if (result.deepVerified) card.addView(label("✓ Description requirement verified", 12f, Color.rgb(145, 220, 155), true))
+            card.addView(label(result.title, 16f, Color.WHITE, true).apply { setPadding(0, 4, 0, 6) })
+            card.addView(Button(this).apply {
+                text = "Open Original Listing"
+                setOnClickListener {
+                    startActivity(Intent(this@BrowserActivity, ListingActivity::class.java).apply {
+                        putExtra("url", result.url)
+                        putExtra("rememberSignIns", rememberSignIns)
+                    })
+                }
+            })
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 12)
+            list.addView(card, lp)
+        }
+
+        if (failures.isNotEmpty()) {
+            list.addView(label("Source Notes", 19f, Color.WHITE, true).apply { setPadding(0, 16, 0, 6) })
+            failures.distinct().take(30).forEach { list.addView(label("• $it", 14f, Color.rgb(235, 175, 145), false)) }
+        }
+
+        list.addView(Button(this).apply { text = "New Search"; setOnClickListener { finish() } })
+        root.addView(list)
+        setContentView(root)
+    }
+
+    private fun decodeJsString(raw: String?): String {
+        if (raw == null || raw == "null") return ""
+        return try {
+            val value = JSONTokener(raw).nextValue()
+            if (value is String) value else value.toString()
+        } catch (_: Exception) {
+            raw.trim('"').replace("\\n", "\n").replace("\\\"", "\"")
+        }
+    }
+
+    private fun currentName(): String = if (index in names.indices) names[index] else "Source"
+    private fun currentKey(): String = if (index in keys.indices) keys[index] else ""
+
+    private fun label(value: String, sp: Float, color: Int, bold: Boolean) = TextView(this).apply {
+        text = value
+        textSize = sp
+        setTextColor(color)
+        gravity = Gravity.START
+        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (::webView.isInitialized && webView.visibility == View.VISIBLE && webView.canGoBack() && !stopped) webView.goBack()
+        else super.onBackPressed()
     }
 
     override fun onDestroy() {
-        activeDialog?.dismiss()
-        if (::webView.isInitialized) {
-            runJs(JS_PAUSE_ALL_VIDEOS)
-            webView.stopLoading()
-            webView.webChromeClient = null
-            webView.webViewClient = WebViewClient()
-            (webView.parent as? ViewGroup)?.removeView(webView)
-            webView.destroy()
-        }
+        handler.removeCallbacksAndMessages(null)
+        if (::webView.isInitialized) webView.destroy()
+        if (rememberSignIns) CookieManager.getInstance().flush()
+        else CookieManager.getInstance().removeAllCookies(null)
         super.onDestroy()
-    }
-
-    companion object {
-        private const val STATE_URL = "browser_url"
-        private const val STATE_CURSOR_X = "cursor_x"
-        private const val STATE_CURSOR_Y = "cursor_y"
-
-        private val HANDLED_KEYS = setOf(
-            KeyEvent.KEYCODE_DPAD_UP,
-            KeyEvent.KEYCODE_DPAD_DOWN,
-            KeyEvent.KEYCODE_DPAD_LEFT,
-            KeyEvent.KEYCODE_DPAD_RIGHT,
-            KeyEvent.KEYCODE_DPAD_CENTER,
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_BUTTON_A,
-            KeyEvent.KEYCODE_MENU,
-            KeyEvent.KEYCODE_BACK,
-            KeyEvent.KEYCODE_CHANNEL_UP,
-            KeyEvent.KEYCODE_CHANNEL_DOWN,
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-            KeyEvent.KEYCODE_MEDIA_PLAY,
-            KeyEvent.KEYCODE_MEDIA_PAUSE,
-            KeyEvent.KEYCODE_MEDIA_REWIND,
-            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-            KeyEvent.KEYCODE_MEDIA_NEXT,
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS
-        )
-
-        private const val FEED_FINGERPRINT = """
-            (function(){
-              var videos = document.querySelectorAll('video');
-              if (!videos.length) return 'scroll|' + Math.round(window.scrollY || 0);
-              var middle = window.innerHeight / 2, best = videos[0], distance = 1e9;
-              for (var i = 0; i < videos.length; i++) {
-                var rect = videos[i].getBoundingClientRect();
-                var current = Math.abs((rect.top + rect.bottom) / 2 - middle);
-                if (current < distance) { distance = current; best = videos[i]; }
-              }
-              var bestRect = best.getBoundingClientRect();
-              return (best.currentSrc || best.src || 'video') + '|' + Math.round(bestRect.top);
-            })();
-        """
-
-        private const val JS_FEED_NEXT = """
-            (function(){
-              var height = window.innerHeight;
-              var videos = Array.prototype.slice.call(document.querySelectorAll('video'));
-              var middle = height / 2, active = null, activeIndex = -1, distance = 1e9;
-              for (var i = 0; i < videos.length; i++) {
-                var rect = videos[i].getBoundingClientRect();
-                var current = Math.abs((rect.top + rect.bottom) / 2 - middle);
-                if (current < distance) { distance = current; active = videos[i]; activeIndex = i; }
-              }
-              if (active && videos[activeIndex + 1]) {
-                videos[activeIndex + 1].scrollIntoView({behavior:'smooth', block:'center'});
-                return true;
-              }
-              var node = active ? active.parentElement : null;
-              for (var depth = 0; node && depth < 8; depth++, node = node.parentElement) {
-                var style = getComputedStyle(node);
-                if (/auto|scroll/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 40) {
-                  node.scrollBy({top:node.clientHeight, behavior:'smooth'});
-                  return true;
-                }
-              }
-              window.scrollBy({top:height * 0.92, behavior:'smooth'});
-              return true;
-            })();
-        """
-
-        private const val JS_FEED_PREVIOUS = """
-            (function(){
-              var height = window.innerHeight;
-              var videos = Array.prototype.slice.call(document.querySelectorAll('video'));
-              var middle = height / 2, active = null, activeIndex = -1, distance = 1e9;
-              for (var i = 0; i < videos.length; i++) {
-                var rect = videos[i].getBoundingClientRect();
-                var current = Math.abs((rect.top + rect.bottom) / 2 - middle);
-                if (current < distance) { distance = current; active = videos[i]; activeIndex = i; }
-              }
-              if (active && activeIndex > 0) {
-                videos[activeIndex - 1].scrollIntoView({behavior:'smooth', block:'center'});
-                return true;
-              }
-              var node = active ? active.parentElement : null;
-              for (var depth = 0; node && depth < 8; depth++, node = node.parentElement) {
-                var style = getComputedStyle(node);
-                if (/auto|scroll/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 40) {
-                  node.scrollBy({top:-node.clientHeight, behavior:'smooth'});
-                  return true;
-                }
-              }
-              window.scrollBy({top:-height * 0.92, behavior:'smooth'});
-              return true;
-            })();
-        """
-
-        private const val JS_TOGGLE_VIDEO = """
-            (function(){
-              var videos = Array.prototype.slice.call(document.querySelectorAll('video'));
-              if (!videos.length) return false;
-              var middle = window.innerHeight / 2, best = videos[0], distance = 1e9;
-              videos.forEach(function(video){
-                var rect = video.getBoundingClientRect();
-                var current = Math.abs((rect.top + rect.bottom) / 2 - middle);
-                if (current < distance) { distance = current; best = video; }
-              });
-              if (best.paused) best.play(); else best.pause();
-              return true;
-            })();
-        """
-
-        private const val JS_ACTIVE_EDITOR = """
-            (function(){
-              var element = document.activeElement;
-              if (!element) return false;
-              var tag = (element.tagName || '').toLowerCase();
-              return tag === 'textarea' ||
-                (tag === 'input' && !/button|submit|checkbox|radio|file/.test(element.type || '')) ||
-                element.isContentEditable || element.getAttribute('role') === 'textbox';
-            })();
-        """
-
-        private const val JS_PAUSE_ALL_VIDEOS = """
-            (function(){
-              document.querySelectorAll('video,audio').forEach(function(media){
-                try { media.pause(); } catch (e) {}
-              });
-            })();
-        """
-
-        private const val JS_BLUR_EDITOR = """
-            (function(){
-              var active = document.activeElement;
-              if (active && active.blur) active.blur();
-            })();
-        """
-    }
-
-    /** High-contrast pointer drawn above the website. */
-    private class CursorView(context: Context) : View(context) {
-        private var x = 0f
-        private var y = 0f
-        private var radius = 14f
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(225, 255, 255, 255)
-            style = Paint.Style.FILL
-        }
-        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(245, 0, 190, 255)
-            style = Paint.Style.STROKE
-            strokeWidth = 5f
-        }
-
-        fun setPos(newX: Float, newY: Float) {
-            x = newX
-            y = newY
-            invalidate()
-        }
-
-        fun pulse() {
-            radius = 22f
-            invalidate()
-            postDelayed({
-                radius = 14f
-                invalidate()
-            }, 130L)
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            canvas.drawCircle(x, y, radius, fill)
-            canvas.drawCircle(x, y, radius, ring)
-        }
     }
 }
