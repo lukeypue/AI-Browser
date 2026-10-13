@@ -39,6 +39,19 @@ def session_lock(project, output):
         with run_lock(output):
             yield
 
+def group_has_live_processes(group):
+    # Linux is already required by flock/systemd. Do not inspect command arguments.
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            fields = (entry / 'stat').read_text().rsplit(') ', 1)[1].split()
+            if fields[0] != 'Z' and int(fields[2]) == group:
+                return True
+        except (OSError, IndexError, ValueError):
+            continue
+    return False
+
 def run_command(command, cwd, timeout):
     process = subprocess.Popen(command, cwd=cwd, start_new_session=True)
     try:
@@ -59,6 +72,10 @@ def run_command(command, cwd, timeout):
             except ProcessLookupError:
                 pass
             process.wait()
+            # SIGKILL delivery is asynchronous. Keep the lock until descendants have exited.
+            deadline = time.monotonic() + 5
+            while group_has_live_processes(process.pid) and time.monotonic() < deadline:
+                time.sleep(0.01)
         raise RunTimeout('Practice-city time limit reached') from error
     if code:
         raise subprocess.CalledProcessError(code, command)
@@ -97,6 +114,7 @@ def main(argv=None):
     parser.add_argument('--project', type=Path, required=True, help='Repository checkout with root AGENTS.md')
     parser.add_argument('--output-dir', type=Path, required=True, help='Dedicated report directory outside the checkout')
     parser.add_argument('--episodes', type=int, default=3600)
+    parser.add_argument('--prepare-dependencies', action='store_true', help='Installation only: warm dependencies under the same locks before the offline session')
     parser.add_argument('--timeout-seconds', type=int, default=1800)
     options = parser.parse_args(argv)
     if not 10 <= options.episodes <= 10000 or not 30 <= options.timeout_seconds <= 3600:
@@ -114,10 +132,14 @@ def main(argv=None):
             clock = time.monotonic()
             target = core / 'build/reports/brain/simulation.json'
             target.unlink(missing_ok=True)
+            if options.prepare_dependencies:
+                run_command(['gradle', '-p', str(core), '--no-daemon', '--console=plain', 'test'],
+                            project, options.timeout_seconds)
             # Dependency preparation happens at installation. Hourly runs have no network need.
+            remaining = max(0.01, options.timeout_seconds - (time.monotonic() - clock))
             run_command(['gradle', '-p', str(core), '--offline', '--no-daemon', '--console=plain',
                          'test', 'simulationExperiment', f'-PbrainTrainingEpisodes={options.episodes}'],
-                        project, options.timeout_seconds)
+                        project, remaining)
             report = json.loads(target.read_text())
             errors = validate_report(report)
             if report.get('manifest', {}).get('training_episodes') != options.episodes:

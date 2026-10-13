@@ -9,8 +9,13 @@ if [[ -n $(git -C "$source_dir" status --porcelain -- ai-browser/brain-core scri
 fi
 for command in gradle git python3 runuser systemctl timeout; do command -v "$command" >/dev/null; done
 state=/var/lib/aibrowser-practice-city
-if systemctl is-active --quiet aibrowser-practice-city.service; then
-  echo 'An existing practice-city session is running; installation did not replace it.' >&2; exit 1
+service_state=$(systemctl show -p ActiveState --value aibrowser-practice-city.service 2>/dev/null || true)
+case "$service_state" in
+  active|activating|deactivating|reloading)
+    echo 'An existing practice-city session is running; installation did not replace it.' >&2; exit 1 ;;
+esac
+if systemctl is-enabled --quiet aibrowser-practice-city.timer 2>/dev/null || systemctl is-active --quiet aibrowser-practice-city.timer; then
+  echo 'An existing practice-city timer is enabled; preserve it and review the upgrade first.' >&2; exit 1
 fi
 if ! id aibrowserlab >/dev/null 2>&1; then
   useradd --system --user-group --home-dir "$state" --shell /usr/sbin/nologin aibrowserlab
@@ -30,12 +35,9 @@ else
     echo 'Existing lab checkout contains changes; installation did not overwrite them.' >&2; exit 1;
   }
 fi
-# Warm dependencies and verify without access to root's credentials or Android signing files.
+# Warm dependencies and validate the full first session under the runner's shared locks.
 timeout --kill-after=20s 35m runuser -u aibrowserlab -- env HOME="$state" GRADLE_USER_HOME="$state/gradle-cache" \
-  gradle -p "$state/source/ai-browser/brain-core" --no-daemon --console=plain test simulationExperiment -PbrainTrainingEpisodes=10
-# Validate the actual full-size first session before enabling unattended runs.
-timeout --kill-after=20s 35m runuser -u aibrowserlab -- env HOME="$state" GRADLE_USER_HOME="$state/gradle-cache" \
-  python3 "$state/source/scripts/practice-city.py" --project "$state/source" --output-dir "$state/reports"
+  python3 "$state/source/scripts/practice-city.py" --project "$state/source" --output-dir "$state/reports" --prepare-dependencies
 install -m 644 "$source_dir/deploy/practice-city/aibrowser-practice-city.service" /etc/systemd/system/aibrowser-practice-city.service
 install -m 644 "$source_dir/deploy/practice-city/aibrowser-practice-city.timer" /etc/systemd/system/aibrowser-practice-city.timer
 systemctl daemon-reload
