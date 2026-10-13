@@ -98,3 +98,19 @@ class PracticeCityRunnerTest(unittest.TestCase):
                 with self.assertRaises(module.AlreadyRunning):
                     with module.session_lock(root/'checkout-b', root/'archive'):
                         self.fail('Shared archive was overwritten')
+
+    def test_install_preparation_must_fail_if_another_session_holds_the_lock(self):
+        module = self.runner()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root/'checkout'
+            core = project/'ai-browser/brain-core'
+            core.mkdir(parents=True)
+            (project/'AGENTS.md').write_text('Test fixture')
+            (core/'settings.gradle').write_text('Test fixture')
+            output = root/'reports'
+            with module.session_lock(project, output):
+                args = ['--project', str(project), '--output-dir', str(output)]
+                self.assertEqual(0, module.main(args), 'Scheduled overlap is a safe skip')
+                self.assertNotEqual(0, module.main(args + ['--prepare-dependencies']),
+                                    'Installation requires a real completed session')

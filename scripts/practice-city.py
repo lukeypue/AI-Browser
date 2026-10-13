@@ -156,7 +156,7 @@ def main(argv=None):
             return 0
     except AlreadyRunning:
         print('Skipped: a practice-city run is already active.')
-        return 0
+        return 1 if options.prepare_dependencies else 0
     except (RunTimeout, subprocess.CalledProcessError, OSError, ValueError) as error:
         print(f'Practice-city run failed: {type(error).__name__}')
         return 1
