@@ -48,6 +48,8 @@
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:launchMode="singleTop" />
 
+        <activity android:name=".ui.PhoneSharingActivity" android:exported="false" />
+
         <service
             android:name=".service.BrainService"
             android:exported="false"

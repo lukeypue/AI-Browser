@@ -127,6 +127,7 @@ class BrainService : Service() {
         if (savedTest.getBoolean("test_running", false)) {
             savedTest.edit().putBoolean("test_running", false).putString("test_summary", "Previous test was interrupted when the service ended. Existing diagnostics are available; start a new timed test.").apply()
             diagnostics.event("learning_test_interrupted")
+            diagnostics.completePhoneTest(interrupted = true)
         }
         val runtime = BrainRuntime.get(this)
         BrainRuntime.whenExtensionReady { ext ->
@@ -324,6 +325,7 @@ class BrainService : Service() {
             timedTest = com.appgate.brain.engine.TimedLearningTest(testMinutes, android.os.SystemClock.elapsedRealtime())
             main.postDelayed(testDeadline, testMinutes * 60_000L)
             getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", true).putString("test_summary", "$testMinutes-minute test running. Pauses and human review count toward the time limit.").apply()
+            diagnostics.beginPhoneTest()
             diagnostics.event("learning_test_start", extra = JsonObject().put("minutes", testMinutes))
         }
         val includeAccountSites = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("learn_account_sites", false)
@@ -380,6 +382,7 @@ class BrainService : Service() {
         getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", false).putString("test_summary", summary).apply()
         diagnostics.event("learning_test_end", extra = JsonObject().put("reason", reason).put("elapsed_ms", result.elapsedMs)
             .put("tasks", result.tasks).put("verified_actions", result.verified).put("failed_actions", result.failed).put("verified_procedure_uses", result.verifiedSkills))
+        diagnostics.completePhoneTest(interrupted = reason == "service ended")
         releaseWakeLock()
         if (stop) {
             engine?.requestStop()
@@ -556,9 +559,15 @@ class BrainService : Service() {
         }
     }
 
+    private fun staleTestEvent(): Boolean {
+        val owner = executingTest.get()
+        return owner != null && timedTest !== owner
+    }
+
     private val engineEvents = object : EngineEvents {
-        override fun diagnostic(host: String, kind: String, data: JsonObject) { diagnostics.event(kind, host, extra = data) }
+        override fun diagnostic(host: String, kind: String, data: JsonObject) { if (!staleTestEvent()) diagnostics.event(kind, host, extra = data) }
         override fun progress(ledger: TaskLedger, reason: String) {
+            if (staleTestEvent()) return
             lastProgressAt = System.currentTimeMillis()
             diagnostics.event("verified_progress", ledger.host, reason)
         }
@@ -576,6 +585,7 @@ class BrainService : Service() {
             main.post { if (owner == null || timedTest === owner) { publish(state.copy(status = text)); updateNotification(text) } }
         }
         override fun step(ledger: TaskLedger, description: String, status: VerifyStatus?) {
+            if (staleTestEvent()) return
             // Descriptions may contain the user's query; diagnostics keep typed coordinates only.
             diagnostics.event("step", ledger.host, extra = JsonObject().put("status", status?.name).put("phase", ledger.phase.name).put("source", ledger.programSource))
             val testOwner = executingTest.get()
@@ -592,6 +602,7 @@ class BrainService : Service() {
             }
         }
         override fun needHuman(ledger: TaskLedger, reason: String, url: String) {
+            if (staleTestEvent()) return
             diagnostics.event("need_human", ledger.host, reason)
             val owner = executingTest.get()
             val learner = learning
@@ -602,10 +613,12 @@ class BrainService : Service() {
             }
         }
         override fun needGrant(ledger: TaskLedger, previewText: String, previewHash: String) {
+            if (staleTestEvent()) return
             diagnostics.event("need_grant", ledger.host)
             main.post { publish(state.copy(mode = Mode.NEED_GRANT, grantPreview = previewText, grantLedgerId = ledger.id, status = "Review and approve the message")); notifyHuman(ledger.host, "A message is ready for your approval") }
         }
         override fun finished(ledger: TaskLedger, result: TaskResult?) {
+            if (staleTestEvent()) return
             if (ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE) {
                 val id = ledger.id
                 val verifiedUses = ledger.successfulSkills.size

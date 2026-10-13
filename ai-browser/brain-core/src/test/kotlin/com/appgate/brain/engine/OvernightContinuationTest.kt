@@ -23,11 +23,25 @@ class OvernightContinuationTest {
 
     @Test fun coolingSiteResumesAutomaticallyWhenItsDelayExpires() {
         val fake = FakeSite().apply { dialogShown = false }; val memory = Memory(InMemoryStorage())
-        memory.site(fake.host).learningBlockedUntil = System.currentTimeMillis() + 200
+        val now = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
+        val due = now.get() + 200
+        memory.site(fake.host).learningBlockedUntil = due
         val events = object : EngineEvents {}
-        val session = LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events, listOf(profile(fake.host)), perSiteChunkMs = 100)
-        session.run(maxSites = 2)
-        assertTrue("the session must wait, then visit the cooled site", fake.log.any { it.startsWith("navigate ") })
+        val session = LearningSession(BrainEngine(fake, memory, { null }, events, config), memory, events, listOf(profile(fake.host)), perSiteChunkMs = 100, clock = { now.get() })
+        val error = AtomicReference<Throwable>()
+        val worker = Thread { try { session.run(maxSites = 2) } catch (t: Throwable) { error.set(t) } }.apply { isDaemon = true }
+        worker.start()
+        try {
+            val deadline = System.nanoTime() + 2_000_000_000L
+            while (!session.isWaiting && worker.isAlive && System.nanoTime() < deadline) Thread.sleep(1)
+            assertTrue("cooling must wait instead of exploring", session.isWaiting)
+            assertTrue(fake.log.none { it.startsWith("navigate ") })
+            now.set(due + 1)
+            worker.join(3000)
+            assertFalse("the finite session should finish after its due visit", worker.isAlive)
+            assertNull(error.get())
+            assertTrue("the session must wait, then visit the cooled site", fake.log.any { it.startsWith("navigate ") })
+        } finally { session.stop(); worker.interrupt(); worker.join(2000) }
     }
 
     @Test fun humanOnlyWaitingStaysActiveAndCanBeStopped() {

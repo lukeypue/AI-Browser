@@ -7,10 +7,13 @@ def stableSigningPassword = System.getenv('AI_BROWSER_SIGNING_PASSWORD')
 def stableSigningEnabled = stableKeystorePath && stableSigningPassword
 
 android {
+    buildFeatures { buildConfig true }
     namespace 'com.appgate.tv'
     compileSdk 37
 
     defaultConfig {
+        def diagnosticsRevision = ["git", "rev-parse", "HEAD"].execute(null, rootDir).text.trim()
+        buildConfigField "String", "DIAGNOSTICS_REVISION", "\"${diagnosticsRevision}\""
         applicationId "com.aibrowser.universal"
         minSdk 26
         targetSdk 34
@@ -49,6 +52,7 @@ android {
 
 dependencies {
     implementation project(':brain-core')
+    implementation 'androidx.work:work-runtime-ktx:2.10.5'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'org.mozilla.geckoview:geckoview-arm64-v8a:155.0.20260903215306'
     testImplementation 'junit:junit:4.13.2'

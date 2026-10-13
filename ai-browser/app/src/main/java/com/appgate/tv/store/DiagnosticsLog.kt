@@ -8,7 +8,8 @@ import androidx.core.content.FileProvider
 import com.appgate.brain.json.JsonObject
 import com.appgate.brain.perception.Redactor
 import java.io.File
-import java.util.concurrent.Executors
+import com.appgate.brain.diagnostics.*
+import java.util.UUID
 
 /**
  * A bounded, privacy-safe event log (NDJSON) the user can export to Downloads or share.
@@ -17,7 +18,12 @@ import java.util.concurrent.Executors
  * values, no keys. Nothing is uploaded automatically — sharing is always a button the user taps.
  */
 class DiagnosticsLog(private val context: Context) {
-    private val writer = Executors.newSingleThreadExecutor { r -> Thread(r, "brain-diag") }
+    private val writer = SerialDiagnosticWriter()
+    private val phonePrefs = context.getSharedPreferences("phone_test_context", Context.MODE_PRIVATE)
+    private var trimGeneration = phonePrefs.getInt("trim_generation", 0)
+    @Volatile private var writeFailed = false
+    @Volatile private var phoneTestId = phonePrefs.getString("id", "").orEmpty()
+    private fun boot() = android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
     private val file = File(context.filesDir, FILE_NAME)
     @Volatile private var lines = 0
 
@@ -25,18 +31,20 @@ class DiagnosticsLog(private val context: Context) {
 
     fun event(kind: String, host: String = "", detail: String = "", extra: JsonObject? = null) {
         val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrDefault("unknown")
-        val line = JsonObject().put("t", System.currentTimeMillis()).put("build", version).put("kind", kind).put("host", host.take(80)).put("detail", Redactor.snippet(detail, 240))
+        val line = JsonObject().put("t", System.currentTimeMillis()).put("elapsed", android.os.SystemClock.elapsedRealtime()).put("boot", boot()).put("test_id", phoneTestId).put("build", version).put("kind", kind).put("host", host.take(80)).put("detail", Redactor.snippet(detail, 240))
         if (extra != null) line.put("x", extra)
-        writer.execute {
+        writer.append {
             runCatching {
                 file.appendText(line.toString() + "\n", Charsets.UTF_8)
                 lines++
                 if (lines > MAX_LINES) trim()
-            }
+            }.onFailure { writeFailed = true }
         }
     }
 
     private fun trim() {
+        trimGeneration++
+        phonePrefs.edit().putInt("trim_generation", trimGeneration).commit()
         val all = file.readLines(Charsets.UTF_8)
         val keep = all.takeLast(MAX_LINES * 3 / 4)
         val temp = File(context.filesDir, "$FILE_NAME.tmp")
@@ -75,7 +83,44 @@ class DiagnosticsLog(private val context: Context) {
         }
     }
 
-    fun clear() { writer.execute { runCatching { file.delete() }; lines = 0 } }
+    fun clear() { writer.append { runCatching { file.delete() }; lines = 0; trimGeneration++; phonePrefs.edit().putInt("trim_generation", trimGeneration).commit() } }
+
+    fun beginPhoneTest() {
+        val sharing = PhoneSharing(context)
+        val id = UUID.randomUUID().toString()
+        val elapsed = android.os.SystemClock.elapsedRealtime()
+        val wall = System.currentTimeMillis()
+        val owner = sharing.generation()
+        val startedBoot = boot()
+        phoneTestId = id
+        writer.append {
+            phonePrefs.edit().putString("id", id).putLong("elapsed", elapsed).putLong("wall", wall)
+                .putInt("boot", startedBoot).putInt("test_trim", trimGeneration).putLong("consent_generation", owner).commit()
+        }
+    }
+
+    fun completePhoneTest(interrupted: Boolean = false) {
+        val sharing = PhoneSharing(context)
+        val finishedElapsed = android.os.SystemClock.elapsedRealtime()
+        val finishedWall = System.currentTimeMillis()
+        val finishedBoot = boot()
+        phoneTestId = ""
+        // The read is enqueued after all preceding event writes, including the end marker.
+        writer.snapshot {
+            val id = phonePrefs.getString("id", null) ?: return@snapshot
+            try {
+                check(!writeFailed)
+                val owner = phonePrefs.getLong("consent_generation", -1)
+                if (sharing.enabled() && sharing.generation() == owner) {
+                    val test = PhoneTestContext(id, phonePrefs.getLong("elapsed", 0), phonePrefs.getLong("wall", 0), phonePrefs.getInt("test_trim", 0), phonePrefs.getInt("boot", -1))
+                    val events = if (file.exists()) file.useLines { lines -> lines.mapNotNull { com.appgate.brain.json.Json.parseObjectOrNull(it) }.toList() } else emptyList()
+                    val version = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
+                    sharing.enqueue(PhoneReportExporter.export(test, events, finishedElapsed, finishedWall, trimGeneration, interrupted, com.appgate.tv.BuildConfig.DIAGNOSTICS_REVISION, version, currentBoot = finishedBoot), owner)
+                }
+            } catch (_: Exception) { sharing.snapshotFailed() }
+            finally { phonePrefs.edit().remove("id").commit() }
+        }
+    }
 
     companion object {
         const val FILE_NAME = "brain_diagnostics.ndjson"

@@ -67,6 +67,7 @@ class LearningActivity : ServiceBoundActivity() {
         column.addView(Ui.button(this, "SHARE TEST DIAGNOSTICS") {
             service?.diagnostics?.shareIntent()?.let { startActivity(Intent.createChooser(it, "Share test diagnostics")) }
         })
+        column.addView(Ui.button(this, "PHONE DIAGNOSTIC SHARING") { startActivity(Intent(this, PhoneSharingActivity::class.java)) })
         allowTeacher = android.widget.CheckBox(this).apply {
             text = "Allow AI help: up to ${TeacherBudget.HOURLY_LIMIT} requests/hour and ${TeacherBudget.DAILY_LIMIT}/day. Off = local only."
             setTextColor(Ui.text)

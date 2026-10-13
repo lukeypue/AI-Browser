@@ -1,0 +1,23 @@
+[Unit]
+Description=Consent-based sanitized phone diagnostic receiver
+After=network.target
+
+[Service]
+Type=simple
+User=aibrowserreceiver
+Group=aibrowserupload
+WorkingDirectory=/opt/aibrowser-phone-receiver
+ExecStart=/usr/bin/python3 /opt/aibrowser-phone-receiver/receiver.py --state /var/lib/aibrowser-phone-receiver
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+ReadWritePaths=/var/lib/aibrowser-phone-receiver
+MemoryMax=256M
+RestrictSUIDSGID=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
