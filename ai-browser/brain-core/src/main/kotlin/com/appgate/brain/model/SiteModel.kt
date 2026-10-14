@@ -97,6 +97,9 @@ class SiteModel(val host: String) {
     var learningNeedsHuman: Boolean = false
     var lastLearningStatus: String = ""
     var learningObservedAt: Long = 0L
+    // Scheduling history, not proof that a pagination control is absent.
+    var paginationDiscoveryRetries: Int = 0
+    var paginationDiscoveryRetryAt: Long = 0L
     var searchUrlTemplate: String? = null
     var startUrl: String? = null
     var loginUrl: String? = null
@@ -161,6 +164,7 @@ class SiteModel(val host: String) {
         .put("lesson_ordinal", lessonOrdinal).put("learning_blocked_until", learningBlockedUntil)
         .put("learning_needs_human", learningNeedsHuman).put("learning_status", lastLearningStatus)
         .put("learning_observed_at", learningObservedAt)
+        .put("pagination_discovery_retries", paginationDiscoveryRetries).put("pagination_discovery_retry_at", paginationDiscoveryRetryAt)
         .put("search_url", searchUrlTemplate).put("start_url", startUrl).put("login_url", loginUrl)
         .put("pages", JsonObject().also { j -> pageTypesSeen.forEach { (k, v) -> j.put(k.name, v) } })
         .put("edges", JsonArray(edges.values.map { it.toJson() }))
@@ -192,6 +196,8 @@ class SiteModel(val host: String) {
             m.learningNeedsHuman = o.optBoolean("learning_needs_human")
             m.lastLearningStatus = o.optString("learning_status")
             m.learningObservedAt = o.optLong("learning_observed_at")
+            m.paginationDiscoveryRetries = o.optInt("pagination_discovery_retries").coerceIn(0, 5)
+            m.paginationDiscoveryRetryAt = o.optLong("pagination_discovery_retry_at").coerceAtLeast(0L)
             m.searchUrlTemplate = o.optStringOrNull("search_url")
             m.startUrl = o.optStringOrNull("start_url")
             m.loginUrl = o.optStringOrNull("login_url")

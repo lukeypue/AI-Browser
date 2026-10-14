@@ -183,7 +183,9 @@ class LearningSession(
                         break
                     }
                     TaskStatus.PAUSED -> return null
-                    else -> if (out.successfulSkills.none { it !in masteredBefore }) blockedInARow++ else blockedInARow = 0
+                    // Verified helper actions are useful, but only newly completed curriculum
+                    // lessons reset the visit's no-new-learning counter.
+                    else -> if (site.curriculum.none { it.done && it.id !in masteredBefore }) blockedInARow++ else blockedInARow = 0
                 }
                 if (!Curriculum.allLessonsComplete(site) && out.actions == 0 && out.successfulSkills.isEmpty() &&
                     out.status in setOf(TaskStatus.FAILED, TaskStatus.PARTIAL)) {
@@ -197,7 +199,7 @@ class LearningSession(
                     memory.saveSite(site)
                     break
                 }
-                if (blockedInARow >= 3) { site.learningBlockedUntil = clock() + lessonRetryMs; memory.saveSite(site); events.log("info", "${profile.name}: three goals without a new verified skill; retry in 30 sec"); break }
+                if (blockedInARow >= 3) { site.learningBlockedUntil = clock() + lessonRetryMs; memory.saveSite(site); events.log("info", "${profile.name}: three goals without a new verified lesson; retry in 30 sec"); break }
                 if (Curriculum.allLessonsComplete(site)) { site.learningBlockedUntil = clock() + 24 * 60 * 60_000L; memory.saveSite(site); break }
             }
             siteIndex++

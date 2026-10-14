@@ -77,7 +77,8 @@ object Curriculum {
             }
             it.retryAt <= now && (it.opportunity == "AVAILABLE" ||
                 (site.learningObservedAt == 0L && it.opportunity == "UNKNOWN") || prerequisite) &&
-                (page == null || live != null) && canAttempt(it.id)
+                (page == null || live != null) &&
+                (live?.skillId != "seek_pagination" || site.paginationDiscoveryRetryAt <= now) && canAttempt(it.id)
         }
         if (allLessonsComplete(site)) return eligible.minByOrNull { it.completedAt }?.id.orEmpty()
         return eligible.filter { !it.done }.minWithOrNull(compareBy<CurriculumItem> { it.blocked + it.unavailable }.thenBy { order.indexOf(it.id) })?.id.orEmpty()
@@ -114,6 +115,9 @@ object Curriculum {
         if (pending.isEmpty()) return "all_lessons_complete"
         val cooling = pending.filter { it.retryAt > now }
         if (cooling.size == pending.size) return "cooldown:" + ((cooling.minOf { it.retryAt } - now + 999L) / 1_000L) + "s"
+        val liveTargets = pending.filter { it.retryAt <= now }.mapNotNull { LearningOpportunities.target(page, it.id) }
+        if (liveTargets.isNotEmpty() && liveTargets.all { it.skillId == "seek_pagination" } && site.paginationDiscoveryRetryAt > now)
+            return "pagination_discovery_cooldown"
         val absent = pending.filter { it.retryAt <= now && LearningOpportunities.target(page, it.id) == null }
         if (absent.size == pending.count { it.retryAt <= now }) return "no_target_on_${page.pageType.name.lowercase()}"
         return "not_observed_available"
@@ -136,6 +140,16 @@ object Curriculum {
     fun observe(site: SiteModel, sps: SemanticPageState, now: Long) {
         ensure(site)
         LearningOpportunities.observe(site, sps, now)
+        if (!sps.isHumanOnly && sps.settle == com.appgate.brain.model.Settle.IDLE &&
+            sps.pageType == com.appgate.brain.model.PageType.RESULTS && !sps.dialogOpen &&
+            sps.host.removePrefix("www.") == site.host.removePrefix("www.") &&
+            sps.affordances.any { it.visible && it.enabled && it.sameSite && !it.isCommit &&
+                it.role in setOf(com.appgate.brain.model.Role.PAGE_NEXT, com.appgate.brain.model.Role.LOAD_MORE) } &&
+            site.paginationDiscoveryRetries > 0) {
+            site.paginationDiscoveryRetries = 0
+            site.paginationDiscoveryRetryAt = 0L
+            site.curriculum.filter { !it.done && it.id in setOf("next_page", "load_more") }.forEach { it.retryAt = 0L }
+        }
     }
 
     /** A lesson names one verified capability. Its query is only a search prerequisite. */
@@ -170,14 +184,16 @@ object Curriculum {
         if (ledger.done && ledger.lesson.isNotBlank() && ledger.lesson !in ledger.attemptedSkills) {
             site.curriculum.firstOrNull { it.id == ledger.lesson && !it.done }?.let { it.unavailable++; it.retryAt = now + RETRY_MS }
         }
-        // Next and load-more share one footer discovery. Verified scrolling is
-        // not verification of either missing control; do not immediately repeat
-        // that same search under the other lesson. A newly exposed pagination
-        // control still clears its delay through LearningOpportunities.observe.
+        // A partially completed discovery can end on a BUSY footer. It proves neither
+        // absence nor pagination mastery. Back off repeated unfinished scans without
+        // penalizing valid scrolling; ordinary retry migration cannot erase this hold.
         if (ledger.status == com.appgate.brain.model.TaskStatus.PARTIAL &&
             ledger.lesson in setOf("next_page", "load_more") &&
-            "seek_pagination" in ledger.attemptedSkills &&
+            "seek_pagination" in ledger.attemptedSkills && "seek_pagination" in verifiedSkills &&
             ledger.attemptedSkills.none { it in setOf("next_page", "load_more") }) {
+            site.paginationDiscoveryRetries = (site.paginationDiscoveryRetries + 1).coerceAtMost(5)
+            val delay = (RETRY_MS * (1L shl (site.paginationDiscoveryRetries - 1))).coerceAtMost(5 * 60_000L)
+            site.paginationDiscoveryRetryAt = now + delay
             site.curriculum.filter { !it.done && it.id in setOf("next_page", "load_more") }
                 .forEach { it.retryAt = maxOf(it.retryAt, now + RETRY_MS) }
         }

@@ -108,7 +108,7 @@ class MainActivity : AppCompatActivity() {
         column.addView(Ui.text(this, "Diagnostics contain only the brain's own semantic events (page types, control roles, verified/failed, timings). No listing text, no searches, no account data.", 12f, Ui.muted).apply { setPadding(0, 2, 0, 8) })
 
         column.addView(Ui.text(this, "What is new in $versionName", 18f, Ui.text, true).apply { setPadding(0, 20, 0, 8) })
-        column.addView(Ui.text(this, "• Learning checks failed procedures before starting another lesson. A held search prerequisite no longer creates repeated failed attempts.\n• Changed controls, different verified procedures and eligible AI repairs can still be tried.\n• Diagnostics distinguish a procedure cooldown from missing lesson controls.\n• Site checks stay on a 30-second cadence. New lesson credit still requires verified results.", 14f, Ui.muted))
+        column.addView(Ui.text(this, "• Repeated unfinished pagination discovery gradually waits longer: 30 seconds up to 5 minutes.\n• Real Next or Load-more controls reopen learning immediately when safely observed.\n• Discovery scrolls no longer count as a new lesson for site rotation.\n• Normal site checks still run every 30 seconds. Saved learning and the newer diagnostics features are retained.", 14f, Ui.muted))
 
         root.addView(column)
         setContentView(root)

@@ -43,7 +43,7 @@ object SemanticDiagnostics {
         .put("pending_states", com.appgate.brain.json.Json.arr(site.curriculum.filter { !it.done }.map { item ->
             JsonObject().put("lesson", capability(item.id))
                 .put("opportunity", item.opportunity.takeIf { it in setOf("UNKNOWN", "AVAILABLE", "ABSENT") } ?: "UNKNOWN")
-                .put("cooling", item.retryAt > now)
+                .put("cooling", item.retryAt > now || sps?.let { LearningOpportunities.target(it, item.id)?.skillId == "seek_pagination" && site.paginationDiscoveryRetryAt > now } == true)
                 .put("live_target", sps?.let { LearningOpportunities.target(it, item.id) }?.skillId?.let { capability(it) })
         }))
 
