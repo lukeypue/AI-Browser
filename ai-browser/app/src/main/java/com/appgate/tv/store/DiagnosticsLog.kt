@@ -92,10 +92,13 @@ class DiagnosticsLog(private val context: Context) {
         val wall = System.currentTimeMillis()
         val owner = sharing.generation()
         val startedBoot = boot()
+        val startedRevision = com.appgate.tv.BuildConfig.DIAGNOSTICS_REVISION
+        val startedVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
         phoneTestId = id
         writer.append {
             phonePrefs.edit().putString("id", id).putLong("elapsed", elapsed).putLong("wall", wall)
-                .putInt("boot", startedBoot).putInt("test_trim", trimGeneration).putLong("consent_generation", owner).commit()
+                .putInt("boot", startedBoot).putInt("test_trim", trimGeneration).putLong("consent_generation", owner)
+                .putString("test_revision", startedRevision).putInt("test_version", startedVersion).commit()
         }
     }
 
@@ -112,13 +115,15 @@ class DiagnosticsLog(private val context: Context) {
                 check(!writeFailed)
                 val owner = phonePrefs.getLong("consent_generation", -1)
                 if (sharing.enabled() && sharing.generation() == owner) {
-                    val test = PhoneTestContext(id, phonePrefs.getLong("elapsed", 0), phonePrefs.getLong("wall", 0), phonePrefs.getInt("test_trim", 0), phonePrefs.getInt("boot", -1))
+                    val test = PhoneTestContext(id, phonePrefs.getLong("elapsed", 0), phonePrefs.getLong("wall", 0), phonePrefs.getInt("test_trim", 0), phonePrefs.getInt("boot", -1),
+                        appRevision = phonePrefs.getString("test_revision", null),
+                        versionCode = if (phonePrefs.contains("test_version")) phonePrefs.getInt("test_version", -1) else null)
                     val events = if (file.exists()) file.useLines { lines -> lines.mapNotNull { com.appgate.brain.json.Json.parseObjectOrNull(it) }.toList() } else emptyList()
                     val version = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
                     sharing.enqueue(PhoneReportExporter.export(test, events, finishedElapsed, finishedWall, trimGeneration, interrupted, com.appgate.tv.BuildConfig.DIAGNOSTICS_REVISION, version, currentBoot = finishedBoot), owner)
                 }
             } catch (_: Exception) { sharing.snapshotFailed() }
-            finally { phonePrefs.edit().remove("id").commit() }
+            finally { phonePrefs.edit().remove("id").remove("test_revision").remove("test_version").commit() }
         }
     }
 

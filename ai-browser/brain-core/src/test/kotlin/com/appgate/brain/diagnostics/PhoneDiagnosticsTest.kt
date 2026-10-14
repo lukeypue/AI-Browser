@@ -6,7 +6,44 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 
 class PhoneDiagnosticsTest {
- private val context = PhoneTestContext("12345678-1234-4234-8234-123456789abc", 1000, 100000, 0)
+ @Test fun interruptedReportWithoutStartingBuildCannotClaimCurrentBuild() {
+  val legacy = PhoneTestContext("12345678-1234-4234-8234-123456789abc",1000,100000,0)
+  val oldEvent = Json.obj("kind" to "step","elapsed" to 1500,"test_id" to legacy.id,"boot" to 0,"build" to "7.2.19-site-brain")
+  assertThrows(IllegalArgumentException::class.java) {
+   PhoneReportExporter.export(legacy,listOf(oldEvent),2000,101000,0,true,"b".repeat(40),106)
+  }
+ }
+ private val context = PhoneTestContext("12345678-1234-4234-8234-123456789abc", 1000, 100000, 0, appRevision="a".repeat(40), versionCode=70000)
+ @Test fun interruptedRecoveryKeepsStartingBuildIdentity() {
+  val p=PhoneReportExporter.export(context,emptyList(),2000,101000,0,true,"b".repeat(40),70001)
+  assertEquals("a".repeat(40),p.optString("app_revision"))
+  assertEquals(70000,p.optInt("version_code"))
+  assertTrue(p.optObject("flags")!!.optBoolean("interrupted"))
+ }
+ @Test fun changedBuildWithoutInterruptionCannotBeLabeledCompleted() {
+  assertThrows(IllegalArgumentException::class.java) {
+   PhoneReportExporter.export(context,emptyList(),2000,101000,0,false,"b".repeat(40),70001)
+  }
+ }
+ @Test fun malformedStartingBuildFailsClosed() {
+  for (invalid in listOf(context.copy(appRevision=null),context.copy(versionCode=null),context.copy(appRevision="private text"),context.copy(appRevision="a".repeat(39)),context.copy(versionCode=-1))) {
+   assertThrows(IllegalArgumentException::class.java) {
+    PhoneReportExporter.export(invalid,emptyList(),2000,101000,0,true,"b".repeat(40),70001)
+   }
+  }
+ }
+ @Test fun legacyUninterruptedCompletionUsesCurrentProcessIdentity() {
+  val legacy=context.copy(appRevision=null,versionCode=null)
+  val p=PhoneReportExporter.export(legacy,emptyList(),2000,101000,0,false,"b".repeat(40),70001)
+  assertEquals("b".repeat(40),p.optString("app_revision"));assertEquals(70001,p.optInt("version_code"))
+  assertFalse(p.optObject("flags")!!.optBoolean("interrupted"))
+ }
+ @Test fun changedBuildCrossBootRecoveryKeepsStartingIdentity() {
+  val oldEvent=Json.obj("kind" to "step","elapsed" to 1800,"test_id" to context.id,"boot" to 0)
+  val p=PhoneReportExporter.export(context,listOf(oldEvent),100,101000,0,true,"b".repeat(40),70001,currentBoot=1)
+  assertEquals("a".repeat(40),p.optString("app_revision"));assertEquals(70000,p.optInt("version_code"))
+  assertEquals(800,p.optLong("elapsed_ms"));assertTrue(p.optObject("flags")!!.optBoolean("interrupted"));assertTrue(p.optObject("flags")!!.optBoolean("clock_changed"))
+ }
  private fun export(events:List<JsonObject>, now:Long=2000, wall:Long=101000, trimmed:Int=0, interrupted:Boolean=false) = PhoneReportExporter.export(context,events.map{if(!it.has("test_id"))it.put("test_id",context.id);if(!it.has("boot"))it.put("boot",0);it},now,wall,trimmed,interrupted,"a".repeat(40),70000)
  @Test fun supportedKslCarsHostKeepsAllowlistedKslLabel() {
   for (host in listOf("cars.ksl.com", "CARS.KSL.COM", "classifieds.ksl.com")) {

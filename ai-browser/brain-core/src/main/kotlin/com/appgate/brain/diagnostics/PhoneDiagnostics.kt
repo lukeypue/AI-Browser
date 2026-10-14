@@ -4,7 +4,7 @@ import java.time.Instant
 import java.security.MessageDigest
 import java.util.concurrent.*
 import kotlin.math.abs
-data class PhoneTestContext(val id:String,val startedElapsed:Long,val startedWall:Long,val trimGeneration:Int,val bootId:Int=0)
+data class PhoneTestContext(val id:String,val startedElapsed:Long,val startedWall:Long,val trimGeneration:Int,val bootId:Int=0,val appRevision:String?=null,val versionCode:Int?=null)
 object PhoneReportExporter {
  private val codes=setOf("learning_test_start","learning_test_end","learning_test_interrupted","step","task_finished","verified_progress","need_human","need_grant","renderer_gone","service_timeout","job_error","watchdog","action_outcome","learning_recheck","learning_recovery","learning_outcome","net_blocked","net_unknown_mutation")
  private val pages=setOf("HOME","SEARCH","RESULTS","FACET_PANEL","DETAIL","PROFILE","MESSAGES","DIALOG","AUTH_WALL","CHALLENGE","ERROR","UNKNOWN")
@@ -19,6 +19,13 @@ object PhoneReportExporter {
   require(r.matches(Regex("[0-9a-f]{40}")));require(v>=0)
   val own=e.filter{it.optString("test_id")==c.id&&it.optInt("boot",-1)==c.bootId}
   val crossedBoot=currentBoot!=c.bootId
+  require((c.appRevision==null)==(c.versionCode==null))
+  c.appRevision?.let{require(it.matches(Regex("[0-9a-f]{40}")))}
+  c.versionCode?.let{require(it>=0)}
+  // A legacy interrupted context has no trustworthy starting build. Never guess.
+  require(!(i||crossedBoot)||c.appRevision!=null)
+  val buildChanged=c.appRevision!=null&&(c.appRevision!=r||c.versionCode!=v)
+  require(!buildChanged||i||crossedBoot)
   val endElapsed=if(crossedBoot)own.maxOfOrNull{it.optLong("elapsed",c.startedElapsed)}?:c.startedElapsed else n
   val elapsed=(endElapsed-c.startedElapsed).coerceIn(0,86_400_000)
   val current=own.filter{it.optLong("elapsed",-1) in c.startedElapsed..endElapsed}.sortedBy{it.optLong("elapsed")}
@@ -33,7 +40,7 @@ object PhoneReportExporter {
   val reason=when(end.optString("reason")){"deadline"->"deadline";"stopped"->"stopped";"browser opened"->"browser";"search started","message task started"->"search";"replaced"->"replaced";"service ended"->"service_destroyed";else->if(i)"interrupted" else "unknown"}
   val flags=Json.obj("trimmed" to (t!=c.trimGeneration),"clock_changed" to (crossedBoot || abs((w-c.startedWall)-(n-c.startedElapsed))>60_000 || n<c.startedElapsed),"interrupted" to (i||crossedBoot))
   val summary=Json.obj("verified" to (count(end["verified_actions"])?:0),"failed" to (count(end["failed_actions"])?:0),"tasks" to (count(end["tasks"])?:0),"verified_skills" to (count(end["verified_procedure_uses"])?:0),"end_reason" to reason)
-  val report=Json.obj("schema_version" to 1,"report_id" to c.id,"app_revision" to r,"version_code" to v,"started_at_utc" to Instant.ofEpochMilli(c.startedWall.coerceAtLeast(0)).toString(),"elapsed_ms" to elapsed,"flags" to flags,"summary" to summary,"events" to output)
+  val report=Json.obj("schema_version" to 1,"report_id" to c.id,"app_revision" to (c.appRevision?:r),"version_code" to (c.versionCode?:v),"started_at_utc" to Instant.ofEpochMilli(c.startedWall.coerceAtLeast(0)).toString(),"elapsed_ms" to elapsed,"flags" to flags,"summary" to summary,"events" to output)
   var kept=output.toList().takeLast(8000)
   if(kept.size!=output.size)flags.put("trimmed",true)
   report.put("events",JsonArray(kept))
