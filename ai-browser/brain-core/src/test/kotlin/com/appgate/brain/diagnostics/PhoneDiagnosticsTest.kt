@@ -8,6 +8,20 @@ import java.util.concurrent.TimeUnit
 class PhoneDiagnosticsTest {
  private val context = PhoneTestContext("12345678-1234-4234-8234-123456789abc", 1000, 100000, 0)
  private fun export(events:List<JsonObject>, now:Long=2000, wall:Long=101000, trimmed:Int=0, interrupted:Boolean=false) = PhoneReportExporter.export(context,events.map{if(!it.has("test_id"))it.put("test_id",context.id);if(!it.has("boot"))it.put("boot",0);it},now,wall,trimmed,interrupted,"a".repeat(40),70000)
+ @Test fun supportedKslCarsHostKeepsAllowlistedKslLabel() {
+  for (host in listOf("cars.ksl.com", "CARS.KSL.COM", "classifieds.ksl.com")) {
+   val report=export(listOf(Json.obj("kind" to "action_outcome", "host" to host, "elapsed" to 1500)))
+   assertEquals(host,"KSL",report.optArray("events")!!.objects().single().optString("site"))
+   assertFalse(report.toString().contains(host))
+  }
+ }
+ @Test fun kslCarsLookalikeHostsRemainPrivateAndUnknown() {
+  for (host in listOf("cars.ksl.com.private.invalid", "private.cars.ksl.com", "private.invalid")) {
+   val report=export(listOf(Json.obj("kind" to "action_outcome", "host" to host, "elapsed" to 1500)))
+   assertEquals(host,"UNKNOWN",report.optArray("events")!!.objects().single().optString("site"))
+   assertFalse(report.toString().contains(host))
+  }
+ }
  @Test fun personalFieldsAndUnknownCodesNeverEscape() {
   val event=Json.obj("kind" to "step","host" to "classifieds.ksl.com","elapsed" to 1500,"detail" to "secret query", "x" to Json.obj("status" to "VERIFIED","phase" to "SEARCH","url" to "secret-url","items" to 3))
   val p=export(listOf(event,Json.obj("kind" to "secret query","elapsed" to 1600)))
