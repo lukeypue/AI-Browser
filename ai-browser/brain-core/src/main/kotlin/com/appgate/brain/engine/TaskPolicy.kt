@@ -154,12 +154,14 @@ class TaskPolicy(private val profile: SiteProfile, private val site: SiteModel) 
         if (sps.pageType == PageType.RESULTS) ledger.resultsUrl = sps.url
         val candidates = ledger.verdicts.values.count { it.hardViolations(goal) == 0 }
         val enough = candidates >= goal.budget.itemsInspected
-        val exhausted = ledger.scrollRoundsWithoutNew >= 2 || ledger.pagesVisited >= 6
+        // Pagination is bounded by the goal's action/time budgets, just like load-more.
+        // A fixed page count can hide matching cards before inspection even starts.
+        val exhausted = ledger.scrollRoundsWithoutNew >= 2
         if (!enough && !exhausted && sps.pageType == PageType.RESULTS) {
             if (sps.has(Role.LOAD_MORE)) return PolicyDecision.RunSkill("load_more", emptyMap(), "load more results")
             val scrollable = sps.scrollHeight > sps.scrollY + sps.viewportHeight + 200
             if (scrollable && ledger.scrollRoundsWithoutNew < 2) return PolicyDecision.RunSkill("scroll_results", emptyMap(), "scroll for more results")
-            if (sps.has(Role.PAGE_NEXT) && ledger.pagesVisited < 6) { ledger.pagesVisited++; ledger.scrollRoundsWithoutNew = 0; return PolicyDecision.RunSkill("next_page", emptyMap(), "next page") }
+            if (sps.has(Role.PAGE_NEXT)) { ledger.pagesVisited++; return PolicyDecision.RunSkill("next_page", emptyMap(), "next page") }
             if (!scrollable && ledger.scrollRoundsWithoutNew == 0 && !sps.has(Role.PAGE_NEXT)) { ledger.scrollRoundsWithoutNew = 1; return PolicyDecision.RunSkill("scroll_results", emptyMap(), "scroll once to trigger lazy results") }
         }
         if (ledger.verdicts.isEmpty() && sps.pageType != PageType.RESULTS) {

@@ -70,6 +70,11 @@ detail read, expand, evaluate, back) → `DONE`. `PREPARE_MESSAGE` runs open →
 `NEED_GRANT` → `commit_send` only with a grant. Zero recognized listings and unresolved
 required detail checks finish as PARTIAL, never as completed inspection.
 
+Collection uses the goal's existing action/time budgets for both Next-page and Load-more
+pagination. It stops when enough eligible candidates are collected or observable progress
+is exhausted; a fixed six-page cutoff must not hide later matching cards. This policy change
+does not import synthetic training memory into Android.
+
 A model request for human help on an ordinary page ends the attempt without creating a
 permanent sign-in hold. Observed auth/challenge pages require human help; an incidental
 offsite transition during training ends that lesson without inventing a sign-in request.
