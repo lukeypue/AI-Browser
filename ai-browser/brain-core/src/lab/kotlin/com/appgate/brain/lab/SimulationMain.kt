@@ -7,7 +7,7 @@ import com.appgate.brain.json.JsonObject
 fun main(args: Array<String>) {
     val start = System.nanoTime()
     val episodes = args.getOrNull(1)?.toInt() ?: 1200
-    val report = SimulationTrainer().experiment(episodes)
+    val report = SimulationTrainer().experiment(episodes, includeChallenge = true)
     val root = File(".").canonicalFile
     fun git(vararg args: String): String = runCatching {
         val process = ProcessBuilder(listOf("git") + args).directory(root).redirectErrorStream(true).start()

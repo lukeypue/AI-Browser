@@ -114,3 +114,31 @@ class PracticeCityRunnerTest(unittest.TestCase):
                 self.assertEqual(0, module.main(args), 'Scheduled overlap is a safe skip')
                 self.assertNotEqual(0, module.main(args + ['--prepare-dependencies']),
                                     'Installation requires a real completed session')
+
+class ChallengeRunnerTests(unittest.TestCase):
+    def test_challenge_summary_cannot_be_ignored(self):
+        module=PracticeCityRunnerTest().runner()
+        r={'challenge_manifest':{'episodes':432,'districts':24},'challenge_baseline':{'episodes':432,'unsafe_actions':1}}
+        errors=module.validate_report(r)
+        self.assertTrue(any('challenge' in x for x in errors))
+
+class ChallengeEvidenceRunnerTests(unittest.TestCase):
+    def fixture(self):
+        import sys
+        directory=Path(__file__).parents[2]/'deploy/phone-reports/receiver'
+        sys.path.insert(0,str(directory))
+        try:
+            from test_synthetic_export import ChallengeExportTests
+            return ChallengeExportTests().challenge()
+        finally:sys.path.remove(str(directory))
+    def test_valid_frozen_case_evidence_passes(self):
+        self.assertEqual([],PracticeCityRunnerTest().runner().validate_report(self.fixture(),require_challenge=True))
+    def test_contradictory_case_and_changed_corpus_are_rejected(self):
+        import hashlib
+        module=PracticeCityRunnerTest().runner()
+        r=self.fixture();r['challenge_pairs'][0]['after']['unsafe_actions']=1
+        self.assertTrue(module.validate_report(r,require_challenge=True))
+        r=self.fixture();c=r['challenge_pairs'][0]['before']['scenario'].replace('/100010/','/999999/')
+        r['challenge_pairs'][0]={'before':{'scenario':c},'after':{'scenario':c}}
+        r['challenge_manifest']['sha256']=hashlib.sha256('\n'.join(x['before']['scenario'] for x in r['challenge_pairs']).encode()).hexdigest()
+        self.assertTrue(module.validate_report(r,require_challenge=True))

@@ -4,7 +4,7 @@ import com.appgate.brain.goal.GoalParser
 import com.appgate.brain.model.Budget
 import com.appgate.brain.model.Goal
 
-enum class SimulationFault { NONE, STALE_ONCE, LOADING_ONCE, NOOP_SEARCH, BLANK_ALWAYS, ERROR_ALWAYS, AUTH, LOADING_ALWAYS }
+enum class SimulationFault { NONE, STALE_ONCE, LOADING_ONCE, NOOP_SEARCH, BLANK_ALWAYS, ERROR_ALWAYS, AUTH, LOADING_ALWAYS, CHALLENGE }
 
 /** Seed and truth exist only in the environment and scorer, never in observations. */
 enum class SimulationPagination { NEXT_PAGE, LOAD_MORE }
@@ -28,6 +28,7 @@ data class Scenario(
     val query: String get() = listOf("Toyota Sequoia", "Ford Expedition", "Chevrolet Tahoe", "Nissan Armada")[Math.floorMod(seed, 2) + (queryVariant % 2) * 2]
     fun goal(): Goal = GoalParser.parse("$query under 8000 under 150000 miles with a 3.73 axle",
         Budget(itemsInspected = 8, actions = 60, llmCalls = 0, wallMs = 5000))
+    val humanOnly: Boolean get() = fault in setOf(SimulationFault.AUTH, SimulationFault.CHALLENGE)
     val permanentFailure: Boolean get() = fault in setOf(SimulationFault.NOOP_SEARCH,
         SimulationFault.BLANK_ALWAYS, SimulationFault.ERROR_ALWAYS, SimulationFault.LOADING_ALWAYS)
     val recoverable: Boolean get() = fault in setOf(SimulationFault.STALE_ONCE, SimulationFault.LOADING_ONCE)
