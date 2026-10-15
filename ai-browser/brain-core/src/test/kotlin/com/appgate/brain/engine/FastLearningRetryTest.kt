@@ -27,7 +27,7 @@ class FastLearningRetryTest {
     }
     @Test fun closeScoreFloorDoesNotAdmitWeakAmbiguousOffsiteOrCommitControls() {
         val site = SiteModel("fake.market"); repeat(20) { site.recordFailure(PageType.RESULTS, Role.CLOSE, null, "old", now) }
-        val close = Affordance("close", Role.CLOSE, tag = "button", roleScore = .7)
+        val close = Affordance("close", Role.CLOSE, tag = "button", roleScore = .7, regionRole = RegionRole.DIALOG)
         for (controls in listOf(listOf(close.copy(roleScore = .5)), listOf(close, close.copy(id = "other")),
             listOf(close.copy(sameSite = false)), listOf(close.copy(effect = EffectClass.COMMIT_EXTERNAL)))) {
             val page = results().copy(dialogOpen = true, affordances = controls)
@@ -119,7 +119,7 @@ class FastLearningRetryTest {
 
     @Test fun uniqueRecognizedDialogCloseRemainsUsableAfterOldFailures() {
         val site = SiteModel("fake.market"); repeat(20) { site.recordFailure(PageType.RESULTS, Role.CLOSE, null, "old", now) }
-        val page = results().copy(dialogOpen = true, affordances = listOf(Affordance("close", Role.CLOSE, tag = "button", roleScore = .7)))
+        val page = results().copy(dialogOpen = true, affordances = listOf(Affordance("close", Role.CLOSE, tag = "button", roleScore = .7, regionRole = RegionRole.DIALOG)))
         assertTrue(StepGrounder(site).ground(Step(StepKind.DISMISS, Role.CLOSE), emptyMap(), page, emptySet()) is GroundingOutcome.Ready)
     }
 }

@@ -279,7 +279,7 @@ class OpportunityCurriculumTest {
         val lesson = site.curriculum.single { it.id == "select_facet" }
         lesson.opportunity = "ABSENT"; lesson.observedAt = now - 1
         site.learningObservedAt = now - 1
-        val dialog = results().copy(dialogOpen = true, affordances = listOf(Affordance("close", Role.CLOSE)))
+        val dialog = results().copy(dialogOpen = true, affordances = listOf(Affordance("close", Role.CLOSE, regionRole = RegionRole.DIALOG)))
         observe(site, dialog)
         assertEquals("select_facet", Curriculum.nextLesson(site, now, dialog))
         assertEquals("dismiss_dialog", LearningOpportunities.target(dialog, "select_facet")!!.skillId)

@@ -16,7 +16,8 @@ object LearningOpportunities {
     private val numericKeys = setOf("price", "mileage", "year", "distance", "bedrooms", "bathrooms")
     private val unsafe = setOf(Role.LOGIN, Role.ACCOUNT, Role.COMPOSER_INPUT, Role.MESSAGE_SELLER, Role.ATTACH)
     private fun controls(page: SemanticPageState) = page.affordances.filter {
-        it.visible && it.enabled && it.sameSite && !it.isCommit && !it.role.isCommit && it.role !in unsafe
+        it.visible && it.enabled && it.sameSite && !it.isCommit && !it.role.isCommit && it.role !in unsafe &&
+            (it.role != Role.CLOSE || !page.dialogOpen || FilterControls.inDialog(it))
     }
     private fun canonical(key: String?): String? = key?.takeIf { it.removeSuffix("_min").removeSuffix("_max") in choiceKeys + numericKeys }
     private fun alternative(a: Affordance): String? = a.choices.firstOrNull {

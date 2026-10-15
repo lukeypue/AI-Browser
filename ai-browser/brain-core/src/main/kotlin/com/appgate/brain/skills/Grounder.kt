@@ -32,7 +32,7 @@ class Grounder(private val site: SiteModel?) {
         }.map { it.id }.toSet() else emptySet()
         for (a in sps.affordances) {
             if (!a.visible || !a.enabled) continue
-            if (dialogClosers.isNotEmpty() && a.id !in dialogClosers) continue
+            if (role == Role.CLOSE && sps.dialogOpen && a.id !in dialogClosers) continue
             val reasons = ArrayList<String>(4)
             var s = 0.0
             when {

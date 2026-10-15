@@ -20,7 +20,8 @@ class LearningStallRegressionTest {
             val site = SiteModel("fake.market")
             repeat(20) { site.recordFailure(PageType.RESULTS, role, null, "old failed procedure", now - 1000) }
             val control = Affordance("live", role, name = if (role == Role.CLOSE) "Close" else "Search", roleScore = .95,
-                tag = if (role == Role.CLOSE) "button" else "input")
+                tag = if (role == Role.CLOSE) "button" else "input",
+                regionRole = if (role == Role.CLOSE) RegionRole.DIALOG else RegionRole.UNKNOWN)
             val page = results().copy(affordances = listOf(control), dialogOpen = role == Role.CLOSE)
             val step = if (role == Role.CLOSE) Step(StepKind.DISMISS, role) else Step(StepKind.TYPE, role, arg = "Ford")
             assertTrue("a clear $role must stay groundable after old failures", StepGrounder(site).ground(step, emptyMap(), page, emptySet()) is GroundingOutcome.Ready)
