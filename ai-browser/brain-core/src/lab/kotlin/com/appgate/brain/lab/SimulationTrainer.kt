@@ -85,25 +85,27 @@ class SimulationTrainer {
         return SimulationRun(scenario, market, out, EpisodeScorer.score(scenario, market, out), teacherDemonstrations = demos)
     }
 
-    fun experiment(trainingEpisodes: Int = 1200): JsonObject {
+    fun experiment(trainingEpisodes: Int = 1200, includeChallenge: Boolean = false): JsonObject {
         require(trainingEpisodes in 10..10000)
         // Known developer-owned fixtures, hidden from the student/training loop; not a secure external benchmark.
         val fixed = evaluationCases("practice.sim.invalid", 1000)
         val unseen = evaluationCases("unseen.sim.invalid", 2000)
         val city = cityCases()
+        val challenge = if (includeChallenge) challengeCases() else emptyList()
+        val challengeBaseline = evaluate(challenge, emptyMap())
         val cityBaseline = evaluate(city, emptyMap())
         val baseline = evaluate(fixed, emptyMap())
         val unseenBaseline = evaluate(unseen, emptyMap())
         val (snapshot, training, achievedLevel) = progressiveTraining(trainingEpisodes)
         val trainingCases = training.map { it.scenario }
-        require((fixed + unseen + city).none { e -> trainingCases.any { it.id == e.id || it.seed == e.seed } })
+        require((fixed + unseen + city + challenge).none { e -> trainingCases.any { it.id == e.id || it.seed == e.seed } })
         val after = evaluate(fixed, snapshot)
         val transfer = evaluate(unseen, snapshot)
         val cityAfter = evaluate(city, snapshot)
         fun manifest(cases: List<Scenario>) = MessageDigest.getInstance("SHA-256")
             .digest(cases.joinToString("\n") { it.id }.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
-        return JsonObject().put("schema_version", 2).put("environment", "offline stateful marketplace wire format; real Kotlin engine/parser/verifier; no browser or external model")
+        val report = JsonObject().put("schema_version", if (includeChallenge) 3 else 2).put("environment", "offline stateful marketplace wire format; real Kotlin engine/parser/verifier; no browser or external model")
             .put("learning", "verified parameterized procedural memory; no foundation-model weight training")
             .put("evaluation_isolation", "each case starts from a fresh fork of the frozen pre/post memory; no evaluation writes enter training")
             .put("real_world_validated", false).put("synthetic_memory_imported_to_android", false)
@@ -124,9 +126,23 @@ class SimulationTrainer {
             .put("compiled_skills", Memory(storage(snapshot)) { NOW }.skills.all().count { it.origin == SkillOrigin.COMPILED })
             .put("fixed_pairs", JsonArray(baseline.zip(after).map { (a,b) -> JsonObject().put("before", a.toJson()).put("after", b.toJson()) }))
             .put("unseen_pairs", JsonArray(unseenBaseline.zip(transfer).map { (a,b) -> JsonObject().put("before", a.toJson()).put("after", b.toJson()) }))
+        if (includeChallenge) {
+            val challengeAfter = evaluate(challenge, snapshot)
+            report.put("challenge_manifest", JsonObject().put("sha256", manifest(challenge)).put("districts", 24)
+                .put("episodes", challenge.size).put("max_catalog_size", 128).put("min_page_size", 1).put("max_page_size", 8)
+                .put("pagination_modes", "next_page,load_more").put("training_hosts_disjoint", true))
+                .put("challenge_baseline", summary(challengeBaseline)).put("challenge_after_training", summary(challengeAfter))
+                .put("challenge_pairs", JsonArray(challengeBaseline.zip(challengeAfter).map { (a,b) -> JsonObject().put("before", a.toJson()).put("after", b.toJson()) }))
+                .put("challenge_districts", JsonArray(challenge.map { it.host }.distinct().map { host ->
+                    JsonObject().put("host", host).put("baseline", summary(challengeBaseline.filter { it.scenario.host == host }))
+                        .put("after_training", summary(challengeAfter.filter { it.scenario.host == host }))
+                }))
+        }
+        return report
     }
 
     companion object {
+        fun challengeCases(): List<Scenario> = ChallengeCity.cases()
         const val NOW = 1_800_000_000_000L
         /** Same exam each run. Training seeds are negative, exam seeds positive; exam hosts are never trained. */
         fun cityCases(): List<Scenario> = (0..7).flatMap { district -> (1..9).flatMap { level ->
@@ -151,7 +167,7 @@ class SimulationTrainer {
 
         fun summary(rows: List<SimulationRun>): JsonObject {
             val recovery = rows.filter { it.score.recoveredFault }
-            val tasks = rows.filter { !it.scenario.permanentFailure && it.scenario.fault != SimulationFault.AUTH && !it.scenario.emptyCatalog }
+            val tasks = rows.filter { !it.scenario.permanentFailure && !it.scenario.humanOnly && !it.scenario.emptyCatalog }
             return JsonObject().put("episodes", rows.size).put("oracle_success_rate", rows.count { it.score.success }.toDouble() / rows.size.coerceAtLeast(1))
                 .put("search_tasks", tasks.size).put("search_task_success_rate", tasks.count { it.score.success }.toDouble() / tasks.size.coerceAtLeast(1))
                 .put("average_actions", rows.map { it.task.actions }.average()).put("average_renderer_commands", rows.map { it.market.rendererCommands }.average())

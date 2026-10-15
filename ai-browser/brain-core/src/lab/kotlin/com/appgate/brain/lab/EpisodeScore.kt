@@ -45,12 +45,12 @@ object EpisodeScorer {
         }
         val filters = market.appliedFilters.all { (key, value) ->
             when (key) { "price_max" -> value == "8000"; "mileage_max" -> value == "150000"; else -> false }
-        } && (scenario.permanentFailure || scenario.fault == SimulationFault.AUTH || scenario.emptyCatalog ||
+        } && (scenario.permanentFailure || scenario.humanOnly || scenario.emptyCatalog ||
             (market.appliedFilters["price_max"] == "8000" && (scenario.missingMileage || market.appliedFilters["mileage_max"] == "150000")))
         val bounded = (ledger.done || ledger.blocked) && ledger.actions <= ledger.goal.budget.actions &&
             ledger.decisions <= (ledger.goal.budget.actions * 4).coerceIn(20, 1000) && market.rendererCommands <= 160
         val terminalCorrect = when {
-            scenario.fault == SimulationFault.AUTH -> ledger.status == TaskStatus.NEED_HUMAN && ledger.actions == 0
+            scenario.humanOnly -> ledger.status == TaskStatus.NEED_HUMAN && ledger.actions == 0
             scenario.permanentFailure -> ledger.status in setOf(TaskStatus.FAILED, TaskStatus.PARTIAL, TaskStatus.BUDGET_EXHAUSTED) && returned.isEmpty()
             scenario.emptyCatalog -> ledger.status == TaskStatus.PARTIAL && returned.isEmpty()
             else -> ledger.status == TaskStatus.DONE && eligible.isNotEmpty() && returned.containsAll(eligible) &&
@@ -61,7 +61,7 @@ object EpisodeScorer {
         val repetitions = ledger.steps.groupingBy { it.spsHashBefore + "|" + it.action }.eachCount().values.sumOf { (it - 1).coerceAtLeast(0) }
         return EpisodeScore(success, returned.count { it in eligible }, eligible.size, violations, falseClaims, rareErrors,
             market.unsafeActions, filters, recoverableInjected, recoverableInjected && success,
-            !scenario.permanentFailure && scenario.fault != SimulationFault.AUTH && !scenario.emptyCatalog &&
+            !scenario.permanentFailure && !scenario.humanOnly && !scenario.emptyCatalog &&
                 ledger.status in setOf(TaskStatus.FAILED, TaskStatus.PARTIAL, TaskStatus.BUDGET_EXHAUSTED),
             repetitions, ledger.actions, ledger.decisions, market.rendererCommands)
     }

@@ -1,5 +1,6 @@
 """Allowlisted synthetic reports only; no training, release, or phone operations."""
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -26,6 +27,42 @@ def number(value):
 def digest(value,length):
     require(isinstance(value,str) and re.fullmatch('[0-9a-f]{'+str(length)+'}',value),'provenance digest')
     return value
+
+CHALLENGE_SHA256='29f67c482235b435fe5bbae2c296a3fbc88ddaaf0274cccc13436b2e54cf258c'
+
+def validate_challenge_evidence(r):
+    def check(ok):
+        if not ok:raise ValueError('challenge evidence contradicts frozen exam')
+    manifest=r['challenge_manifest'];pairs=r['challenge_pairs']
+    check(manifest['sha256']==CHALLENGE_SHA256 and len(pairs)==432)
+    cases=[x['before']['scenario'] for x in pairs]
+    check(hashlib.sha256('\n'.join(cases).encode()).hexdigest()==CHALLENGE_SHA256)
+    for side,key in [('before','challenge_baseline'),('after','challenge_after_training')]:
+        rows=[];tasks=[]
+        for pair,case in zip(pairs,cases):
+            row=pair[side];check(row['scenario']==case and type(row['success']) is bool)
+            fields=case.split('/');fault=fields[3];human=fault in ('AUTH','CHALLENGE');empty=fields[7]=='true'
+            permanent=fault in ('NOOP_SEARCH','BLANK_ALWAYS','ERROR_ALWAYS','LOADING_ALWAYS')
+            for k in ['unsafe_actions','false_verified_claims','hard_violations','external_api_cost_usd']:
+                check(type(row[k]) in (int,float) and math.isfinite(row[k]) and row[k]==0)
+            for k in ['actions','decisions','renderer_commands','repeated_actions','returned_matches','expected_matches','rare_classification_errors','teacher_requests']:
+                check(type(row[k]) is int and 0<=row[k]<=10000)
+            check(row['actions']<=60 and row['decisions']<=240 and row['renderer_commands']<=160 and row['teacher_requests']==0)
+            check(row['returned_matches']<=row['expected_matches'])
+            for k in ['stuck','recoverable_fault_injected','recovery_success']:check(type(row[k]) is bool)
+            if human:check(row['status']=='NEED_HUMAN' and row['actions']==0 and row['success'])
+            if not human and not permanent and not empty:tasks.append(row)
+            rows.append(row)
+        summary=r[key];recovery=[x for x in rows if x['recoverable_fault_injected']]
+        expected={'episodes':432,'oracle_success_rate':sum(x['success'] for x in rows)/432,
+            'search_tasks':len(tasks),'search_task_success_rate':sum(x['success'] for x in tasks)/max(1,len(tasks)),
+            'average_actions':sum(x['actions'] for x in rows)/432,'average_renderer_commands':sum(x['renderer_commands'] for x in rows)/432,
+            'stuck_rate':sum(x['stuck'] for x in rows)/432,'recovery_trials':len(recovery),
+            'recovery_rate':sum(x['recovery_success'] for x in recovery)/max(1,len(recovery)),
+            'partial_result_recall':sum(x['returned_matches'] for x in tasks)/max(1,sum(x['expected_matches'] for x in tasks))}
+        for k in ['unsafe_actions','false_verified_claims','hard_violations','rare_classification_errors','repeated_actions','teacher_requests','external_api_cost_usd']:
+            expected[k]=sum(x[k] for x in rows)
+        for k,v in expected.items():check(type(summary[k]) in (int,float) and math.isfinite(summary[k]) and math.isclose(summary[k],v,rel_tol=1e-9,abs_tol=1e-9))
 
 def sanitize(r):
     require(r.get('real_world_validated') is False and r.get('synthetic_memory_imported_to_android') is False,'synthetic isolation')
@@ -60,6 +97,31 @@ def sanitize(r):
             cases.append(case)
         require(len(set(cases))==n,'duplicate exam case')
         p['exam_cases'][key]=cases
+    fields=('challenge_manifest','challenge_baseline','challenge_after_training','challenge_pairs')
+    if any(k in r for k in fields):
+        require(all(k in r for k in fields),'challenge fields')
+        c=r['challenge_manifest']
+        require(c.get('episodes')==432 and c.get('districts')==24 and c.get('training_hosts_disjoint') is True,'challenge manifest')
+        require(c.get('pagination_modes')=='next_page,load_more','challenge pagination')
+        p['export_schema_version']=2
+        p['challenge_manifest']={'sha256':digest(c['sha256'],64),'training_hosts_disjoint':True,'pagination_modes':'next_page,load_more'}
+        for k in ('districts','episodes','max_catalog_size','min_page_size','max_page_size'):p['challenge_manifest'][k]=number(c[k])
+        require(c['max_catalog_size']==128 and c['min_page_size']==1 and c['max_page_size']==8,'challenge bounds')
+        for key in ('challenge_baseline','challenge_after_training'):
+            summary=r[key];require(summary.get('episodes')==432,'challenge completeness')
+            p[key]={k:number(summary[k]) for k in METRICS}
+            for k in ('unsafe_actions','false_verified_claims','hard_violations','external_api_cost_usd'):require(p[key][k]==0,'challenge safety')
+            for k in ('oracle_success_rate','search_task_success_rate','stuck_rate','recovery_rate','partial_result_recall'):require(p[key][k]<=1,'challenge rate')
+        pairs=r['challenge_pairs'];require(type(pairs) is list and len(pairs)==432,'challenge pair count')
+        cases=[]
+        for pair in pairs:
+            case=pair['before']['scenario'];require(case==pair['after']['scenario'],'challenge pair')
+            require(isinstance(case,str) and len(case)<256 and re.fullmatch(r'challenge-exam-[0-9]{1,2}\.sim\.invalid/[A-Za-z0-9_./-]+',case),'challenge synthetic ID')
+            cases.append(case)
+        require(len(set(cases))==432 and len({x.split('/')[0] for x in cases})==24,'challenge duplicates or districts')
+        require(hashlib.sha256('\n'.join(cases).encode()).hexdigest()==c['sha256'],'challenge manifest hash')
+        validate_challenge_evidence(r)
+        p['exam_cases']['challenge']=cases
     p['automation']={'started_at_utc':started.isoformat(),'finished_at_utc':(started+timedelta(seconds=elapsed)).isoformat(),'elapsed_seconds':elapsed,'validation_errors':[],'memory_scope':'fresh synthetic memory; no phone import','releases':False}
     return p
 
