@@ -241,7 +241,9 @@ class SpsParser(private val siteFacetVocabulary: Map<String, String> = emptyMap(
 
     private fun isChallenge(url: String, sig: PageSignals): Boolean {
         if (sig.challengeWidget) return true
-        val path = url.lowercase()
+        // The scheme separator is not a path: https://challenge-* is an ordinary
+        // hostname, not a /challenge route. Keep independent CAPTCHA host markers.
+        val path = url.substringAfter("://", url).lowercase()
         val challengePath = sig.challengePath || Regex("(captcha|/challenge|/checkpoint|security-check|verify-you|are-you-human|cdn-cgi/challenge)").containsMatchIn(path)
         return (challengePath && (sig.challengePhrase || sig.sparse)) || (sig.challengePhrase && sig.sparse)
     }
