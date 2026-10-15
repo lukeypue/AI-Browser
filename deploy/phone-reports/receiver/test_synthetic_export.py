@@ -74,6 +74,8 @@ class ChallengeExportTests(unittest.TestCase):
         self.assertEqual(432,p['challenge_after_training']['episodes'])
         self.assertEqual(432,len(p['exam_cases']['challenge']))
         self.assertEqual(144,len(p['exam_cases']['city']))
+        self.assertEqual(216,len(p['challenge_failures']))
+        self.assertEqual({'scenario','status','actions','returned_matches','expected_matches'},set(p['challenge_failures'][0]))
     def test_incomplete_unsafe_or_wrong_manifest_challenge_is_rejected(self):
         for mutate in [lambda r:r['challenge_after_training'].update(unsafe_actions=1),lambda r:r['challenge_pairs'].pop(),lambda r:r['challenge_manifest'].update(sha256='a'*64),lambda r:r['challenge_pairs'][0]['after'].update(scenario='private.invalid/text')]:
             r=self.challenge();mutate(r)

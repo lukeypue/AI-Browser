@@ -122,6 +122,14 @@ def sanitize(r):
         require(hashlib.sha256('\n'.join(cases).encode()).hexdigest()==c['sha256'],'challenge manifest hash')
         validate_challenge_evidence(r)
         p['exam_cases']['challenge']=cases
+        p['challenge_failures']=[]
+        statuses={'PENDING','RUNNING','NEED_HUMAN','NEED_GRANT','DONE','FAILED','ABANDONED','PAUSED','PARTIAL','BUDGET_EXHAUSTED'}
+        for pair in pairs:
+            row=pair['after']
+            require(row['status'] in statuses,'challenge status')
+            if not row['success']:
+                p['challenge_failures'].append({k:row[k] for k in ('scenario','status','actions','returned_matches','expected_matches')})
+
     p['automation']={'started_at_utc':started.isoformat(),'finished_at_utc':(started+timedelta(seconds=elapsed)).isoformat(),'elapsed_seconds':elapsed,'validation_errors':[],'memory_scope':'fresh synthetic memory; no phone import','releases':False}
     return p
 
