@@ -51,3 +51,11 @@ tasks.register('dialogClinic', JavaExec) {
     workingDir = projectDir
     args layout.buildDirectory.file('reports/brain/dialog-clinic.json').get().asFile.absolutePath
 }
+
+ tasks.register('codexDialogClinic', JavaExec) {
+    dependsOn tasks.named('labClasses')
+    classpath = sourceSets.lab.runtimeClasspath
+    mainClass = 'com.appgate.brain.lab.CodexDialogClinicMain'
+    workingDir projectDir
+    args project.findProperty('teacherProposal'), project.findProperty('teacherTrialReport')
+ }
