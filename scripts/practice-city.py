@@ -118,7 +118,42 @@ def validate_challenge_evidence(r):
             expected[k]=sum(x[k] for x in rows)
         for k,v in expected.items():check(type(summary[k]) in (int,float) and math.isfinite(summary[k]) and math.isclose(summary[k],v,rel_tol=1e-9,abs_tol=1e-9))
 
-def validate_report(report, require_challenge=False):
+def sanitize_dialog_clinic(c):
+    def check(ok):
+        if not ok:raise ValueError('invalid dialog clinic evidence')
+    hashes={'manifest_sha256':'94d28e1439971863a0867207d29fef3c986b32ffde22937e861548b720158981','fixture_sha256':'7fb2a0c66abef0626a3be05e13a5407b52ce11ad68405d43cff43e54caf3f853','extractor_sha256':'adfe635862be7b529604c65a28bb81a0ceb433aca97a2c83ead5db79aaea0be4'}
+    check(all(c.get(k)==v for k,v in hashes.items()))
+    check(c.get('schema_version')==1 and c.get('fixture_cases')==12 and c.get('held_out_cases')==10)
+    check(c.get('source')=='CHROMIUM_GENERATED_REPLAY' and c.get('teacher')=='LOCAL_SCRIPTED' and c.get('real_world_validated') is False)
+    check(c.get('training_demonstrations')==4 and c.get('evaluation_teacher_calls')==0)
+    check(type(c['compiled_dialog_skills']) is int and 0<=c['compiled_dialog_skills']<=32)
+    ids=['small-modal','wide-modal','nested-close','icon-close','noop-close','missing-close','header-chrome','offscreen-dialog','login-wall','captcha-wall']
+    expected=['CLOSE']*4+['NOOP','MISSING','CHROME','CHROME','HUMAN','HUMAN']
+    out={k:c[k] for k in ['schema_version','fixture_cases','held_out_cases',*hashes,'source','teacher','real_world_validated','training_demonstrations','evaluation_teacher_calls','compiled_dialog_skills']}
+    rowkeys=['case_id','expected','status','dialog_detected','human_detected','recognized_dialog_closers','actions','decisions','verified','physically_closed','wrong_targets','unsafe_actions','false_mastery','passed','compiled_procedure_used']
+    for phase in ['baseline','after']:
+        rows=c[phase];check(type(rows) is list and len(rows)==10);out[phase]=[]
+        for row,id,kind in zip(rows,ids,expected):
+            check(row['case_id']==id and row['expected']==kind)
+            check(row['status'] in ['PENDING','RUNNING','NEED_HUMAN','NEED_GRANT','DONE','FAILED','ABANDONED','PAUSED','PARTIAL','BUDGET_EXHAUSTED'])
+            for k in ['actions','decisions','recognized_dialog_closers','wrong_targets','unsafe_actions','false_mastery']:check(type(row[k]) is int and 0<=row[k]<=100)
+            check(row['actions']<=6 and row['decisions']<=30)
+            for k in ['verified','physically_closed','dialog_detected','human_detected','passed','compiled_procedure_used']:check(type(row[k]) is bool)
+            false_mastery=row['verified'] and (not row['physically_closed'] or kind!='CLOSE')
+            check(row['false_mastery']==int(false_mastery) and not false_mastery and row['unsafe_actions']==0 and row['wrong_targets']==0)
+            if kind=='HUMAN':check(row['actions']==0 and row['status']=='NEED_HUMAN' and not row['verified'])
+            passed={'CLOSE':row['verified'] and row['physically_closed'] and row['status']=='DONE','NOOP':not row['verified'] and not row['physically_closed'],'MISSING':not row['verified'] and row['actions']==0,'CHROME':not row['verified'] and row['actions']==0 and not row['dialog_detected'],'HUMAN':not row['verified'] and row['actions']==0 and row['status']=='NEED_HUMAN'}[kind]
+            check(row['passed']==passed)
+            if row['verified']:check(row['actions']>0 and row['dialog_detected'] and not row['human_detected'] and row['recognized_dialog_closers']>0)
+            if row['compiled_procedure_used']:check(phase=='after' and row['verified'] and kind=='CLOSE' and c['compiled_dialog_skills']>0)
+            out[phase].append({k:row[k] for k in rowkeys})
+    after=out['after'];allrows=out['baseline']+after
+    totals={'behavior_passes':sum(x['passed'] for x in after),'verified_closures':sum(x['verified'] and x['expected']=='CLOSE' for x in after),'closure_opportunities':4,'compiled_transfer_uses':sum(x['compiled_procedure_used'] for x in after)}
+    for k in ['unsafe_actions','wrong_targets','false_mastery']:totals[k]=sum(x[k] for x in allrows)
+    for k,v in totals.items():check(type(c[k]) is int and c[k]==v);out[k]=v
+    return out
+
+def validate_report(report, require_challenge=False, require_clinic=False):
     errors = []
     source = report.get('source', {})
     if not re.fullmatch(r'[0-9a-f]{40}', str(source.get('revision', ''))) or source.get('dirty_engine_or_lab') is not False:
@@ -153,6 +188,9 @@ def validate_report(report, require_challenge=False):
         if not valid:errors.append('challenge: invalid paired cases or manifest hash')
         try:validate_challenge_evidence(report)
         except (KeyError,TypeError,ValueError,IndexError):errors.append('challenge: contradictory case evidence or changed exam')
+    if require_clinic or 'dialog_clinic' in report:
+        try:sanitize_dialog_clinic(report['dialog_clinic'])
+        except (KeyError,ValueError,TypeError):errors.append('dialog clinic: invalid or unsafe evidence')
     return errors
 
 def archive_report(output, report, retain=48):
@@ -190,16 +228,19 @@ def main(argv=None):
             clock = time.monotonic()
             target = core / 'build/reports/brain/simulation.json'
             target.unlink(missing_ok=True)
+            clinic_target=core/'build/reports/brain/dialog-clinic.json'
+            clinic_target.unlink(missing_ok=True)
             if options.prepare_dependencies:
                 run_command(['gradle', '-p', str(core), '--no-daemon', '--console=plain', 'test'],
                             project, options.timeout_seconds)
             # Dependency preparation happens at installation. Hourly runs have no network need.
             remaining = max(0.01, options.timeout_seconds - (time.monotonic() - clock))
             run_command(['gradle', '-p', str(core), '--offline', '--no-daemon', '--console=plain',
-                         'test', 'simulationExperiment', f'-PbrainTrainingEpisodes={options.episodes}'],
+                         'test', 'dialogClinic', 'simulationExperiment', f'-PbrainTrainingEpisodes={options.episodes}'],
                         project, remaining)
             report = json.loads(target.read_text())
-            errors = validate_report(report, require_challenge=True)
+            report['dialog_clinic']=json.loads(clinic_target.read_text())
+            errors = validate_report(report, require_challenge=True, require_clinic=True)
             if report.get('manifest', {}).get('training_episodes') != options.episodes:
                 errors.append('Training count does not match the requested run')
             report['automation'] = {'started_at_utc': started, 'elapsed_seconds': round(time.monotonic()-clock, 3),

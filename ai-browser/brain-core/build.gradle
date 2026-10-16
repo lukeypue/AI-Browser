@@ -42,3 +42,12 @@ tasks.register('simulationExperiment', JavaExec) {
     args layout.buildDirectory.file('reports/brain/simulation.json').get().asFile.absolutePath,
         providers.gradleProperty('brainTrainingEpisodes').getOrElse('1200')
 }
+
+tasks.register('dialogClinic', JavaExec) {
+    group = 'verification'
+    description = 'Browser-generated dialog lesson replay with verified local teaching and held-out transfer.'
+    classpath = sourceSets.lab.runtimeClasspath
+    mainClass = 'com.appgate.brain.lab.DialogClinicMainKt'
+    workingDir = projectDir
+    args layout.buildDirectory.file('reports/brain/dialog-clinic.json').get().asFile.absolutePath
+}
