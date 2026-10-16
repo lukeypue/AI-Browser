@@ -108,4 +108,31 @@ class PhoneDiagnosticsTest {
   assertEquals(800,p.optLong("elapsed_ms"));assertEquals(1,p.optArray("events")!!.size)
   assertTrue(p.optObject("flags")!!.optBoolean("clock_changed"));assertTrue(p.optObject("flags")!!.optBoolean("interrupted"))
  }
+ @Test fun repairEvidencePreservesOnlyTypedCoordinatesAndNestedProbeCounts() {
+  val x=Json.obj("lesson" to "dismiss_dialog", "capability" to "dismiss_dialog", "reason" to "procedure_cooldown", "status" to "PARTIAL", "page" to Json.obj("page_type" to "DIALOG", "closers" to 0, "dialog_controls" to 0, "facet_openers" to 2), "new_lessons" to 0,"teacher_attempts" to 2)
+  val e=export(listOf(Json.obj("kind" to "learning_recheck", "host" to "facebook.com", "elapsed" to 1500, "x" to x))).optArray("events")!!.objects().single()
+  assertEquals("dismiss_dialog",e.optString("lesson"));assertEquals("dismiss_dialog",e.optString("capability"))
+  assertEquals("PROCEDURE_COOLDOWN",e.optString("recheck_reason"));assertEquals("PARTIAL",e.optString("status"))
+  assertEquals(2,e.optObject("counters")!!.optInt("teacher_attempts"));assertEquals("DIALOG",e.optString("page_type"));assertEquals(2,e.optObject("counters")!!.optInt("facet_openers"))
+ }
+ @Test fun untrustedRepairCoordinatesAreUnknownAndPersonalExtrasNeverEscape() {
+  val x=Json.obj("lesson" to "private text", "capability" to "https://private", "reason" to "private query", "after" to Json.obj("page_type" to "RESULTS", "closers" to -1, "facet_openers" to 1000001), "new_lessons" to 3)
+  val p=export(listOf(Json.obj("kind" to "action_outcome", "elapsed" to 1500,"x" to x)))
+  val e=p.optArray("events")!!.objects().single()
+  for(k in listOf("lesson","capability","recheck_reason"))assertEquals("UNKNOWN",e.optString(k))
+  assertFalse(p.toString().contains("private"));assertFalse(e.optObject("counters")!!.has("closers"));assertFalse(e.optObject("counters")!!.has("facet_openers"))
+  assertEquals(3,e.optObject("counters")!!.optInt("new_lessons"))
+ }
+ @Test fun cooldownReasonIsCanonicalWithoutExportingFreeTextOrDurations() {
+  val e=export(listOf(Json.obj("kind" to "learning_recheck", "elapsed" to 1500,"x" to Json.obj("reason" to "cooldown:29s")))).optArray("events")!!.objects().single()
+  assertEquals("COOLDOWN",e.optString("recheck_reason"))
+ }
+
+ @Test fun malformedTeacherAttemptCountsCannotEscape() {
+  for(v in listOf<JsonValue>(JsonNumber(-1.0),JsonNumber(1000001.0),JsonBool(true),JsonString("private"))){
+   val p=export(listOf(Json.obj("kind" to "learning_outcome","elapsed" to 1500,"x" to JsonObject().put("teacher_attempts",v))))
+   assertFalse(p.optArray("events")!!.objects().single().optObject("counters")!!.has("teacher_attempts"))
+  }
+ }
+
 }

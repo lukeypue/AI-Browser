@@ -221,3 +221,9 @@ Explicit dialogs wholly outside the viewport are not active overlays. An idle em
 ## Unfinished pagination discovery scheduling
 
 Next-page and Load-more discovery share persisted retry history separately from ordinary curriculum retry timestamps. A PARTIAL lesson with verified seek_pagination and no attempted actual pagination capability increases a scheduling delay from 30 to at most 300 seconds. Only seek_pagination targets are held. Safe settled same-site pagination controls clear the history immediately; BUSY and human-only observations do not. This state proves neither control absence nor mastery and does not quarantine valid scrolling. Visit rotation resets its no-new-learning counter only for newly completed curriculum IDs.
+
+## Diagnostic repair evidence
+
+Phone report schema2 retains canonical lesson/capability/recheck-reason enums, task statuses, nested probe-page counts, and bounded teacher-attempt/new-lesson counters. Unknown free text is dropped or becomes UNKNOWN. Teacher attempts count requested calls, not successful provider transport or learned skills. Receiver and publisher accept strict legacy schema1 as well as strict schema2; deploy validators before releasing a schema2 app. No page text, URLs, query values or credentials are exported. Existing1MiB/queue/consent/retention boundaries remain.
+
+The parallel browser lab is an on-demand synthetic extractor/action smoke test with at most four isolated Chromium processes, each using fresh contexts and intercepted .sim.invalid traffic. Physical closure and observation-based human signals are checked against separate fixture expectations. It has no teacher and does not exercise Android lifecycle or independently establish learned mastery. Its rows are not mixed into frozen city exam scores.

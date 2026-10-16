@@ -8,10 +8,13 @@ data class PhoneTestContext(val id:String,val startedElapsed:Long,val startedWal
 object PhoneReportExporter {
  private val codes=setOf("learning_test_start","learning_test_end","learning_test_interrupted","step","task_finished","verified_progress","need_human","need_grant","renderer_gone","service_timeout","job_error","watchdog","action_outcome","learning_recheck","learning_recovery","learning_outcome","net_blocked","net_unknown_mutation")
  private val pages=setOf("HOME","SEARCH","RESULTS","FACET_PANEL","DETAIL","PROFILE","MESSAGES","DIALOG","AUTH_WALL","CHALLENGE","ERROR","UNKNOWN")
- private val statuses=setOf("VERIFIED","FAILED","AMBIGUOUS","HUMAN_NEEDED","UNKNOWN")
+ private val statuses=setOf("VERIFIED","FAILED","AMBIGUOUS","HUMAN_NEEDED","UNKNOWN","PENDING","RUNNING","NEED_HUMAN","NEED_GRANT","DONE","ABANDONED","PAUSED","PARTIAL","BUDGET_EXHAUSTED")
  private val phases=setOf("START","SEARCH","CONSTRAIN","COLLECT","INSPECT","PREPARE_MESSAGE","PREVIEW","DONE","UNKNOWN")
  private val diagnostics=setOf("VERIFIED","NO_TARGET","REPEAT_STATE_LIMIT","OUTSIDE_TASK_HOST","ACTION_REJECTED","STALE_DOCUMENT","RENDERER_TIMEOUT","INTERLOCK_BLOCKED","UNMET_EXPECTATION","PAGE_UNSETTLED","AUTH_WALL","CHALLENGE","UNEXPECTED_HOST","MODEL_UNCERTAIN","UNKNOWN")
- private val counts=setOf("items","controls","search_boxes","result_links","facet_controls","dialog_controls","next_controls","load_more_controls","new_items","decisions","verified_skills")
+ private val capabilities=setOf("search","constrain_numeric","select_facet","scroll_results","seek_pagination","next_page","load_more","sort_results","open_item","expand_description","go_back","dismiss_dialog","open_filters","open_facet","apply_filters","open_category","prepare_message","commit_send","navigate","custom","UNKNOWN")
+ private val recheckReasons=setOf("UNKNOWN","PROBE_UNAVAILABLE","HUMAN_HOLD","PAGE_BUSY","ALL_LESSONS_COMPLETE","COOLDOWN","PAGINATION_DISCOVERY_COOLDOWN","NOT_OBSERVED_AVAILABLE","PROCEDURE_COOLDOWN","NO_TARGET_ON_HOME","NO_TARGET_ON_SEARCH","NO_TARGET_ON_RESULTS","NO_TARGET_ON_FACET_PANEL","NO_TARGET_ON_DETAIL","NO_TARGET_ON_PROFILE","NO_TARGET_ON_MESSAGES","NO_TARGET_ON_DIALOG","NO_TARGET_ON_AUTH_WALL","NO_TARGET_ON_CHALLENGE","NO_TARGET_ON_ERROR","NO_TARGET_ON_UNKNOWN")
+ private fun reason(value:String):String=if(value.matches(Regex("cooldown:[0-9]+s"))) "COOLDOWN" else enum(value.uppercase(java.util.Locale.ROOT),recheckReasons)
+ private val counts=setOf("teacher_attempts","closers","facet_openers","new_lessons","lessons_complete","lessons_total","pending","inspected","items","controls","search_boxes","result_links","facet_controls","dialog_controls","next_controls","load_more_controls","new_items","decisions","verified_skills")
  private val sites=mapOf("facebook.com" to "FACEBOOK","www.facebook.com" to "FACEBOOK","m.facebook.com" to "FACEBOOK","ksl.com" to "KSL","www.ksl.com" to "KSL","classifieds.ksl.com" to "KSL","cars.ksl.com" to "KSL","offerup.com" to "OFFERUP","www.offerup.com" to "OFFERUP","ebay.com" to "EBAY","www.ebay.com" to "EBAY","craigslist.org" to "CRAIGSLIST","www.craigslist.org" to "CRAIGSLIST","autotrader.com" to "AUTOTRADER","www.autotrader.com" to "AUTOTRADER","cars.com" to "CARS_COM","www.cars.com" to "CARS_COM")
  private fun enum(value:String,allowed:Set<String>)=value.takeIf{it in allowed}?:"UNKNOWN"
  private fun count(value:JsonValue?):Long?=value?.asDoubleOrNull()?.takeIf{it.isFinite()&&it>=0&&it<=1_000_000&&it%1.0==0.0}?.toLong()
@@ -32,15 +35,15 @@ object PhoneReportExporter {
   val output=JsonArray()
   current.forEach { raw ->
    val kind=raw.optString("kind");if(kind !in codes)return@forEach
-   val extra=raw.optObject("x")?:JsonObject();val page=extra.optObject("after")?:extra.optObject("before")?:extra
+   val extra=raw.optObject("x")?:JsonObject();val page=extra.optObject("after")?:extra.optObject("before")?:extra.optObject("page")?:extra
    val counters=JsonObject();counts.forEach{k->count(extra[k]?:page[k])?.let{counters.put(k,it)}}
-   output.add(Json.obj("code" to kind,"site" to (sites[raw.optString("host").lowercase()]?:"UNKNOWN"),"page_type" to enum(page.optString("page_type"),pages),"status" to enum(extra.optString("status"),statuses),"phase" to enum(extra.optString("phase"),phases),"diagnostic_code" to enum(extra.optString("code"),diagnostics),"elapsed_ms" to (raw.optLong("elapsed")-c.startedElapsed).coerceIn(0,elapsed),"counters" to counters))
+   output.add(Json.obj("code" to kind,"site" to (sites[raw.optString("host").lowercase()]?:"UNKNOWN"),"page_type" to enum(page.optString("page_type"),pages),"status" to enum(extra.optString("status"),statuses),"phase" to enum(extra.optString("phase"),phases),"diagnostic_code" to enum(extra.optString("code"),diagnostics),"elapsed_ms" to (raw.optLong("elapsed")-c.startedElapsed).coerceIn(0,elapsed),"counters" to counters,"lesson" to enum(extra.optString("lesson").ifBlank { extra.optString("rehearsal") },capabilities),"capability" to enum(extra.optString("capability"),capabilities),"recheck_reason" to reason(extra.optString("reason"))))
   }
   val end=current.lastOrNull{it.optString("kind")=="learning_test_end"}?.optObject("x")?:JsonObject()
   val reason=when(end.optString("reason")){"deadline"->"deadline";"stopped"->"stopped";"browser opened"->"browser";"search started","message task started"->"search";"replaced"->"replaced";"service ended"->"service_destroyed";else->if(i)"interrupted" else "unknown"}
   val flags=Json.obj("trimmed" to (t!=c.trimGeneration),"clock_changed" to (crossedBoot || abs((w-c.startedWall)-(n-c.startedElapsed))>60_000 || n<c.startedElapsed),"interrupted" to (i||crossedBoot))
   val summary=Json.obj("verified" to (count(end["verified_actions"])?:0),"failed" to (count(end["failed_actions"])?:0),"tasks" to (count(end["tasks"])?:0),"verified_skills" to (count(end["verified_procedure_uses"])?:0),"end_reason" to reason)
-  val report=Json.obj("schema_version" to 1,"report_id" to c.id,"app_revision" to (c.appRevision?:r),"version_code" to (c.versionCode?:v),"started_at_utc" to Instant.ofEpochMilli(c.startedWall.coerceAtLeast(0)).toString(),"elapsed_ms" to elapsed,"flags" to flags,"summary" to summary,"events" to output)
+  val report=Json.obj("schema_version" to 2,"report_id" to c.id,"app_revision" to (c.appRevision?:r),"version_code" to (c.versionCode?:v),"started_at_utc" to Instant.ofEpochMilli(c.startedWall.coerceAtLeast(0)).toString(),"elapsed_ms" to elapsed,"flags" to flags,"summary" to summary,"events" to output)
   var kept=output.toList().takeLast(8000)
   if(kept.size!=output.size)flags.put("trimmed",true)
   report.put("events",JsonArray(kept))

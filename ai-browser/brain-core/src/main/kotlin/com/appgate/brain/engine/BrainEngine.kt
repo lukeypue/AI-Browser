@@ -428,7 +428,7 @@ class BrainEngine(
         val result = if (ledger.goal.intent == GoalIntent.FIND_LISTINGS || ledger.goal.intent == GoalIntent.LEARN_SITE) resultFor(ledger) else null
         events.diagnostic(ledger.host, "learning_outcome", JsonObject().put("status", ledger.status.name)
             .put("lesson", SemanticDiagnostics.capability(ledger.lesson)).put("items", ledger.verdicts.size).put("inspected", ledger.itemsInspected)
-            .put("verified_skills", ledger.successfulSkills.size).put("new_lessons", site.curriculum.count { it.done && it.id !in lessonsBefore })
+            .put("teacher_attempts", ledger.llmCalls).put("verified_skills", ledger.successfulSkills.size).put("new_lessons", site.curriculum.count { it.done && it.id !in lessonsBefore })
             .put("lessons_complete", site.curriculum.count { it.done }).put("lessons_total", site.curriculum.size))
         events.finished(ledger, result)
         currentLedger = null

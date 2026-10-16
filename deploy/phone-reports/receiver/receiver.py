@@ -14,6 +14,11 @@ DIAGNOSTICS={'VERIFIED','NO_TARGET','REPEAT_STATE_LIMIT','OUTSIDE_TASK_HOST','AC
 COUNTERS={'items','controls','search_boxes','result_links','facet_controls','dialog_controls','next_controls','load_more_controls','new_items','decisions','verified_skills'}
 REASONS={'deadline','stopped','browser','search','replaced','interrupted','service_destroyed','unknown'}
 
+CAPABILITIES={'sort_results', 'UNKNOWN', 'open_facet', 'dismiss_dialog', 'commit_send', 'open_item', 'navigate', 'scroll_results', 'search', 'go_back', 'prepare_message', 'apply_filters', 'custom', 'load_more', 'select_facet', 'next_page', 'constrain_numeric', 'open_category', 'open_filters', 'seek_pagination', 'expand_description'}
+RECHECK_REASONS={'NO_TARGET_ON_PROFILE', 'UNKNOWN', 'NO_TARGET_ON_RESULTS', 'PAGE_BUSY', 'NO_TARGET_ON_ERROR', 'NO_TARGET_ON_CHALLENGE', 'PROCEDURE_COOLDOWN', 'NO_TARGET_ON_MESSAGES', 'NO_TARGET_ON_HOME', 'NO_TARGET_ON_UNKNOWN', 'ALL_LESSONS_COMPLETE', 'HUMAN_HOLD', 'NO_TARGET_ON_DETAIL', 'NO_TARGET_ON_FACET_PANEL', 'NO_TARGET_ON_AUTH_WALL', 'NO_TARGET_ON_SEARCH', 'PAGINATION_DISCOVERY_COOLDOWN', 'COOLDOWN', 'NOT_OBSERVED_AVAILABLE', 'NO_TARGET_ON_DIALOG', 'PROBE_UNAVAILABLE'}
+COUNTERS_V2=COUNTERS|{'teacher_attempts'}|{'pending', 'lessons_complete', 'inspected', 'lessons_total', 'new_lessons', 'facet_openers', 'closers'}
+STATUSES_V2=STATUSES|{'PENDING','RUNNING','NEED_HUMAN','NEED_GRANT','DONE','ABANDONED','PAUSED','PARTIAL','BUDGET_EXHAUSTED'}
+
 class Failure(Exception):
  def __init__(self,status=400):self.status=status
 
@@ -26,7 +31,8 @@ def canonical(report):return json.dumps(report,sort_keys=True,separators=(',',':
 
 def validate(r):
  exact(r,{'schema_version','report_id','app_revision','version_code','started_at_utc','elapsed_ms','flags','summary','events'})
- check(type(r['schema_version']) is int and r['schema_version']==1)
+ check(type(r['schema_version']) is int and r['schema_version'] in (1,2))
+ version=r['schema_version']
  check(type(r['report_id']) is str and str(uuid.UUID(r['report_id']))==r['report_id'])
  check(type(r['app_revision']) is str and re.fullmatch('[0-9a-f]{40}',r['app_revision']))
  integer(r['version_code'],2147483647); integer(r['elapsed_ms'],86400000)
@@ -40,10 +46,12 @@ def validate(r):
  check(type(r['events']) is list and len(r['events'])<=8000)
  previous=0
  for event in r['events']:
-  exact(event,{'code','site','page_type','status','phase','diagnostic_code','elapsed_ms','counters'})
-  for key,allowed in [('code',CODES),('site',SITES),('page_type',PAGES),('status',STATUSES),('phase',PHASES),('diagnostic_code',DIAGNOSTICS)]:check(type(event[key]) is str and event[key] in allowed)
+  exact(event,{'code','site','page_type','status','phase','diagnostic_code','elapsed_ms','counters'} | ({'lesson','capability','recheck_reason'} if version==2 else set()))
+  if version==2:
+   for key,allowed in [('lesson',CAPABILITIES),('capability',CAPABILITIES),('recheck_reason',RECHECK_REASONS)]:check(type(event[key]) is str and event[key] in allowed)
+  for key,allowed in [('code',CODES),('site',SITES),('page_type',PAGES),('status',STATUSES_V2 if version==2 else STATUSES),('phase',PHASES),('diagnostic_code',DIAGNOSTICS)]:check(type(event[key]) is str and event[key] in allowed)
   integer(event['elapsed_ms'],r['elapsed_ms']);check(event['elapsed_ms']>=previous);previous=event['elapsed_ms']
-  check(type(event['counters']) is dict and set(event['counters'])<=COUNTERS)
+  check(type(event['counters']) is dict and set(event['counters'])<=(COUNTERS_V2 if version==2 else COUNTERS))
   for value in event['counters'].values():integer(value)
  check(len(canonical(r))<=LIMIT,413)
  return r
@@ -121,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
  def response(self,status,obj):
   raw=json.dumps(obj,separators=(',',':')).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw)
  def do_GET(self):
-  self.response(200 if self.path=='/health' else 404,{'service':'ai-browser-phone-reports','schema_version':1})
+  self.response(200 if self.path=='/health' else 404,{'service':'ai-browser-phone-reports','schema_version':2,'accepted_schema_versions':[1,2]})
  def do_POST(self):
   try:
    check(self.headers.get('X-Forwarded-Proto')=='https',403)

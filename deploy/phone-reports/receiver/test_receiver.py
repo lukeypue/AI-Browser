@@ -51,4 +51,23 @@ class ReceiverTests(unittest.TestCase):
   self.store.prune(now=1000+31*86400)
   self.assertFalse((Path(self.temp.name)/'outbox'/(r['report_id']+'.json')).exists())
 
+class RepairEvidenceTests(unittest.TestCase):
+ def test_v2_evidence_and_legacy_v1_are_both_validated(self):
+  validate(report())
+  r=report();r['schema_version']=2;e=r['events'][0];e.update(lesson='dismiss_dialog',capability='dismiss_dialog',recheck_reason='PROCEDURE_COOLDOWN',status='PARTIAL');e['counters'].update(closers=0,facet_openers=2,new_lessons=0,teacher_attempts=2)
+  validate(r)
+ def test_v2_rejects_arbitrary_coordinates_and_unknown_fields(self):
+  for key in ('lesson','capability','recheck_reason'):
+   r=report();r['schema_version']=2;r['events'][0].update(lesson='UNKNOWN',capability='UNKNOWN',recheck_reason='UNKNOWN');r['events'][0][key]='private text'
+   with self.assertRaises(Failure):validate(r)
+ def test_v2_teacher_attempts_are_bounded_integers(self):
+  for v in (-1,1000001,True,'private'):
+   r=report();r['schema_version']=2;r['events'][0].update(lesson='UNKNOWN',capability='UNKNOWN',recheck_reason='UNKNOWN');r['events'][0]['counters']['teacher_attempts']=v
+   with self.assertRaises(Failure):validate(r)
+ def test_v1_cannot_smuggle_v2_extensions_or_statuses(self):
+  r=report();r['events'][0]['lesson']='search'
+  with self.assertRaises(Failure):validate(r)
+  r=report();r['events'][0]['status']='DONE'
+  with self.assertRaises(Failure):validate(r)
+
 if __name__=='__main__':unittest.main()
