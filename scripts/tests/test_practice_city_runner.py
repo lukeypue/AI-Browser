@@ -142,3 +142,26 @@ class ChallengeEvidenceRunnerTests(unittest.TestCase):
         r['challenge_pairs'][0]={'before':{'scenario':c},'after':{'scenario':c}}
         r['challenge_manifest']['sha256']=hashlib.sha256('\n'.join(x['before']['scenario'] for x in r['challenge_pairs']).encode()).hexdigest()
         self.assertTrue(module.validate_report(r,require_challenge=True))
+
+class DialogClinicRunnerTests(unittest.TestCase):
+    def test_clinic_validator_rejects_unearned_mastery(self):
+        import sys
+        directory=Path(__file__).parents[2]/'deploy/phone-reports/receiver';sys.path.insert(0,str(directory))
+        try:
+            from test_dialog_clinic_export import clinic
+            c=clinic();module=PracticeCityRunnerTest().runner();self.assertEqual(4,module.sanitize_dialog_clinic(c)['compiled_transfer_uses'])
+            c['after'][4]['verified']=True
+            with self.assertRaises(ValueError):module.sanitize_dialog_clinic(c)
+        finally:sys.path.remove(str(directory))
+
+class DialogClinicConsistencyRunnerTests(unittest.TestCase):
+    def test_reuse_requires_compiled_memory_and_actions(self):
+        import sys
+        directory=Path(__file__).parents[2]/'deploy/phone-reports/receiver';sys.path.insert(0,str(directory))
+        try:
+            from test_dialog_clinic_export import clinic
+            module=PracticeCityRunnerTest().runner()
+            for mutate in [lambda c:c.update(compiled_dialog_skills=0),lambda c:c['after'][0].update(actions=0)]:
+                c=clinic();mutate(c)
+                with self.assertRaises(ValueError):module.sanitize_dialog_clinic(c)
+        finally:sys.path.remove(str(directory))
