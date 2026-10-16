@@ -1,0 +1,7 @@
+# Space verified rehearsals without slowing unfinished lessons
+
+Evidence: validated phone report 5f3b459e-be53-46b8-9dad-cabe023f1e23, version111, one hour, 197 tasks/164 verified/30 failed. Repeated completed-skill practice dominates KSL outcomes. Existing verifier updates persisted completedAt, but practiceLesson permits repetition at the next30-second site visit.
+
+Bounded change: require five minutes since a completed skill last verified before rehearsal. Continue least-recently-verified selection. Use existing content-free persisted timestamps; no new memory, phone report fields, endpoint, credentials or service changes. Preserve unfinished lessons'30-second opportunities, failure holds, daily completed-site review and all human boundaries. Report no claimed Facebook or phone success gain until a subsequent real test.
+
+Regression: reproduce repeated eligibility after JSON reload; test exact five-minute threshold, rollback, alternate eligible skill, and immediate unfinished lesson selection. Update existing rehearsal fixtures to represent an old verified skill. Run full core/app check, Android debug build/lint, all browser harnesses, receiver/publisher/runner tests and independent review. Prepare release metadata through existing release manifest; preserve Android version declarations/signing/workflows. Publish only after green local and feature CI gates, normal fast-forward stable-branch push, verify stable APK signer/version/source, require user consent for installation.

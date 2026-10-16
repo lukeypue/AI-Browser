@@ -20,6 +20,7 @@ import com.appgate.brain.util.Hashing
  */
 object Curriculum {
     const val RETRY_MS = 30_000L
+    const val REHEARSAL_INTERVAL_MS = 5 * 60_000L
     private val items = listOf(
         "search" to "Search verifies (query typed, results change)",
         "constrain_numeric" to "A numeric facet (price/mileage/year) applies and verifies",
@@ -89,7 +90,8 @@ object Curriculum {
         if (page.isHumanOnly || page.dialogOpen || page.settle != com.appgate.brain.model.Settle.IDLE ||
             page.pageType != com.appgate.brain.model.PageType.RESULTS || allLessonsComplete(site)) return ""
         if (site.curriculum.any { !it.done && LearningOpportunities.target(page, it.id) != null }) return ""
-        return site.curriculum.filter { it.done && it.retryAt <= now &&
+        return site.curriculum.filter { it.done && it.retryAt <= now && now >= it.completedAt &&
+            now - it.completedAt >= REHEARSAL_INTERVAL_MS &&
             LearningOpportunities.target(page, it.id)?.skillId == it.id && it.id != "search" && canAttempt(it.id) }
             .minByOrNull { it.completedAt }?.id.orEmpty()
     }

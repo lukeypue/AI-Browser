@@ -56,7 +56,7 @@ class FastLearningRetryTest {
         val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000) }
         val memory = Memory(InMemoryStorage()) { now }; val site = memory.site(fake.host); Curriculum.ensure(site)
         site.curriculum.filter { it.id != "next_page" }.forEach { it.completedAt = now - 1 }
-        site.curriculum.single { it.id == "load_more" }.completedAt = now - 1000
+        site.curriculum.single { it.id == "load_more" }.completedAt = now - 600_000
         val renderer = object : Renderer by fake {
             override fun observe(timeoutMs: Long): String {
                 val raw = Json.parseObject(fake.observe(timeoutMs))
@@ -111,6 +111,7 @@ class FastLearningRetryTest {
     @Test fun rehearsalNeverActsOnDialogBusyOrHumanPages() {
         val site = SiteModel("fake.market"); Curriculum.ensure(site)
         site.curriculum.filter { it.id != "next_page" }.forEach { it.completedAt = now - 1 }
+        site.curriculum.single { it.id == "load_more" }.completedAt = now - 600_000
         val page = results().copy(affordances = listOf(Affordance("more", Role.LOAD_MORE)))
         assertEquals("load_more", Curriculum.practiceLesson(site, now, page))
         for (unsafe in listOf(page.copy(dialogOpen = true), page.copy(settle = Settle.BUSY), page.copy(authWall = true)))
