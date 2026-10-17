@@ -87,12 +87,10 @@ class DiagnosticsLog(private val context: Context) {
 
     fun clear() { writer.append { runCatching { file.delete() }; lines = 0; trimGeneration++; phonePrefs.edit().putInt("trim_generation", trimGeneration).commit() } }
 
-    fun beginPhoneTest() {
+    fun beginPhoneTest(startedElapsed: Long, startedWall: Long) {
         val sharing = PhoneSharing(context)
         sharing.beginLiveTest()
         val id = UUID.randomUUID().toString()
-        val elapsed = android.os.SystemClock.elapsedRealtime()
-        val wall = System.currentTimeMillis()
         val owner = sharing.generation()
         val startedBoot = boot()
         val startedRevision = com.appgate.tv.BuildConfig.DIAGNOSTICS_REVISION
@@ -100,7 +98,7 @@ class DiagnosticsLog(private val context: Context) {
         phoneTestId = id
         com.appgate.tv.serverlab.ServerLabRuntime.beginTest(id)
         writer.append {
-            phonePrefs.edit().putString("id", id).putLong("elapsed", elapsed).putLong("wall", wall)
+            phonePrefs.edit().putString("id", id).putLong("elapsed", startedElapsed).putLong("wall", startedWall)
                 .putInt("boot", startedBoot).putInt("test_trim", trimGeneration).putLong("consent_generation", owner).putLong("live_elapsed",0)
                 .putString("test_revision", startedRevision).putInt("test_version", startedVersion).commit()
         }

@@ -103,7 +103,14 @@ class BrainService : Service() {
     private var learning: LearningSession? = null
     @Volatile private var timedTest: com.appgate.brain.engine.TimedLearningTest? = null
     private val executingTest = ThreadLocal<com.appgate.brain.engine.TimedLearningTest?>()
-    private val testDeadline = Runnable { finishTimedTest("deadline", stop = true) }
+    private val testDeadline = object : Runnable {
+        override fun run() {
+            val run = timedTest ?: return
+            val remaining = run.remainingMs(android.os.SystemClock.elapsedRealtime())
+            if (remaining > 0L) main.postDelayed(this, remaining)
+            else finishTimedTest("deadline", stop = true)
+        }
+    }
     private val liveHeartbeat = object:Runnable {
         override fun run() {
             if(timedTest==null)return
@@ -330,13 +337,15 @@ class BrainService : Service() {
         if (job?.isDone == false) return
         finishTimedTest("replaced", stop = false)
         if (testMinutes != null) {
-            timedTest = com.appgate.brain.engine.TimedLearningTest(testMinutes, android.os.SystemClock.elapsedRealtime())
-            main.postDelayed(testDeadline, testMinutes * 60_000L)
+            val startedElapsed = android.os.SystemClock.elapsedRealtime()
+            val startedWall = System.currentTimeMillis()
             getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", true).putString("test_summary", "$testMinutes-minute test running. Pauses and human review count toward the time limit.").apply()
-            diagnostics.beginPhoneTest()
+            val run = beginTimedLearningTest(testMinutes, startedElapsed, startedWall, diagnostics::beginPhoneTest)
+            timedTest = run
             diagnostics.event("learning_test_start", extra = JsonObject().put("minutes", testMinutes))
             main.removeCallbacks(liveHeartbeat)
             main.post(liveHeartbeat)
+            main.postDelayed(testDeadline, run.remainingMs(android.os.SystemClock.elapsedRealtime()))
         }
         val includeAccountSites = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("learn_account_sites", false)
         val sites = com.appgate.tv.serverlab.ServerLabRuntime.profiles(SiteProfiles.training.filter { includeAccountSites || !it.requiresLogin })
