@@ -145,22 +145,46 @@ class Controller:
    files,total=self.pending();_wire.require(len(files)<10 and total<=9*1048576)
    journal=dict(phase='RUNNING',cycle_id=str(uuid.uuid4()),started_at_utc=self.now(),started_monotonic=self.monotonic(),boot_id=self.boot_id(),config=self.config)
    self.stage(journal,'RUNNING')
-   local=None
+   local=None;stage='APP_CYCLE';fingerprint=None;observed=None;app_verified=False
    try:
     local=validate_local(self.transport.cycle(journal['cycle_id']),journal['cycle_id'],'cycle')
+    stage='APP_IDENTITY'
     _wire.require(local['source_revision']==self.config['source_revision'] and local['version_code']==self.config['version_code'])
+    if local['diagnostics'] is not None:
+     _wire.require(local['diagnostics']['app_revision']==self.config['source_revision'] and
+                   local['diagnostics']['version_code']==self.config['version_code'])
     journal['local']=local;journal['cycle_elapsed_ms']=self.elapsed(journal);self.stage(journal,'APP_COMPLETED')
     if local['status']!='COMPLETED':
      self.transport.stop();return self.finalize(journal,self.report(journal,local['status'],local))
+    fingerprint=local['memory_after']['fingerprint'];stage='HOST_DURATION'
     _wire.require(journal['boot_id']==self.boot_id() and journal['cycle_elapsed_ms']>=1800000)
-    self.transport.stop();app=self.transport.probe(journal['cycle_id'])
-    validate_local(app,journal['cycle_id'],'probe');_wire.require(app['source_revision']==self.config['source_revision'] and app['version_code']==self.config['version_code'])
-    fingerprint=local['memory_after']['fingerprint'];_wire.require(app['memory_after']['fingerprint']==fingerprint);self.stage(journal,'APP_RESTARTED')
-    self.transport.restart();emulator=self.transport.probe(journal['cycle_id'])
-    validate_local(emulator,journal['cycle_id'],'probe');_wire.require(emulator['source_revision']==self.config['source_revision'] and emulator['version_code']==self.config['version_code'])
-    _wire.require(emulator['memory_after']['fingerprint']==fingerprint);self.stage(journal,'EMULATOR_RESTARTED')
+    stage='APP_STOP';self.transport.stop()
+    stage='APP_PROBE';app=self.transport.probe(journal['cycle_id'])
+    stage='APP_PROBE_SCHEMA';validate_local(app,journal['cycle_id'],'probe')
+    stage='APP_PROBE_IDENTITY';_wire.require(app['source_revision']==self.config['source_revision'] and app['version_code']==self.config['version_code'])
+    stage='APP_MEMORY';observed=app['memory_after']['fingerprint']
+    _wire.require(observed==fingerprint);app_verified=True;self.stage(journal,'APP_RESTARTED')
+    stage='EMULATOR_RESTART';observed=None;self.transport.restart()
+    stage='EMULATOR_PROBE';emulator=self.transport.probe(journal['cycle_id'])
+    stage='EMULATOR_PROBE_SCHEMA';validate_local(emulator,journal['cycle_id'],'probe')
+    stage='EMULATOR_PROBE_IDENTITY';_wire.require(emulator['source_revision']==self.config['source_revision'] and emulator['version_code']==self.config['version_code'])
+    stage='EMULATOR_MEMORY';observed=emulator['memory_after']['fingerprint']
+    _wire.require(observed==fingerprint);self.stage(journal,'EMULATOR_RESTARTED')
     restart=dict(app_restart_verified=True,emulator_restart_verified=True,before_fingerprint=fingerprint,after_app_fingerprint=app['memory_after']['fingerprint'],after_emulator_fingerprint=emulator['memory_after']['fingerprint'],verified_at_utc=self.now())
     return self.finalize(journal,self.report(journal,'COMPLETED',local,restart))
-   except (OSError,ValueError,TimeoutError,__import__('subprocess').SubprocessError):
-    # Never include command output or invalid app payloads in failure reports.
-    self.transport.stop();return self.finalize(journal,self.report(journal,'FAILED'))
+   except (OSError,ValueError,TimeoutError,__import__('subprocess').SubprocessError) as error:
+    # Retain only an app result that already passed closed-schema and source pins.
+    # A restart rejection never becomes COMPLETED, and untrusted probe/exception
+    # contents never enter either the report or the private failure record.
+    validated=journal.get('local')
+    reason=('TIMEOUT' if isinstance(error,(TimeoutError,__import__('subprocess').TimeoutExpired)) else
+            'INVALID_RESULT' if isinstance(error,ValueError) else
+            'COMMAND_FAILED' if isinstance(error,__import__('subprocess').SubprocessError) else 'OS_ERROR')
+    try:
+     failures=self.state/'runtime-failures';mkdir(failures,0o700)
+     atomic_json(failures/(journal['cycle_id']+'.json'),dict(schema_version=1,cycle_id=journal['cycle_id'],
+       source_revision=self.config['source_revision'],stage=stage,reason=reason,
+       local_sha256=hashlib.sha256(canonical_report(validated)).hexdigest() if validated else None,
+       expected_fingerprint=fingerprint,observed_fingerprint=observed,app_restart_verified=app_verified))
+    finally:self.transport.stop()
+    return self.finalize(journal,self.report(journal,'FAILED',validated))

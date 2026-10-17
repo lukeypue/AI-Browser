@@ -133,6 +133,83 @@ class ControllerTests(unittest.TestCase):
     return r
    self.fake.probe=bad
    r=self.controller().run_once();self.assertEqual(r['status'],'FAILED')
+ def test_failed_emulator_probe_preserves_validated_app_evidence(self):
+  original=self.fake.probe;calls=0
+  def probe(id):
+   nonlocal calls
+   calls+=1
+   if calls==2:raise OSError('PRIVATE_EXCEPTION_TEXT_NEVER_EXPORT')
+   return original(id)
+  self.fake.probe=probe;c=self.controller();r=c.run_once()
+  self.assertEqual(r['status'],'FAILED');self.assertEqual(r['end_reason'],'RUNTIME_FAILED')
+  self.assertIsNotNone(r['diagnostics']);self.assertEqual(r['app_elapsed_ms'],1800000)
+  self.assertFalse(r['restart']['emulator_restart_verified'])
+  evidence=json.loads((c.state/'runtime-failures'/(r['cycle_id']+'.json')).read_text())
+  self.assertEqual(evidence['stage'],'EMULATOR_PROBE');self.assertEqual(evidence['reason'],'OS_ERROR')
+  self.assertTrue(evidence['app_restart_verified'])
+  self.assertNotIn('PRIVATE_EXCEPTION_TEXT_NEVER_EXPORT',json.dumps(evidence)+json.dumps(r))
+ def test_emulator_fingerprint_rejection_retains_digest_only(self):
+  original=self.fake.probe;calls=0
+  def probe(id):
+   nonlocal calls
+   calls+=1;r=original(id)
+   if calls==2:r['memory_after']['fingerprint']='f'*64
+   return r
+  self.fake.probe=probe;c=self.controller();r=c.run_once()
+  self.assertIsNotNone(r['diagnostics']);self.assertEqual(r['status'],'FAILED')
+  evidence=json.loads((c.state/'runtime-failures'/(r['cycle_id']+'.json')).read_text())
+  self.assertEqual(evidence['stage'],'EMULATOR_MEMORY');self.assertEqual(evidence['reason'],'INVALID_RESULT')
+  self.assertEqual(evidence['expected_fingerprint'],r['memory_after']['fingerprint'])
+  self.assertEqual(evidence['observed_fingerprint'],'f'*64)
+  self.assertEqual(set(evidence),set('schema_version cycle_id source_revision stage reason local_sha256 expected_fingerprint observed_fingerprint app_restart_verified'.split()))
+ def test_unvalidated_or_wrong_source_app_payload_never_retained(self):
+  original=self.fake.cycle
+  for mode in ('extra','source'):
+   def cycle(id):
+    r=original(id)
+    if mode=='extra':r['url']='PRIVATE_UNTRUSTED_URL'
+    else:r['source_revision']='f'*40
+    return r
+   self.fake.cycle=cycle;c=self.controller();r=c.run_once()
+   self.assertEqual(r['status'],'FAILED');self.assertIsNone(r['diagnostics'])
+   evidence_path=c.state/'runtime-failures'/(r['cycle_id']+'.json')
+   self.assertTrue(evidence_path.is_file());evidence=json.loads(evidence_path.read_text())
+   self.assertIsNone(evidence['local_sha256']);self.assertNotIn('PRIVATE_UNTRUSTED_URL',json.dumps(evidence))
+ def test_failure_evidence_is_private_and_existing_reports_stay_immutable(self):
+  import os
+  def cycle(id):raise TimeoutError('PRIVATE_TIMEOUT_CONTEXT')
+  self.fake.cycle=cycle;c=self.controller();r=c.run_once()
+  evidence=c.state/'runtime-failures'/(r['cycle_id']+'.json')
+  self.assertTrue(evidence.is_file());self.assertEqual(evidence.stat().st_mode&0o777,0o600)
+  self.assertEqual(evidence.parent.stat().st_mode&0o777,0o700)
+  value=json.loads(evidence.read_text());self.assertEqual(value['reason'],'TIMEOUT')
+  self.assertEqual(value['stage'],'APP_CYCLE');self.assertIsNone(r['diagnostics'])
+  before=(c.outbox/(r['cycle_id']+'.json')).read_bytes()
+  c.run_once();self.assertEqual((c.outbox/(r['cycle_id']+'.json')).read_bytes(),before)
+ def test_inconsistent_nested_app_identity_is_never_retained(self):
+  original=self.fake.cycle
+  for field,value in (('app_revision','f'*40),('version_code',919)):
+   def cycle(id):
+    r=original(id);r['diagnostics'][field]=value;return r
+   self.fake.cycle=cycle;c=self.controller()
+   try:r=c.run_once()
+   except ValueError:self.fail('inconsistent nested identity escaped FAILED finalization')
+   self.assertEqual(r['status'],'FAILED');self.assertIsNone(r['diagnostics'])
+   evidence=json.loads((c.state/'runtime-failures'/(r['cycle_id']+'.json')).read_text())
+   self.assertIsNone(evidence['local_sha256']);self.assertEqual(evidence['stage'],'APP_IDENTITY')
+ def test_private_evidence_write_failure_still_attempts_cleanup(self):
+  from unittest.mock import patch
+  from android_cycles import controller as module
+  original=module.atomic_json
+  def write(path,value,*args,**kwargs):
+   if Path(path).parent.name=='runtime-failures':raise OSError('private evidence unavailable')
+   return original(path,value,*args,**kwargs)
+  def cycle(id):raise TimeoutError('private timeout text')
+  self.fake.cycle=cycle;c=self.controller()
+  with patch.object(module,'atomic_json',side_effect=write):
+   with self.assertRaises(OSError):c.run_once()
+  self.assertIn('stop',self.fake.calls)
+  self.assertTrue((c.state/'journal.json').is_file())
  def test_conflicting_finalized_uuid_never_overwrites_outbox(self):
   def crash(phase):
    if phase=='FINALIZED':raise SystemExit()

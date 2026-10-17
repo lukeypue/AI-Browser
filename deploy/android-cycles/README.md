@@ -13,3 +13,11 @@ Published files: android-cycles/<UUID>.json and android-cycles/index.json. Repor
 All four fixtures share one host/curriculum and may reuse a previous layout. Android cycle completion proves runtime/persistence only; it does not guarantee four-layout coverage. Browser harnesses test each physical layout independently.
 
 The existing review task must be identified through a supported control before its monitoring prompt is extended. Do not create another review automation. Existing stable workflow concurrency/head guards stay in place; final source checks, normal fast-forward push and exact-source signed artifact verification must share a release lock when integrating the existing reviewer. Do not publish an APK for server-only test deployment.
+
+## Runtime failure evidence
+
+A later restart failure does not erase an already schema-validated, source-pinned app result. The final report remains FAILED with restart completion unverified; retained app diagnostics are evidence of app work only. Invalid or wrong-source app payloads are never retained. Historical reports and their hashes are immutable.
+
+Private root-only controller evidence is saved atomically at controller/runtime-failures/<UUID>.json. It contains only fixed stage/reason enums, source revision, validated hashes and the app-restart verification flag. Exception messages, command output and invalid probe payloads are excluded. This supports diagnosing future failures; it cannot reconstruct an exact rejection reason that older code discarded.
+
+The controller deployment manifest records its own source revision separately from the installed app source_revision in config.json. Such deployments require controller/receiver/publisher tests and independent review, and do not require another Android APK release. Acquire cycle.lock at a completed-cycle boundary before stopping the idle controller and replacing its code; preserve the existing timer, uploader and emulator data.
