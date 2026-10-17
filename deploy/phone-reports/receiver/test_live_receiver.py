@@ -1,4 +1,4 @@
-import copy,hashlib,json,os,tempfile,unittest,uuid
+import copy,gc,hashlib,json,os,sqlite3,tempfile,unittest,uuid
 from pathlib import Path
 from unittest.mock import patch
 import receiver
@@ -33,12 +33,28 @@ class LiveStoreTests(unittest.TestCase):
   with self.assertRaises(Failure) as error:self.accept(p,now)
   self.assertEqual(error.exception.status,status)
  def test_auth_creates_no_live_data(self):
+  # Force prior connections to finalize, then delay GC during authentication.
+  # Connection cleanup must be deterministic, not an incidental GC side effect.
+  gc.collect();was_enabled=gc.isenabled();gc.disable()
+  self.addCleanup(lambda:gc.enable() if was_enabled else None)
   self.assertTrue(hasattr(self.store,'accept_live'),'live acceptance is missing')
   before={f.relative_to(self.root):f.read_bytes() for f in self.root.rglob('*') if f.is_file() and not f.name.endswith('-shm')}
   with self.assertRaises(Failure) as error:self.store.accept_live(self.device,'bad',progress(),now=1000)
   self.assertEqual(error.exception.status,401)
   after={f.relative_to(self.root):f.read_bytes() for f in self.root.rglob('*') if f.is_file() and not f.name.endswith('-shm')}
   self.assertEqual({str(k):hashlib.sha256(v).hexdigest() for k,v in before.items()},{str(k):hashlib.sha256(v).hexdigest() for k,v in after.items()})
+ def test_connection_context_closes_after_success_and_exception(self):
+  for fail in (False,True):
+   with self.subTest(exception=fail):
+    try:
+     with self.store.connect() as db:
+      self.assertEqual(db.execute('SELECT 1').fetchone(),(1,))
+      db.execute('INSERT INTO codes VALUES(?,?)',('close-check-'+str(fail),123))
+      if fail:raise RuntimeError('test transaction failure')
+    except RuntimeError:pass
+    with self.assertRaises(sqlite3.ProgrammingError):db.execute('SELECT 1')
+    with self.store.connect() as reopened:
+     self.assertEqual(reopened.execute('SELECT count(*) FROM codes WHERE hash=?',('close-check-'+str(fail),)).fetchone()[0],0 if fail else 1)
  def test_durable_latest_receipt_reopen_and_independent_final_quota(self):
   self.assertTrue(hasattr(self.store,'accept_live'),'live acceptance is missing')
   p=progress();a=self.accept(p);path=self.root/'live'/(self.device+'.json')

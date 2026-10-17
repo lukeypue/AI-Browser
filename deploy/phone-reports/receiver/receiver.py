@@ -1,6 +1,7 @@
 """Loopback-only upload receiver. No credentials, IPs or request bodies are logged."""
 import argparse,hashlib,hmac,json,os,re,secrets,sqlite3,time,uuid,sys
 if __name__=='__main__':sys.modules.setdefault('receiver',sys.modules[__name__])
+from contextlib import contextmanager
 from datetime import datetime,timezone
 from http.server import BaseHTTPRequestHandler,HTTPServer
 from pathlib import Path
@@ -78,8 +79,13 @@ class Store:
   with self.connect() as db:
    db.executescript('CREATE TABLE IF NOT EXISTS live_receipts(device TEXT,test_id TEXT,sequence INTEGER,hash TEXT,received REAL,PRIMARY KEY(device,test_id,sequence)); CREATE TABLE IF NOT EXISTS live_rate(device TEXT,test_id TEXT,sequence INTEGER,received REAL,PRIMARY KEY(device,test_id,sequence));')
   (self.path/'live').mkdir(exist_ok=True);os.chmod(self.path/'live',0o750)
+ @contextmanager
  def connect(self):
-  db=sqlite3.connect(self.path/'receiver.sqlite',timeout=20);db.execute('PRAGMA journal_mode=WAL');db.execute('PRAGMA synchronous=FULL');return db
+  db=sqlite3.connect(self.path/'receiver.sqlite',timeout=20)
+  try:
+   db.execute('PRAGMA journal_mode=WAL');db.execute('PRAGMA synchronous=FULL')
+   with db:yield db
+  finally:db.close()
  def issue_code(self,now=None):
   now=time.time() if now is None else now;code=secrets.token_urlsafe(24)
   with self.connect() as db:db.execute('INSERT INTO codes VALUES(?,?)',(digest(code),now+600))
