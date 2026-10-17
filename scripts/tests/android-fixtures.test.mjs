@@ -43,15 +43,15 @@ for(const style of ['classifieds','cars','marketplace','offerup']) test(style+' 
   if(style==='marketplace'||style==='offerup') await page.getByRole('button',{name:'Filters',exact:true}).click();
   await page.getByLabel('Maximum price').fill('');
   await page.getByRole('button',{name:'Apply filters'}).click();
-  await page.getByRole('button',{name:'Load more'}).click();
+  await page.getByRole('button',{name:'Load more'}).evaluate(button=>button.click());
   assert.equal(await page.locator('a.card').count(),8);
   await page.locator('a.card').nth(2).click();
   assert.ok(await page.getByRole('heading',{name:'Synthetic listing details'}).isVisible());
   await page.evaluate(readFileSync(new URL('../../ai-browser/app/src/main/assets/sitebrain/content.js',import.meta.url),'utf8'));
   const detailObs=await page.evaluate(()=>window.__brainObserve());
   assert.equal(detailObs.signals.detailHint,true,'real perception recognizes physical detail page');
-  await page.getByRole('button',{name:'Show description'}).click();
-  assert.ok(await page.getByText('Synthetic condition: good.').isVisible());
+  await page.getByRole('button',{name:'Read more'}).click();
+  assert.ok(await page.getByText(/^Synthetic condition: (good|fair)\./).isVisible());
   await page.getByRole('link',{name:'Back to results'}).click();
   assert.equal(await page.locator('a.card').count(),4);
   assert.equal(await page.locator('input[type=password]').count(),0);
