@@ -42,3 +42,13 @@ tasks.register('simulationExperiment', JavaExec) {
     args layout.buildDirectory.file('reports/brain/simulation.json').get().asFile.absolutePath,
         providers.gradleProperty('brainTrainingEpisodes').getOrElse('1200')
 }
+
+// Cache the standalone lab runtime once; ordinary server cycles invoke java directly.
+tasks.register('writeServerBrainClasspath') {
+    dependsOn tasks.named('labClasses')
+    doLast {
+        def output = layout.buildDirectory.file('reports/server-brain-classpath.txt').get().asFile
+        output.parentFile.mkdirs()
+        output.text = sourceSets.lab.runtimeClasspath.asPath
+    }
+}

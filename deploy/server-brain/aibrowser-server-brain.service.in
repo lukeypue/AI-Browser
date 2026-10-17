@@ -1,0 +1,27 @@
+[Unit]
+Description=AI Browser retained synthetic brain learning
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aibrowser-server-brain/source
+ExecStart=/usr/bin/python3 /opt/aibrowser-server-brain/source/scripts/server-brain.py --state /var/lib/aibrowser-server-brain --source-root /opt/aibrowser-server-brain/source --classpath @CLASSPATH@ --source-sha256 @SOURCE_SHA256@ --manifest-sha256 @MANIFEST_SHA256@ --java /usr/bin/java --node /opt/ai-browser-dev/node-v24.21.0-linux-x64/bin/node --playwright-module /opt/ai-browser-dev/browser-harness/node_modules/playwright --playwright-browsers-path /opt/ai-browser-dev/verification-home/.cache/ms-playwright
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+TimeoutStartSec=8min
+CPUQuota=200%
+MemoryMax=1536M
+TasksMax=512
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/aibrowser-server-brain /root/.codex
+InaccessiblePaths=-/root/.ssh -/root/projects -/var/lib/aibrowser-phone-receiver -/var/lib/aibrowser-practice-city-upload
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
