@@ -1,0 +1,1134 @@
+{
+ "item_h2": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.86,
+   "sparse": true,
+   "textLength": 393,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": true,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 1,
+   "h1": "Synthetic vehicle"
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     20,
+     20,
+     372,
+     875
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     52
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     38,
+     387,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "Synthetic vehicle",
+    "depth": 2,
+    "idx": 4,
+    "siblings": 5,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "Synthetic vehicle $6,800 Condition Used Year 2010 Mileage 150,500 Description: Synthetic vehicle in working condition with a tow package, clean interior, documented maintenance, good tires, and a spare wheel. This paragraph is fixture evidence only, describes one item, and contains enough visible primary text to exercise the existing detail threshold.",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "item_h3": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.86,
+   "sparse": true,
+   "textLength": 393,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": true,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 1,
+   "h1": "Synthetic vehicle"
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     20,
+     20,
+     372,
+     875
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     52
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     38,
+     379,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "Synthetic vehicle",
+    "depth": 2,
+    "idx": 4,
+    "siblings": 5,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "Synthetic vehicle $6,800 Condition Used Year 2010 Mileage 150,500 Description: Synthetic vehicle in working condition with a tow package, clean interior, documented maintenance, good tires, and a spare wheel. This paragraph is fixture evidence only, describes one item, and contains enough visible primary text to exercise the existing detail threshold.",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "item_role_heading_2": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.86,
+   "sparse": true,
+   "textLength": 393,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": true,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 1,
+   "h1": "Synthetic vehicle"
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     20,
+     20,
+     372,
+     875
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     52
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     38,
+     354,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "",
+    "depth": 2,
+    "idx": 4,
+    "siblings": 5,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "Synthetic vehicle $6,800 Condition Used Year 2010 Mileage 150,500 Description: Synthetic vehicle in working condition with a tow package, clean interior, documented maintenance, good tires, and a spare wheel. This paragraph is fixture evidence only, describes one item, and contains enough visible primary text to exercise the existing detail threshold.",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "ordinary_consent": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.86,
+   "sparse": true,
+   "textLength": 251,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": false,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 0,
+   "h1": "Privacy choices"
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     20,
+     20,
+     372,
+     875
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     52
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Accept preferences",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     38,
+     193,
+     131,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "Privacy choices",
+    "depth": 2,
+    "idx": 2,
+    "siblings": 4,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   },
+   {
+    "id": "a1",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     169,
+     193,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "Privacy choices",
+    "depth": 2,
+    "idx": 3,
+    "siblings": 4,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "hidden_heading": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.86,
+   "sparse": true,
+   "textLength": 375,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": false,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 1,
+   "h1": ""
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     20,
+     20,
+     372,
+     875
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     52
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     38,
+     336,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "Hidden listing title",
+    "depth": 2,
+    "idx": 4,
+    "siblings": 5,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "background_heading": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.86,
+   "sparse": true,
+   "textLength": 375,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": false,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 1,
+   "h1": ""
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     20,
+     20,
+     372,
+     875
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     76
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     38,
+     336,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "",
+    "depth": 2,
+    "idx": 3,
+    "siblings": 4,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "small_consent": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.14,
+   "sparse": true,
+   "textLength": 429,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": false,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 0,
+   "h1": "Privacy choices"
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     50,
+     300,
+     296,
+     176
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     295
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     68,
+     437,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "Privacy choices",
+    "depth": 2,
+    "idx": 2,
+    "siblings": 3,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "short_consent": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.14,
+   "sparse": true,
+   "textLength": 372,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": false,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 0,
+   "h1": ""
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     50,
+     300,
+     296,
+     176
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     295
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     68,
+     368,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "",
+    "depth": 2,
+    "idx": 1,
+    "siblings": 2,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "login": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 1,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": false,
+   "challengePhrase": false,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.86,
+   "sparse": true,
+   "textLength": 76,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": false,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 0,
+   "h1": "Sign in"
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     20,
+     20,
+     372,
+     875
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     52
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     223,
+     139,
+     52,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "",
+    "depth": 2,
+    "idx": 3,
+    "siblings": 5,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   },
+   {
+    "id": "a1",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     275,
+     139,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "",
+    "depth": 2,
+    "idx": 4,
+    "siblings": 5,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "",
+  "scripts": [],
+  "cardsWithPrice": 0
+ },
+ "challenge": {
+  "v": 3,
+  "url": "https://fixture.market/search",
+  "host": "fixture.market",
+  "title": "",
+  "readyState": "complete",
+  "viewport": {
+   "w": 412,
+   "h": 915,
+   "scrollY": 0,
+   "scrollH": 915
+  },
+  "settle": {
+   "state": "IDLE"
+  },
+  "signals": {
+   "passwordFields": 0,
+   "authPath": false,
+   "authPhrases": false,
+   "challengeWidget": true,
+   "challengePhrase": true,
+   "challengePath": false,
+   "dialog": true,
+   "dialogCoverage": 0.86,
+   "sparse": true,
+   "textLength": 107,
+   "formCount": 0,
+   "resultsHint": false,
+   "detailHint": false,
+   "loginLinks": 0,
+   "hasMain": true,
+   "errorHint": false,
+   "priceCount": 0,
+   "h1": "Verify you are human"
+  },
+  "regions": [
+   {
+    "id": "r0",
+    "role": "DIALOG",
+    "bbox": [
+     20,
+     20,
+     372,
+     875
+    ]
+   },
+   {
+    "id": "r1",
+    "role": "MAIN",
+    "bbox": [
+     8,
+     8,
+     396,
+     52
+    ]
+   }
+  ],
+  "elements": [
+   {
+    "id": "a0",
+    "tag": "button",
+    "type": null,
+    "role": null,
+    "name": "Close",
+    "placeholder": null,
+    "region": "r0",
+    "bbox": [
+     38,
+     219,
+     50,
+     21
+    ],
+    "visible": true,
+    "enabled": true,
+    "selected": false,
+    "expanded": null,
+    "haspopup": false,
+    "href": null,
+    "sameSite": true,
+    "value": null,
+    "choices": [],
+    "near": "Verify you are human",
+    "depth": 2,
+    "idx": 3,
+    "siblings": 4,
+    "inForm": false,
+    "submitType": false,
+    "min": null,
+    "max": null,
+    "cls": [],
+    "editable": false,
+    "rel": null,
+    "inCard": false,
+    "cardHasPrice": false,
+    "listSize": 0,
+    "itemKey": null,
+    "formHasSearch": false,
+    "inDialog": true
+   }
+  ],
+  "items": [],
+  "detailText": "",
+  "scripts": [],
+  "cardsWithPrice": 0
+ }
+}

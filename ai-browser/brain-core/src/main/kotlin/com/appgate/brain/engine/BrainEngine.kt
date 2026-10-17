@@ -340,6 +340,7 @@ class BrainEngine(
 
                 // Continue an in-flight program before asking the policy again.
                 if (ledger.currentProgram.isNotEmpty() && ledger.cursor < ledger.currentProgram.size) {
+                    if (dismissBlockingPrerequisite(ledger, sps, site, profile, executor, effectiveMode)) continue
                     runProgramStep(ledger, sps, site, profile, executor, effectiveMode)
                     consecutiveNoAction = 0
                     continue
@@ -480,6 +481,89 @@ class BrainEngine(
         is Postcondition.UrlQueryHas -> Postcondition.UrlQueryHas(StepGrounder.substitute(p.key, params))
         is Postcondition.RoleAppeared -> p.copy(facetKey = p.facetKey?.let { StepGrounder.substitute(it, params) })
         else -> p
+    }
+
+    /** An ordinary overlay cannot replace the suspended program or borrow its verification credit.
+     * The persisted original program also encounters this guard after a process restart. */
+    private fun dismissBlockingPrerequisite(ledger: TaskLedger, before: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode): Boolean {
+        val pending = ledger.currentProgram.getOrNull(ledger.cursor) ?: return false
+        if (!before.dialogOpen || before.isHumanOnly || before.pageType in setOf(PageType.DETAIL, PageType.FACET_PANEL, PageType.MESSAGES) ||
+            LearningOpportunities.dialogHoldsFilters(before) || pending.role == Role.CLOSE || pending.kind == com.appgate.brain.model.StepKind.DISMISS) return false
+        fun stop(reason: String) {
+            ledger.status = TaskStatus.PARTIAL
+            ledger.terminalReason = reason
+            memory.saveLedger(ledger)
+        }
+        val step = Step(com.appgate.brain.model.StepKind.DISMISS, Role.CLOSE, expect = listOf(Postcondition.DialogClosed))
+        val grounded = (StepGrounder(site).ground(step, emptyMap(), before, ledger.visited, strict = true) as? GroundingOutcome.Ready)?.grounded
+        if (grounded == null) { stop("ordinary dialog has no safe dismissal target"); return true }
+        val key = FailedStrategies.key(before, "dismiss_dialog", listOf(step))
+        if (!FailedStrategies.allowed(site, key, clock())) { stop("dialog dismissal procedure is held after a failed attempt"); return true }
+        if (stopRequested.get()) return true
+        if (ledger.actions >= ledger.goal.budget.actions) {
+            ledger.status = TaskStatus.BUDGET_EXHAUSTED; ledger.terminalReason = "action budget exhausted"; memory.saveLedger(ledger); return true
+        }
+        if (!ProgressSupervisor.permit(ledger, before, step)) { stop("dialog dismissal repeat state limit"); return true }
+        pace(profile)
+        if (stopRequested.get()) return true
+        ledger.actions++
+        memory.saveLedger(ledger)
+        val started = clock()
+        val outcome = executor.execute(grounded.action, before, mode, ledger.grants, null, clock())
+        val firstAfter = (outcome as? ExecOutcome.Done)?.after
+        if (firstAfter != null && !acceptPage(ledger, firstAfter, profile)) return true
+        var after = firstAfter
+        var result = after?.let { Verifier.verify(grounded.action, before, it, ledger.visited) }
+        if (result?.status == VerifyStatus.AMBIGUOUS) {
+            Thread.sleep(config.ambiguousRecheckMs)
+            runCatching { executor.observe(clock()) }.getOrNull()?.let { observed ->
+                after = observed; result = Verifier.verify(grounded.action, before, observed, ledger.visited)
+            }
+        }
+        val observed = after
+        if (observed != null && !acceptPage(ledger, observed, profile)) return true
+        if (observed != null) latestPage = observed
+        val status = result?.status ?: VerifyStatus.FAILED
+        val code = when {
+            status == VerifyStatus.VERIFIED -> DiagnosticCode.VERIFIED
+            status == VerifyStatus.HUMAN_NEEDED -> if (observed?.challenge == true) DiagnosticCode.CHALLENGE else DiagnosticCode.AUTH_WALL
+            outcome is ExecOutcome.Failed && outcome.timeout -> DiagnosticCode.RENDERER_TIMEOUT
+            outcome is ExecOutcome.Failed -> DiagnosticCode.ACTION_REJECTED
+            outcome is ExecOutcome.Blocked -> DiagnosticCode.INTERLOCK_BLOCKED
+            status == VerifyStatus.AMBIGUOUS -> DiagnosticCode.PAGE_UNSETTLED
+            else -> DiagnosticCode.UNMET_EXPECTATION
+        }
+        events.diagnostic(ledger.host, "action_outcome", SemanticDiagnostics.action(ledger, before, observed, step, status, code).put("capability", "dismiss_dialog"))
+        val evidence = result?.evidence?.joinToString("; ") ?: when (outcome) {
+            is ExecOutcome.Failed -> outcome.reason
+            is ExecOutcome.Blocked -> outcome.reason
+            else -> "dialog dismissal did not verify"
+        }
+        ledger.record(LedgerStep(clock(), ledger.phase, before.hash, step.describe(), status, evidence.take(300), "prerequisite:dismiss_dialog"))
+        events.step(ledger, "dismiss blocking dialog prerequisite", status)
+        recordEpisode(site, before, grounded, status, observed?.pageType ?: before.pageType, clock() - started)
+        if (status == VerifyStatus.HUMAN_NEEDED && observed != null) {
+            if (observed.challenge) site.recordChallenge(clock())
+            ledger.status = TaskStatus.NEED_HUMAN
+            ledger.humanReason = if (observed.challenge) "This site is asking for a human verification step." else "This site needs you to sign in."
+            memory.saveSite(site); memory.saveLedger(ledger)
+            events.needHuman(ledger, ledger.humanReason, observed.url)
+            return true
+        }
+        if (observed != null && status in setOf(VerifyStatus.VERIFIED, VerifyStatus.FAILED))
+            learnFromOutcome(ledger, site, before, observed, grounded, status == VerifyStatus.VERIFIED)
+        if (status == VerifyStatus.VERIFIED) {
+            FailedStrategies.record(site, key, true, clock())
+            progress(ledger, "dialog prerequisite|"+before.hash+"|"+observed?.hash, "ordinary dialog dismissed")
+        } else if (status != VerifyStatus.HUMAN_NEEDED) {
+            // No unchanged retry, and never quarantine the suspended original procedure.
+            if (status == VerifyStatus.FAILED && observed?.settle == com.appgate.brain.model.Settle.IDLE && before.settle == com.appgate.brain.model.Settle.IDLE)
+                FailedStrategies.record(site, key, false, clock())
+            stop("ordinary dialog dismissal did not verify")
+        }
+        memory.saveSite(site)
+        memory.saveLedger(ledger)
+        return true
     }
 
     private fun runProgramStep(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode) {

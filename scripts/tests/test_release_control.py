@@ -44,6 +44,9 @@ class ReleaseTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.state = Path(self.tmp.name)
+        self.harness = self.state/'ai-browser/brain-core/src/test/harness'
+        self.harness.mkdir(parents=True)
+        (self.harness/'document-boundary.test.mjs').write_text('// fixture')
         self.fake = Fake()
         self.review = dict(source_sha=CANDIDATE, status='approved', independent=True,
                            reviewer='independent-reviewer', evidence='review-task-123')
@@ -155,6 +158,31 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn(expected, [call.args[0] for call in command.call_args_list])
         self.assertEqual(adapter.env['PLAYWRIGHT_MODULE'],
                          '/opt/ai-browser-dev/browser-harness/node_modules/playwright')
+
+    def test_checks_run_all_trusted_harness_tests_sorted_and_serial(self):
+        from unittest.mock import patch
+        names = ['parallel-browser-lab.test.mjs', 'learning-perception.test.mjs',
+                 'dialog-prerequisite-regression.test.mjs', 'dialog-detection.test.mjs',
+                 'document-boundary.test.mjs']
+        for name in names + ['extract.mjs']:
+            (self.harness/name).write_text('// fixture')
+        (self.state/'outside.test.mjs').write_text('// outside harness')
+        adapter = Production(self.state)
+        with patch.object(adapter, 'command') as command:
+            adapter.checks()
+        node = '/opt/ai-browser-dev/node-v24.21.0-linux-x64/bin/node'
+        expected = [node, '--test', '--test-concurrency=1',
+                    *[str(self.harness/name) for name in sorted(names)]]
+        selected = [call.args[0] for call in command.call_args_list
+                    if any(str(item).startswith(str(self.harness)) for item in call.args[0])]
+        self.assertEqual(selected, [expected])
+
+    def test_missing_harness_tests_fail_closed(self):
+        from unittest.mock import patch
+        (self.harness/'document-boundary.test.mjs').unlink()
+        adapter = Production(self.state)
+        with patch.object(adapter, 'command'):
+            with self.assertRaises(ReleaseError): adapter.checks()
 
     def test_android_fixture_failure_stops_before_push(self):
         from unittest.mock import patch

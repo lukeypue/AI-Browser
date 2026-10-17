@@ -159,7 +159,9 @@ class Production:
         self.command(['/usr/bin/python3','-m','unittest','discover','-s','deploy/phone-reports/receiver'])
         node = '/opt/ai-browser-dev/node-v24.21.0-linux-x64/bin/node'
         harness = self.root/'ai-browser/brain-core/src/test/harness'
-        self.command([node,'--test',str(harness/'document-boundary.test.mjs'),str(harness/'learning-perception.test.mjs')])
+        tests = sorted(harness.glob('*.test.mjs'))
+        require(bool(tests), 'Trusted browser harness tests unavailable')
+        self.command([node,'--test','--test-concurrency=1',*[str(path) for path in tests]])
         self.command([node,'--test','--test-concurrency=1',str(self.root/'scripts/tests/android-fixtures.test.mjs')])
 
     def push(self, candidate):

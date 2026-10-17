@@ -381,13 +381,15 @@
   function detailScope(dialogs) {
     const vh = window.innerHeight || 1, vw = window.innerWidth || 1;
     let best = null, bestCover = 0;
-    for (const d of dialogs) {
-      if (textOf(d, 200).length < 40) continue;                     // scrims / backdrops carry no content
+    const explicitDialogs = dialogs.filter((d) => d.matches('[role=dialog], [role=alertdialog], [aria-modal=true], dialog[open]'));
+    const candidates = explicitDialogs.length ? explicitDialogs : dialogs;
+    for (const d of candidates) {
+      if (!explicitDialogs.length && textOf(d, 200).length < 40) continue;                     // scrims / backdrops carry no content
       const r = d.getBoundingClientRect(); const c = (r.width * r.height) / (vw * vh);
       const explicit = d.getAttribute("role") === "dialog" || d.getAttribute("aria-modal") === "true" ? 0.2 : 0;
       if (c + explicit > bestCover) { bestCover = c + explicit; best = d; }
     }
-    return best && bestCover >= 0.35 ? best : mainContent();
+    return best && (explicitDialogs.length || bestCover >= 0.35) ? best : mainContent();
   }
 
   function computeSignals(elements, cards, dialogs, bodyText) {
@@ -400,7 +402,8 @@
     const pathAndQuery = location.pathname + location.search;
     const lowerText = bodyText.toLowerCase();
     const challengeWidget = Array.from(document.querySelectorAll('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], iframe[src*="challenges.cloudflare"], iframe[src*="arkoselabs"], iframe[src*="funcaptcha"], iframe[src*="geo.captcha-delivery"], [class*="g-recaptcha"], [class*="h-captcha"], [class*="cf-turnstile"], [data-sitekey], #px-captcha, [id*="captcha" i]')).some(visible);
-    const h1 = scope.querySelector("h1, h2, [role=heading][aria-level=\"1\"]") || document.querySelector("h1");
+    const h1 = Array.from(scope.querySelectorAll("h1, h2, h3, h4, h5, h6, [role=heading]"))
+      .find((heading) => visible(heading) && !scopedCards.some((card) => card.contains(heading)));
     const scopeText = textOf(scope, 60000);
     const priceCount = (scopeText.match(/\$\s?[0-9][0-9,]{2,}/g) || []).length;
     const primary = primaryText(scope, scopedCards, DETAIL_TEXT_MAX);
