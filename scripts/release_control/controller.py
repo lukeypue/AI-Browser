@@ -21,6 +21,7 @@ REMOTE = 'git@github.com:lukeypue/AI-Browser.git'
 API = 'https://api.github.com/repos/lukeypue/AI-Browser'
 WORKFLOW = 'Build AppGate APK'
 PACKAGE = 'com.aibrowser.universal'
+KOTLIN_STDLIB = '/opt/ai-browser-dev/verification-home/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.10/30de6faa127a4a012db8e71bf1b9c0a99b1402b2/kotlin-stdlib-2.2.10.jar'
 
 class ReleaseError(RuntimeError):
     pass
@@ -157,12 +158,27 @@ class Production:
                       ':app:testDebugUnitTest',':app:assembleDebug',':app:lintDebug'], cwd=self.root/'ai-browser')
         self.command(['/usr/bin/python3','-m','unittest','discover','-s','scripts/tests'])
         self.command(['/usr/bin/python3','-m','unittest','discover','-s','deploy/phone-reports/receiver'])
+        revision = self.command(['/usr/bin/git','rev-parse','HEAD'], git=True)
+        require(bool(re.fullmatch('[0-9a-f]{40}', revision)), 'Invalid candidate core revision')
+        classes = self.root/'ai-browser/brain-core/build/classes/kotlin/main'
+        require(classes.is_dir() and Path(KOTLIN_STDLIB).is_file(), 'Pinned Kotlin core classpath unavailable')
+        for name in ('perception/SpsParser', 'verify/Verifier', 'engine/LearningOpportunities', 'skills/BuiltinSkills'):
+            source = self.root/'ai-browser/brain-core/src/main/kotlin/com/appgate/brain'/f'{name}.kt'
+            compiled = classes/'com/appgate/brain'/f'{name}.class'
+            require(source.is_file() and compiled.is_file()
+                    and compiled.stat().st_mtime_ns >= source.stat().st_mtime_ns,
+                    'Missing or stale candidate core classes')
+        self.env.update(FIXTURE_CORE_CHECKOUT=str(self.root), FIXTURE_CORE_REVISION=revision,
+                        FIXTURE_CORE_CLASSPATH=str(classes)+':'+KOTLIN_STDLIB)
         node = '/opt/ai-browser-dev/node-v24.21.0-linux-x64/bin/node'
         harness = self.root/'ai-browser/brain-core/src/test/harness'
         tests = sorted(harness.glob('*.test.mjs'))
         require(bool(tests), 'Trusted browser harness tests unavailable')
         self.command([node,'--test','--test-concurrency=1',*[str(path) for path in tests]])
-        self.command([node,'--test','--test-concurrency=1',str(self.root/'scripts/tests/android-fixtures.test.mjs')])
+        script_tests = sorted((self.root/'scripts/tests').glob('*.test.mjs'))
+        require({'android-fixtures.test.mjs', 'android-fixture-curriculum.test.mjs'}
+                <= {path.name for path in script_tests}, 'Required Android fixture coverage unavailable')
+        self.command([node,'--test','--test-concurrency=1',*[str(path) for path in script_tests]])
 
     def push(self, candidate):
         self.command(['/usr/bin/git','push',REMOTE,candidate+':refs/heads/'+BRANCH], git=True, timeout=120)
