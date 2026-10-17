@@ -104,6 +104,13 @@ class BrainService : Service() {
     @Volatile private var timedTest: com.appgate.brain.engine.TimedLearningTest? = null
     private val executingTest = ThreadLocal<com.appgate.brain.engine.TimedLearningTest?>()
     private val testDeadline = Runnable { finishTimedTest("deadline", stop = true) }
+    private val liveHeartbeat = object:Runnable {
+        override fun run() {
+            if(timedTest==null)return
+            diagnostics.snapshotLiveProgress()
+            main.postDelayed(this,30_000)
+        }
+    }
     fun learningTestSummary(): String = getSharedPreferences("brain_jobs", MODE_PRIVATE).getString("test_summary", "No timed test completed yet.")!!
     private var currentGoal: Goal? = null
     private var currentLedgers: List<TaskLedger> = emptyList()
@@ -160,6 +167,7 @@ class BrainService : Service() {
 
     override fun onDestroy() {
         main.removeCallbacks(watchdog)
+        main.removeCallbacks(liveHeartbeat)
         finishTimedTest("service ended", stop = true)
         engine?.requestStop()
         job?.cancel(true)
@@ -327,6 +335,8 @@ class BrainService : Service() {
             getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", true).putString("test_summary", "$testMinutes-minute test running. Pauses and human review count toward the time limit.").apply()
             diagnostics.beginPhoneTest()
             diagnostics.event("learning_test_start", extra = JsonObject().put("minutes", testMinutes))
+            main.removeCallbacks(liveHeartbeat)
+            main.post(liveHeartbeat)
         }
         val includeAccountSites = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("learn_account_sites", false)
         val sites = SiteProfiles.training.filter { includeAccountSites || !it.requiresLogin }
@@ -377,6 +387,7 @@ class BrainService : Service() {
         val run = timedTest ?: return
         timedTest = null
         main.removeCallbacks(testDeadline)
+        main.removeCallbacks(liveHeartbeat)
         val result = run.finish(android.os.SystemClock.elapsedRealtime(), reason)
         val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses. Repeated uses are not new lessons. Save diagnostics for review."
         getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", false).putString("test_summary", summary).apply()

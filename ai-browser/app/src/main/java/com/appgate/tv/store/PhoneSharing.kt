@@ -2,6 +2,8 @@ package com.appgate.tv.store
 
 import android.content.Context
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -17,6 +19,8 @@ import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -40,12 +44,33 @@ class PhoneSharing(context:Context) {
 
  fun enabled()=prefs.getBoolean("enabled",false)
  fun generation()=prefs.getLong("generation",0)
+ fun liveEnabled()=enabled()&&prefs.getBoolean("live_enabled",false)
+ fun liveGeneration()=prefs.getLong("live_generation",0)
+ fun liveStatus():String {
+  if(!liveEnabled())return "Live progress: OFF"
+  val expiry=prefs.getLong("live_pending_until",0)
+  val text=if(expiry>0&&SystemClock.elapsedRealtime()>=expiry)"Pending update expired; waiting for the next timed test heartbeat" else prefs.getString("live_status","Waiting for an active timed test")
+  return "Live progress: ON · "+text
+ }
+ fun beginLiveTest()=synchronized(lock){
+  prefs.edit().putLong("live_generation",liveGeneration()+1).remove("live_pending_until").putString("live_status","Waiting for this test's first heartbeat").commit()
+  activeLive?.disconnect();activeLive=null;liveQueue.cancel();liveHandler.removeCallbacks(liveRetry)
+ }
+ fun setLiveEnabled(on:Boolean)=synchronized(lock){
+  val permitted=on&&enabled()
+  if(prefs.getBoolean("live_enabled",false)==permitted)return@synchronized
+  prefs.edit().putBoolean("live_enabled",permitted).putLong("live_generation",liveGeneration()+1).remove("live_pending_until")
+   .putString("live_status",if(permitted)"Waiting for an active timed test" else "Off; pending live update discarded").commit()
+  activeLive?.disconnect();activeLive=null;liveQueue.cancel();liveHandler.removeCallbacks(liveRetry)
+ }
  fun status():String=synchronized(lock){
   if(!enabled())"Automatic phone diagnostics: OFF"
   else "${prefs.getString("status","Pair this phone to enable delivery")} · ${files().size} pending"
  }
  fun setEnabled(on:Boolean)=synchronized(lock){
   prefs.edit().putBoolean("enabled",on).putLong("generation",generation()+1).putString("status",if(on)"Pair this phone to enable delivery" else "Sharing off; unsent reports cleared").commit()
+  activeLive?.disconnect();activeLive=null;liveQueue.cancel();liveHandler.removeCallbacks(liveRetry)
+  if(!on)prefs.edit().putBoolean("live_enabled",false).putLong("live_generation",liveGeneration()+1).putString("live_status","Off; pending live update discarded").commit()
   if(!on){active?.disconnect();active=null;WorkManager.getInstance(app).cancelAllWorkByTag(TAG);queue.listFiles()?.forEach{it.delete()};prefs.edit().remove("credential").remove("device").commit()}
  }
  private fun key():SecretKey {
@@ -134,18 +159,63 @@ class PhoneSharing(context:Context) {
   }
   return true
  }
- private fun request(path:String,body:String,token:String?,owner:Long):Pair<Int,String> {
+ fun enqueueLive(report:JsonObject,owner:Long,liveOwner:Long)=synchronized(lock){
+  if(!liveEnabled()||generation()!=owner||liveGeneration()!=liveOwner)return@synchronized
+  if(!prefs.contains("credential")){prefs.edit().putString("live_status","Pair this phone to send progress").commit();return@synchronized}
+  val payload=PhoneReportExporter.canonical(report)
+  require(payload.toByteArray(Charsets.UTF_8).size<=32768)
+  val expiry=SystemClock.elapsedRealtime()+30*60_000L
+  val packet=LivePacket(this,payload,report.optString("test_id"),report.optLong("sequence"),PhoneReportExporter.sha256(report),owner,liveOwner,expiry)
+  prefs.edit().putString("live_status","Latest update pending").putLong("live_pending_until",expiry).putString("live_pending_test",packet.testId).putLong("live_pending_sequence",packet.sequence).commit()
+  liveQueue.offer(packet,expiry)
+ }
+ fun liveSnapshotFailed()=synchronized(lock){if(liveEnabled())prefs.edit().putString("live_status","Snapshot unavailable; waiting for the next heartbeat").commit()}
+ private fun deliverLive(packet:LivePacket,current:()->Boolean):Boolean {
+  val authorization=synchronized(lock){
+   if(!liveEnabled()||generation()!=packet.owner||liveGeneration()!=packet.liveOwner||!current()||SystemClock.elapsedRealtime()>=packet.expiresAtMillis)return true
+   prefs.getString("device",null)?.let{it+"."+credential()}?:return true
+  }
+  val delivered=runCatching {
+   val response=request("/v1/live",packet.payload,authorization,packet.owner,packet.liveOwner){current()&&SystemClock.elapsedRealtime()<packet.expiresAtMillis}
+   require(response.first==200)
+   val ack=Json.parseObject(response.second)
+   require(ack.optString("test_id")==packet.testId && ack["sequence"]?.asDoubleOrNull()==packet.sequence.toDouble() && ack.optString("sha256")==packet.hash)
+   synchronized(lock){
+    if(liveEnabled()&&generation()==packet.owner&&liveGeneration()==packet.liveOwner&&current()){
+     liveHandler.removeCallbacks(liveRetry)
+     if(prefs.getString("live_pending_test",null)==packet.testId&&prefs.getLong("live_pending_sequence",-1)==packet.sequence)
+      prefs.edit().putString("live_status","Latest update acknowledged").remove("live_pending_until").commit()
+    }
+   }
+   true
+  }.getOrElse {
+   synchronized(lock){
+    if(liveEnabled()&&generation()==packet.owner&&liveGeneration()==packet.liveOwner&&current())
+     prefs.edit().putString("live_status","Connection pending; only the latest update will retry").commit()
+   }
+   false
+  }
+  if(!delivered)synchronized(lock){
+   if(liveEnabled()&&generation()==packet.owner&&liveGeneration()==packet.liveOwner&&current()&&SystemClock.elapsedRealtime()<packet.expiresAtMillis){
+    liveHandler.removeCallbacks(liveRetry);liveHandler.postDelayed(liveRetry,minOf(30_000L,packet.expiresAtMillis-SystemClock.elapsedRealtime()).coerceAtLeast(1))
+   }
+  }
+  return delivered
+ }
+ private fun request(path:String,body:String,token:String?,owner:Long,liveOwner:Long?=null,current:()->Boolean={true}):Pair<Int,String> {
+  fun allowed()=enabled()&&generation()==owner&&(liveOwner==null||(liveEnabled()&&liveGeneration()==liveOwner&&current()))
   val connection=synchronized(lock){
-   check(enabled()&&generation()==owner)
+   check(allowed())
    (URL(ORIGIN+path).openConnection() as HttpsURLConnection).apply {
     instanceFollowRedirects=false;connectTimeout=15000;readTimeout=20000;requestMethod="POST";doOutput=true
     setRequestProperty("Content-Type","application/json");token?.let{setRequestProperty("Authorization","Bearer $it")}
-    setFixedLengthStreamingMode(body.toByteArray(Charsets.UTF_8).size);active=this
+    setFixedLengthStreamingMode(body.toByteArray(Charsets.UTF_8).size);if(liveOwner==null)active=this else activeLive=this
    }
   }
   try{
-   check(enabled()&&generation()==owner)
-   connection.outputStream.use{it.write(body.toByteArray(Charsets.UTF_8))}
+   check(allowed())
+   if(liveOwner==null)connection.outputStream.use{it.write(body.toByteArray(Charsets.UTF_8))}
+   else LiveWriteBoundary.send({connection.outputStream},lock,{allowed()},body.toByteArray(Charsets.UTF_8))
    val status=connection.responseCode;val stream=if(status in 200..299)connection.inputStream else connection.errorStream
    val raw=stream?.use {
     val buffer=ByteArray(4097);var size=0
@@ -153,7 +223,7 @@ class PhoneSharing(context:Context) {
     require(size<=4096);String(buffer,0,size,Charsets.UTF_8)
    }.orEmpty()
    return status to raw
-  }finally{connection.disconnect();synchronized(lock){if(active===connection)active=null}}
+  }finally{connection.disconnect();synchronized(lock){if(active===connection)active=null;if(activeLive===connection)activeLive=null}}
  }
  companion object {
   const val ORIGIN="https://reports.ryzod.com"
@@ -162,6 +232,12 @@ class PhoneSharing(context:Context) {
   private const val FLAGS=Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
   private val lock=Any()
   @Volatile private var active:HttpsURLConnection?=null
+  @Volatile private var activeLive:HttpsURLConnection?=null
+  private data class LivePacket(val sharing:PhoneSharing,val payload:String,val testId:String,val sequence:Long,val hash:String,val owner:Long,val liveOwner:Long,val expiresAtMillis:Long)
+  private val liveExecutor=ThreadPoolExecutor(1,1,0L,TimeUnit.MILLISECONDS,ArrayBlockingQueue<Runnable>(1)){r->Thread(r,"phone-live-delivery").apply{isDaemon=true}}
+  private val liveQueue=LiveDeliveryQueue<LivePacket>(liveExecutor,now={SystemClock.elapsedRealtime()}){packet,current->packet.sharing.deliverLive(packet,current)}
+  private val liveHandler=Handler(Looper.getMainLooper())
+  private val liveRetry=Runnable{liveQueue.retry()}
   private fun b64(bytes:ByteArray)=Base64.encodeToString(bytes,FLAGS)
  }
 }

@@ -10,15 +10,17 @@ import com.appgate.brain.perception.Redactor
 import java.io.File
 import com.appgate.brain.diagnostics.*
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * A bounded, privacy-safe event log (NDJSON) the user can export to Downloads or share.
  * Lines carry only the brain's own semantic coordinates: host, page type, role, facet key,
  * verification status, timings. No listing text, no names, no query values, no URLs with
- * values, no keys. Nothing is uploaded automatically — sharing is always a button the user taps.
+ * values, no keys. Automatic sanitized sharing requires explicit consent in Phone test diagnostics.
  */
 class DiagnosticsLog(private val context: Context) {
     private val writer = SerialDiagnosticWriter()
+    private val liveSnapshotQueued = AtomicBoolean(false)
     private val phonePrefs = context.getSharedPreferences("phone_test_context", Context.MODE_PRIVATE)
     private var trimGeneration = phonePrefs.getInt("trim_generation", 0)
     @Volatile private var writeFailed = false
@@ -87,6 +89,7 @@ class DiagnosticsLog(private val context: Context) {
 
     fun beginPhoneTest() {
         val sharing = PhoneSharing(context)
+        sharing.beginLiveTest()
         val id = UUID.randomUUID().toString()
         val elapsed = android.os.SystemClock.elapsedRealtime()
         val wall = System.currentTimeMillis()
@@ -97,8 +100,39 @@ class DiagnosticsLog(private val context: Context) {
         phoneTestId = id
         writer.append {
             phonePrefs.edit().putString("id", id).putLong("elapsed", elapsed).putLong("wall", wall)
-                .putInt("boot", startedBoot).putInt("test_trim", trimGeneration).putLong("consent_generation", owner)
+                .putInt("boot", startedBoot).putInt("test_trim", trimGeneration).putLong("consent_generation", owner).putLong("live_elapsed",0)
                 .putString("test_revision", startedRevision).putInt("test_version", startedVersion).commit()
+        }
+    }
+
+    private fun phoneContext(id:String)=PhoneTestContext(id, phonePrefs.getLong("elapsed",0), phonePrefs.getLong("wall",0), phonePrefs.getInt("test_trim",0), phonePrefs.getInt("boot",-1),
+        appRevision=phonePrefs.getString("test_revision",null),versionCode=if(phonePrefs.contains("test_version"))phonePrefs.getInt("test_version",-1) else null)
+    private fun phoneEvents()=if(file.exists())file.useLines{lines->lines.mapNotNull{com.appgate.brain.json.Json.parseObjectOrNull(it)}.toList()} else emptyList()
+    private fun liveReport(test:PhoneTestContext,events:List<JsonObject>,elapsed:Long,wall:Long,currentBoot:Int,finished:Boolean,interrupted:Boolean=false):JsonObject {
+        val evidence=if(interrupted&&currentBoot==test.bootId)events+JsonObject().put("kind","learning_test_interrupted").put("test_id",test.id).put("boot",test.bootId).put("elapsed",elapsed) else events
+        return LiveProgressExporter.export(test,evidence,elapsed,wall,trimGeneration,com.appgate.tv.BuildConfig.DIAGNOSTICS_REVISION,
+            context.packageManager.getPackageInfo(context.packageName,0).versionCode,currentBoot,finished,minimumElapsedMs=phonePrefs.getLong("live_elapsed",0))
+    }
+    fun snapshotLiveProgress() {
+        val sharing=PhoneSharing(context)
+        if(!sharing.liveEnabled()||phoneTestId.isBlank()||!liveSnapshotQueued.compareAndSet(false,true))return
+        val expectedId=phoneTestId
+        val owner=sharing.generation()
+        val liveOwner=sharing.liveGeneration()
+        val elapsed=android.os.SystemClock.elapsedRealtime()
+        val wall=System.currentTimeMillis()
+        val currentBoot=boot()
+        // A serial barrier flushes all preceding diagnostic writes before the read.
+        writer.snapshot {
+            try {
+                check(!writeFailed)
+                if(phonePrefs.getString("id",null)!=expectedId||phonePrefs.getLong("consent_generation",-1)!=owner)return@snapshot
+                if(!sharing.liveEnabled()||sharing.generation()!=owner||sharing.liveGeneration()!=liveOwner)return@snapshot
+                val report=liveReport(phoneContext(expectedId),phoneEvents(),elapsed,wall,currentBoot,false)
+                check(phonePrefs.edit().putLong("live_elapsed",report.optLong("elapsed_ms")).commit())
+                sharing.enqueueLive(report,owner,liveOwner)
+            } catch(_:Exception){sharing.liveSnapshotFailed()}
+            finally {liveSnapshotQueued.set(false)}
         }
     }
 
@@ -107,6 +141,7 @@ class DiagnosticsLog(private val context: Context) {
         val finishedElapsed = android.os.SystemClock.elapsedRealtime()
         val finishedWall = System.currentTimeMillis()
         val finishedBoot = boot()
+        val finishedLiveOwner = sharing.liveGeneration()
         phoneTestId = ""
         // The read is enqueued after all preceding event writes, including the end marker.
         writer.snapshot {
@@ -114,6 +149,14 @@ class DiagnosticsLog(private val context: Context) {
             try {
                 check(!writeFailed)
                 val owner = phonePrefs.getLong("consent_generation", -1)
+                if(sharing.liveEnabled()&&sharing.generation()==owner&&sharing.liveGeneration()==finishedLiveOwner){
+                    // A live snapshot failure must never prevent the durable final report.
+                    runCatching {
+                        val report=liveReport(phoneContext(id),phoneEvents(),finishedElapsed,finishedWall,finishedBoot,true,interrupted)
+                        check(phonePrefs.edit().putLong("live_elapsed",report.optLong("elapsed_ms")).commit())
+                        sharing.enqueueLive(report,owner,finishedLiveOwner)
+                    }.onFailure { sharing.liveSnapshotFailed() }
+                }
                 if (sharing.enabled() && sharing.generation() == owner) {
                     val test = PhoneTestContext(id, phonePrefs.getLong("elapsed", 0), phonePrefs.getLong("wall", 0), phonePrefs.getInt("test_trim", 0), phonePrefs.getInt("boot", -1),
                         appRevision = phonePrefs.getString("test_revision", null),
@@ -123,7 +166,7 @@ class DiagnosticsLog(private val context: Context) {
                     sharing.enqueue(PhoneReportExporter.export(test, events, finishedElapsed, finishedWall, trimGeneration, interrupted, com.appgate.tv.BuildConfig.DIAGNOSTICS_REVISION, version, currentBoot = finishedBoot), owner)
                 }
             } catch (_: Exception) { sharing.snapshotFailed() }
-            finally { phonePrefs.edit().remove("id").remove("test_revision").remove("test_version").commit() }
+            finally { phonePrefs.edit().remove("id").remove("test_revision").remove("test_version").remove("live_elapsed").commit() }
         }
     }
 

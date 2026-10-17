@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch sanitized live phone progress for bounded advisory triage
+
+[Path]
+PathChanged=/var/lib/aibrowser-phone-receiver/live
+Unit=aibrowser-phone-live-triage.service
+
+[Install]
+WantedBy=multi-user.target

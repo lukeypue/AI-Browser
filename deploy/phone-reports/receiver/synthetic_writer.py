@@ -78,9 +78,12 @@ def git(repo,*args):
     if repo: cmd+=['-C',str(repo)]
     return subprocess.check_output(cmd+list(args),env=env,text=True,stderr=subprocess.PIPE,timeout=120).strip()
 
+def destination_allowed(path):
+    return bool(path=='README.md' or re.fullmatch(r'reports/(?:latest|run-[A-Za-z0-9-]+)\.json',path) or re.fullmatch(r'phone-reports/(?:index|[0-9a-f-]{36})\.json',path) or path in {'live-progress/latest.json','live-progress/triage.json'})
+
 def prepare_all(repo):
     tracked=git(repo,'ls-tree','-r','--name-only','HEAD').splitlines()
-    require(all(p=='README.md' or re.fullmatch(r'reports/(?:latest|run-[A-Za-z0-9-]+)\.json',p) or re.fullmatch(r'phone-reports/(?:index|[0-9a-f-]{36})\.json',p) for p in tracked),'unexpected destination files/workflows')
+    require(all(destination_allowed(p) for p in tracked),'unexpected destination files/workflows')
     exports=[]
     for file in sorted(REPORTS.glob('run-*.json')):
         try:
@@ -102,13 +105,15 @@ def prepare_all(repo):
     if newest and (not latest.exists() or latest.read_text()!=newest[1]): latest.write_text(newest[1])
     from publisher import prepare
     prepare(Path('/var/lib/aibrowser-phone-receiver/outbox'),repo)
+    from live_publisher import prepare_live
+    prepare_live(Path('/var/lib/aibrowser-phone-receiver/live'),Path('/var/lib/aibrowser-phone-live-triage'),repo)
 
 
 def push_expected(repo,expected):
-    # The ancestry check forbids non-fast-forward history. The lease adds an exact
-    # expected-head compare-and-swap: a concurrent review write is never overwritten.
+    # Normal fast-forward push, preceded by expected-head and ancestry checks.
+    require(git(repo,'ls-remote','origin','refs/heads/main').split()[0]==expected,'destination head changed')
     git(repo,'merge-base','--is-ancestor',expected,'HEAD')
-    git(repo,'push','--force-with-lease=refs/heads/main:'+expected,'origin','HEAD:main')
+    git(repo,'push','origin','HEAD:refs/heads/main')
 
 @contextmanager
 def candidate(repo,expected):
@@ -127,7 +132,7 @@ def publish(repo,prepare):
             if git(path,'diff','--cached','--name-only'):
                 git(path,'commit','-m','Update validated AI Browser reports [skip ci]')
             try:push_expected(path,expected)
-            except subprocess.CalledProcessError:
+            except (subprocess.CalledProcessError,ValueError):
                 if git(repo,'ls-remote','origin','refs/heads/main').split()[0]!=expected:continue
                 raise
             require(git(path,'rev-parse','HEAD')==git(repo,'ls-remote','origin','refs/heads/main').split()[0],'remote commit verification')

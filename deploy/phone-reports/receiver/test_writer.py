@@ -29,7 +29,7 @@ class WriterTests(unittest.TestCase):
    (b/'review.json').write_text('{}');writer.git(b,'add','.');writer.git(b,'commit','-m','another authorized writer');writer.git(b,'push','origin','main')
    advanced=writer.git(b,'rev-parse','HEAD')
    (a/'new.json').write_text('{}');writer.git(a,'add','.');writer.git(a,'commit','-m','stale writer')
-   with self.assertRaises(subprocess.CalledProcessError):writer.push_expected(a,expected)
+   with self.assertRaises((subprocess.CalledProcessError,ValueError)):writer.push_expected(a,expected)
    self.assertEqual(writer.git(None,'--git-dir',str(remote),'rev-parse','refs/heads/main'),advanced)
  def test_expected_head_fast_forward_succeeds(self):
   with tempfile.TemporaryDirectory() as directory:
@@ -39,3 +39,21 @@ class WriterTests(unittest.TestCase):
    expected=writer.git(repo,'rev-parse','HEAD');(repo/'new.json').write_text('{}');writer.git(repo,'add','.');writer.git(repo,'commit','-m','next')
    writer.push_expected(repo,expected)
    self.assertEqual(writer.git(repo,'rev-parse','HEAD'),writer.git(None,'--git-dir',str(remote),'rev-parse','refs/heads/main'))
+
+ def test_push_uses_normal_fast_forward_and_expected_head(self):
+  from unittest.mock import patch
+  calls=[]
+  def fake(repo,*args):
+   calls.append(args)
+   if args[0]=='ls-remote':return 'a'*40+'\trefs/heads/main'
+   return ''
+  with patch.object(writer,'git',side_effect=fake):writer.push_expected(Path('/unused'),'a'*40)
+  self.assertIn(('ls-remote','origin','refs/heads/main'),calls)
+  self.assertIn(('push','origin','HEAD:refs/heads/main'),calls)
+  self.assertFalse(any('--force' in arg for args in calls for arg in args))
+ def test_live_paths_are_exactly_allowlisted(self):
+  self.assertTrue(writer.destination_allowed('live-progress/latest.json'))
+  self.assertTrue(writer.destination_allowed('live-progress/triage.json'))
+  self.assertFalse(writer.destination_allowed('live-progress/private.txt'))
+  self.assertFalse(writer.destination_allowed('.github/workflows/release.yml'))
+  self.assertTrue(writer.destination_allowed('reports/latest.json'))

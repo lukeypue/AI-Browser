@@ -1,8 +1,11 @@
 """Loopback-only upload receiver. No credentials, IPs or request bodies are logged."""
-import argparse,hashlib,hmac,json,os,re,secrets,sqlite3,time,uuid
+import argparse,hashlib,hmac,json,os,re,secrets,sqlite3,time,uuid,sys
+if __name__=='__main__':sys.modules.setdefault('receiver',sys.modules[__name__])
 from datetime import datetime,timezone
 from http.server import BaseHTTPRequestHandler,HTTPServer
 from pathlib import Path
+
+from live_progress import validate_live,canonical_live,live_document,LIVE_LIMIT,LIVE_TTL,LIVE_INTERVAL,LIVE_HOURLY
 
 LIMIT=1048576
 CODES={'learning_test_start','learning_test_end','learning_test_interrupted','step','task_finished','verified_progress','need_human','need_grant','renderer_gone','service_timeout','job_error','watchdog','action_outcome','learning_recheck','learning_recovery','learning_outcome','net_blocked','net_unknown_mutation'}
@@ -72,6 +75,9 @@ class Store:
   with self.connect() as db:
    db.executescript('CREATE TABLE IF NOT EXISTS codes(hash TEXT PRIMARY KEY,expires REAL); CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY,hash TEXT); CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY,device TEXT,hash TEXT,received REAL);')
   os.chmod(self.path/'receiver.sqlite',0o600)
+  with self.connect() as db:
+   db.executescript('CREATE TABLE IF NOT EXISTS live_receipts(device TEXT,test_id TEXT,sequence INTEGER,hash TEXT,received REAL,PRIMARY KEY(device,test_id,sequence)); CREATE TABLE IF NOT EXISTS live_rate(device TEXT,test_id TEXT,sequence INTEGER,received REAL,PRIMARY KEY(device,test_id,sequence));')
+  (self.path/'live').mkdir(exist_ok=True);os.chmod(self.path/'live',0o750)
  def connect(self):
   db=sqlite3.connect(self.path/'receiver.sqlite',timeout=20);db.execute('PRAGMA journal_mode=WAL');db.execute('PRAGMA synchronous=FULL');return db
  def issue_code(self,now=None):
@@ -91,7 +97,7 @@ class Store:
    db.execute('BEGIN IMMEDIATE');row=db.execute('SELECT hash FROM devices WHERE id=?',(device,)).fetchone();check(row and hmac.compare_digest(row[0],digest(token)),401)
    old=db.execute('SELECT device,hash,received FROM reports WHERE id=?',(r['report_id'],)).fetchone()
    if old:
-    check(old[0]==device and old[1]==sha,409);return {'report_id':r['report_id'],'sha256':sha,'received_at_utc':utc(old[2])}
+    check(old[0]==device and old[1]==sha,409);self._clear_completed_live(device,r['report_id']);return {'report_id':r['report_id'],'sha256':sha,'received_at_utc':utc(old[2])}
    count=db.execute('SELECT count(*) FROM reports WHERE device=? AND received>?',(device,now-3600)).fetchone()[0];check(count<6,429)
    receipt={'report_id':r['report_id'],'sha256':sha,'received_at_utc':utc(now)}
    destination=self.path/'outbox'/(r['report_id']+'.json')
@@ -106,7 +112,86 @@ class Store:
    try:os.fsync(fd)
    finally:os.close(fd)
    db.execute('INSERT INTO reports VALUES(?,?,?,?)',(r['report_id'],device,sha,now))
+   self._clear_completed_live(device,r['report_id'])
   return receipt
+ def _clear_completed_live(self,device,report_id):
+  # Optional cleanup must never change the final report's durable acknowledgement.
+  destination=self.path/'live'/(device+'.json')
+  try:
+   if destination.exists() and live_document(destination.read_bytes())['progress']['test_id']==report_id:
+    destination.unlink()
+    fd=os.open(destination.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+  except (OSError,Failure,ValueError,TypeError,KeyError):pass
+ def accept_live(self,device,token,p,now=None):
+  now=time.time() if now is None else now
+  # Authenticate before touching live state, rate records or filesystem data.
+  with self.connect() as db:
+   row=db.execute('SELECT hash FROM devices WHERE id=?',(device,)).fetchone()
+   check(type(token) is str and row and hmac.compare_digest(row[0],digest(token)),401)
+   validate_live(p);raw=canonical_live(p);sha=hashlib.sha256(raw).hexdigest()
+   db.execute('BEGIN IMMEDIATE')
+   destination=self.path/'live'/(device+'.json');latest=None
+   if destination.exists():
+    check(destination.is_file() and not destination.is_symlink(),409)
+    latest=live_document(destination.read_bytes());check(latest['receipt']['device_id']==device,409)
+    received=datetime.fromisoformat(latest['receipt']['received_at_utc']).timestamp()
+    if received<now-LIVE_TTL:latest=None
+    else:
+     # Recover a file fsynced before a process crash rolled back SQLite.
+     # A previous attempt may have failed at directory fsync. Re-establish
+     # durability before recovering or acknowledging the orphan receipt.
+     with destination.open('rb') as file:os.fsync(file.fileno())
+     fd=os.open(destination.parent,os.O_RDONLY|os.O_DIRECTORY)
+     try:os.fsync(fd)
+     finally:os.close(fd)
+     r=latest['receipt']
+     db.execute('INSERT OR IGNORE INTO live_receipts VALUES(?,?,?,?,?)',(device,r['test_id'],r['sequence'],r['sha256'],received))
+     db.execute('INSERT OR IGNORE INTO live_rate VALUES(?,?,?,?)',(device,r['test_id'],r['sequence'],received))
+   old=db.execute('SELECT hash,received FROM live_receipts WHERE device=? AND test_id=? AND sequence=? AND received>=?',(device,p['test_id'],p['sequence'],now-LIVE_TTL)).fetchone()
+   if old:
+    check(old[0]==sha,409)
+    return {'device_id':device,'test_id':p['test_id'],'sequence':p['sequence'],'sha256':sha,'received_at_utc':utc(old[1])}
+   check(not db.execute('SELECT 1 FROM reports WHERE id=? AND device=?',(p['test_id'],device)).fetchone(),409)
+   finishing=False
+   if latest:
+    previous=latest['progress']
+    if previous['test_id']==p['test_id']:
+     check(all(previous[k]==p[k] for k in ('app_revision','version_code','started_at_utc')),409)
+     check(previous['state']=='RUNNING' and p['sequence']>previous['sequence'],409)
+     finishing=p['state']=='FINISHED'
+    else:
+     seen=db.execute('SELECT 1 FROM live_receipts WHERE device=? AND test_id=? AND received>=?',(device,p['test_id'],now-LIVE_TTL)).fetchone()
+     check(not seen,409)
+     check(datetime.fromisoformat(p['started_at_utc'].replace('Z','+00:00'))>=datetime.fromisoformat(previous['started_at_utc'].replace('Z','+00:00')),409)
+   count,last=db.execute('SELECT count(*),max(received) FROM live_rate WHERE device=? AND received>?',(device,now-3600)).fetchone()
+   check(count<LIVE_HOURLY,429);check(last is None or now-last>=LIVE_INTERVAL or finishing,429)
+   receipt={'device_id':device,'test_id':p['test_id'],'sequence':p['sequence'],'sha256':sha,'received_at_utc':utc(now)}
+   temporary=destination.with_suffix('.tmp')
+   # Restrict access when created, before writing any content.
+   fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o640)
+   with os.fdopen(fd,'wb') as file:
+    os.fchmod(file.fileno(),0o640);file.write(canonical({'progress':p,'receipt':receipt}));file.flush();os.fsync(file.fileno())
+   temporary.replace(destination)
+   fd=os.open(destination.parent,os.O_RDONLY|os.O_DIRECTORY)
+   try:os.fsync(fd)
+   finally:os.close(fd)
+   db.execute('INSERT INTO live_receipts VALUES(?,?,?,?,?)',(device,p['test_id'],p['sequence'],sha,now))
+   db.execute('INSERT INTO live_rate VALUES(?,?,?,?)',(device,p['test_id'],p['sequence'],now))
+  return receipt
+ def prune_live(self,now=None):
+  now=time.time() if now is None else now
+  with self.connect() as db:
+   db.execute('BEGIN IMMEDIATE')
+   for file in (self.path/'live').iterdir():
+    if file.suffix=='.json':
+     try:received=datetime.fromisoformat(live_document(file.read_bytes())['receipt']['received_at_utc']).timestamp()
+     except (Failure,ValueError,KeyError,TypeError):received=file.lstat().st_mtime
+     if received<now-LIVE_TTL:file.unlink(missing_ok=True)
+    elif file.suffix=='.tmp' and file.lstat().st_mtime<now-LIVE_TTL:file.unlink(missing_ok=True)
+   db.execute('DELETE FROM live_receipts WHERE received<?',(now-LIVE_TTL,))
+   db.execute('DELETE FROM live_rate WHERE received<=?',(now-3600,))
  def prune(self,now=None):
   now=time.time() if now is None else now
   with self.connect() as db:
@@ -134,14 +219,14 @@ class Handler(BaseHTTPRequestHandler):
   try:
    check(self.headers.get('X-Forwarded-Proto')=='https',403)
    check(not self.headers.get('Transfer-Encoding'),400)
-   length=int(self.headers.get('Content-Length','0'));check(0<length<=LIMIT,413)
+   length=int(self.headers.get('Content-Length','0'));check(0<length<=(LIVE_LIMIT if self.path=='/v1/live' else LIMIT),413)
    check(self.headers.get('Content-Type','').split(';')[0]=='application/json',415)
    r=strict_load(self.rfile.read(length))
    if self.path=='/v1/pair':
     exact(r,{'code','credential'});device=self.store.pair(r['code'],r['credential']);self.response(201,{'device_id':device});return
-   check(self.path=='/v1/reports',404)
+   check(self.path in {'/v1/reports','/v1/live'},404)
    auth=self.headers.get('Authorization','');match=re.fullmatch(r'Bearer ([0-9a-f-]{36})\.([A-Za-z0-9_-]{43})',auth);check(match is not None,401)
-   receipt=self.store.accept(match[1],match[2],r);self.response(200,receipt)
+   receipt=(self.store.accept_live if self.path=='/v1/live' else self.store.accept)(match[1],match[2],r);self.response(200,receipt)
   except Failure as error:self.response(error.status,{'error':'request_rejected'})
   except (ValueError,TypeError,KeyError,OverflowError):self.response(400,{'error':'invalid_schema'})
   except Exception:self.response(503,{'error':'storage_unavailable'})
@@ -149,8 +234,9 @@ class Handler(BaseHTTPRequestHandler):
 def main():
  parser=argparse.ArgumentParser();parser.add_argument('--state',type=Path,required=True);parser.add_argument('--issue-code',action='store_true');args=parser.parse_args();store=Store(args.state)
  if args.issue_code:print(store.issue_code());return
- Handler.store=store;server=HTTPServer(('127.0.0.1',8765),Handler);server.timeout=30;pruned=0
+ Handler.store=store;server=HTTPServer(('127.0.0.1',8765),Handler);server.timeout=30;pruned=0;live_pruned=0
  while True:
   if time.monotonic()-pruned>3600:store.prune();pruned=time.monotonic()
+  if time.monotonic()-live_pruned>=30:store.prune_live();live_pruned=time.monotonic()
   server.handle_request()
 if __name__=='__main__':main()

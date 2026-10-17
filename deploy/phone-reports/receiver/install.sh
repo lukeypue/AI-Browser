@@ -24,6 +24,7 @@ if ! id aibrowserreceiver >/dev/null 2>&1; then useradd --system --gid aibrowser
 install -d -o root -g root -m 755 /opt/aibrowser-phone-receiver /var/lib/aibrowser-acme
 install -d -o aibrowserreceiver -g aibrowserupload -m 750 /var/lib/aibrowser-phone-receiver
 install -m 644 "$source_dir/receiver.py" /opt/aibrowser-phone-receiver/receiver.py
+install -m 644 "$source_dir/live_progress.py" /opt/aibrowser-phone-receiver/live_progress.py
 install -m 644 "$source_dir/aibrowser-phone-receiver.service" /etc/systemd/system/aibrowser-phone-receiver.service
 cat > /etc/nginx/sites-available/reports.ryzod.com <<'NGINX'
 server {
@@ -82,6 +83,9 @@ systemctl enable --now certbot.timer
 # Publish only through the existing repository-scoped uploader and shared lock.
 install -m 644 "$source_dir/receiver.py" /opt/ai-browser-report-sharing/receiver.py
 install -m 644 "$source_dir/publisher.py" /opt/ai-browser-report-sharing/publisher.py
+install -m 644 "$source_dir/live_progress.py" /opt/ai-browser-report-sharing/live_progress.py
+install -m 644 "$source_dir/live_publisher.py" /opt/ai-browser-report-sharing/live_publisher.py
+install -m 644 "$source_dir/live_triage.py" /opt/ai-browser-report-sharing/live_triage.py
 cp -n /opt/ai-browser-report-sharing/export_reports.py /opt/ai-browser-report-sharing/export_reports.py.before-phone-reports
 install -m 644 "$source_dir/synthetic_writer.py" /opt/ai-browser-report-sharing/export_reports.py.next
 mv /opt/ai-browser-report-sharing/export_reports.py.next /opt/ai-browser-report-sharing/export_reports.py
