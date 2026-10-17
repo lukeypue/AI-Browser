@@ -4,3 +4,7 @@
 ai-browser/.gradle/
 ai-browser/**/.gradle/
 ai-browser/**/build/
+
+# Generated Python bytecode from server verification
+__pycache__/
+*.py[cod]
