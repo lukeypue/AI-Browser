@@ -210,6 +210,15 @@ class ControllerTests(unittest.TestCase):
    with self.assertRaises(OSError):c.run_once()
   self.assertIn('stop',self.fake.calls)
   self.assertTrue((c.state/'journal.json').is_file())
+ def test_finalization_failure_is_not_mislabeled_as_memory_rejection(self):
+  seen=False
+  def hook(phase):
+   nonlocal seen
+   if phase=='FINALIZED' and not seen:seen=True;raise OSError('private finalization failure')
+  c=self.controller(hook=hook);r=c.run_once()
+  self.assertEqual(r['status'],'FAILED');self.assertIsNotNone(r['diagnostics'])
+  evidence=json.loads((c.state/'runtime-failures'/(r['cycle_id']+'.json')).read_text())
+  self.assertEqual(evidence['stage'],'FINALIZE');self.assertEqual(evidence['reason'],'OS_ERROR')
  def test_conflicting_finalized_uuid_never_overwrites_outbox(self):
   def crash(phase):
    if phase=='FINALIZED':raise SystemExit()

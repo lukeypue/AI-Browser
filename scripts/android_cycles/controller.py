@@ -155,7 +155,8 @@ class Controller:
                    local['diagnostics']['version_code']==self.config['version_code'])
     journal['local']=local;journal['cycle_elapsed_ms']=self.elapsed(journal);self.stage(journal,'APP_COMPLETED')
     if local['status']!='COMPLETED':
-     self.transport.stop();return self.finalize(journal,self.report(journal,local['status'],local))
+     stage='APP_STOP';self.transport.stop()
+     stage='FINALIZE';return self.finalize(journal,self.report(journal,local['status'],local))
     fingerprint=local['memory_after']['fingerprint'];stage='HOST_DURATION'
     _wire.require(journal['boot_id']==self.boot_id() and journal['cycle_elapsed_ms']>=1800000)
     stage='APP_STOP';self.transport.stop()
@@ -171,7 +172,7 @@ class Controller:
     stage='EMULATOR_MEMORY';observed=emulator['memory_after']['fingerprint']
     _wire.require(observed==fingerprint);self.stage(journal,'EMULATOR_RESTARTED')
     restart=dict(app_restart_verified=True,emulator_restart_verified=True,before_fingerprint=fingerprint,after_app_fingerprint=app['memory_after']['fingerprint'],after_emulator_fingerprint=emulator['memory_after']['fingerprint'],verified_at_utc=self.now())
-    return self.finalize(journal,self.report(journal,'COMPLETED',local,restart))
+    stage='FINALIZE';return self.finalize(journal,self.report(journal,'COMPLETED',local,restart))
    except (OSError,ValueError,TimeoutError,__import__('subprocess').SubprocessError) as error:
     # Retain only an app result that already passed closed-schema and source pins.
     # A restart rejection never becomes COMPLETED, and untrusted probe/exception
