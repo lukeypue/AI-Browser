@@ -252,6 +252,14 @@ def prepare_android_cycles(outbox,repository):
     if outbox.exists():
         info=outbox.stat();require(outbox.is_dir() and info.st_uid==0 and info.st_gid==grp.getgrnam('aibrowserupload').gr_gid and info.st_mode&0o027==0,'outbox directory ownership/permissions')
         for file in sorted(outbox.iterdir()):
+            # Controller fsync/close can trigger publication before its atomic rename.
+            # Inspect only metadata of its exact temporary name; never read partial JSON.
+            if re.fullmatch(r'\.'+UUID_PATTERN+r'\.json\.'+UUID_PATTERN+r'\.tmp',file.name):
+                try:temporary=file.lstat()
+                except FileNotFoundError:continue  # Atomic rename already finished.
+                require(stat.S_ISREG(temporary.st_mode) and temporary.st_nlink==1 and temporary.st_size<=ANDROID_LIMIT and temporary.st_uid==0 and temporary.st_gid==grp.getgrnam('aibrowserupload').gr_gid and temporary.st_mode&0o027==0,'outbox temporary ownership/permissions')
+                continue
+            require(re.fullmatch(UUID_PATTERN+r'\.json',file.name),'cycle filename')
             doc,payload=cycle_document(file,True);id=doc['cycle_id'];entry=cycle_entry(doc,payload)
             destination=target/(id+'.json')
             if destination.exists() or destination.is_symlink():

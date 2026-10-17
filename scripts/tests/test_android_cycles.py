@@ -24,6 +24,71 @@ class ControllerTests(unittest.TestCase):
   self.config={k:r[k] for k in ('source_revision','version_code','app_apk_sha256','test_apk_sha256','fixture_sha256')}
  def tearDown(self):self.temp.cleanup()
  def controller(self,**kw):return Controller(self.config,self.root/'state',self.root/'outbox',self.root/'receipts',self.fake,monotonic=self.clock,boot_id=lambda:'boot1',**kw)
+ def test_crash_owned_temps_cleaned_without_touching_final_files(self):
+  import os
+  c=self.controller();cycle=str(uuid.uuid4())
+  with c.locked():
+   state_temp=c.state/('.journal.json.'+str(uuid.uuid4())+'.tmp')
+   outbox_temp=c.outbox/('.'+cycle+'.json.'+str(uuid.uuid4())+'.tmp')
+   state_temp.write_bytes(b'partial');state_temp.chmod(0o600)
+   outbox_temp.write_bytes(b'x'*(11*1048576));outbox_temp.chmod(0o640);os.chown(outbox_temp,0,c.upload_gid)
+   journal=c.state/'journal.json';journal.write_bytes(b'journal')
+   final=c.outbox/(cycle+'.json');final.write_bytes(b'final')
+  with c.locked():
+   self.assertFalse(state_temp.exists());self.assertFalse(outbox_temp.exists())
+   self.assertEqual(journal.read_bytes(),b'journal');self.assertEqual(final.read_bytes(),b'final')
+ def test_receipt_temp_cleanup_preserves_nonowned_state_names(self):
+  c=self.controller();cycle=str(uuid.uuid4())
+  with c.locked():
+   archive=c.state/'published';archive.mkdir(mode=0o700)
+   temp=archive/('.'+cycle+'.json.'+str(uuid.uuid4())+'.tmp');temp.write_bytes(b'partial');temp.chmod(0o600)
+   final=archive/(cycle+'.json');final.write_bytes(b'receipt')
+   unknown=c.state/'.journal.json.not-a-uuid.tmp';unknown.write_bytes(b'preserve')
+  with c.locked():
+   self.assertFalse(temp.exists());self.assertEqual(final.read_bytes(),b'receipt')
+   self.assertEqual(unknown.read_bytes(),b'preserve')
+ def test_orphan_cleanup_occurs_only_after_cycle_lock(self):
+  c=self.controller()
+  with c.locked():
+   temp=c.state/('.journal.json.'+str(uuid.uuid4())+'.tmp');temp.write_bytes(b'partial');temp.chmod(0o600)
+   with self.assertRaises(Busy):
+    with self.controller().locked():pass
+   self.assertTrue(temp.exists())
+ def test_orphan_cleanup_rejects_symlink_hardlink_foreign_owner_and_bad_mode(self):
+  import os
+  for kind in ('symlink','hardlink','owner','mode'):
+   c=self.controller()
+   with c.locked():
+    temp=c.outbox/('.'+str(uuid.uuid4())+'.json.'+str(uuid.uuid4())+'.tmp')
+    outside=self.root/('outside-'+kind);outside.write_bytes(b'preserve')
+    if kind=='symlink':temp.symlink_to(outside)
+    elif kind=='hardlink':os.link(outside,temp)
+    else:
+     temp.write_bytes(b'partial');temp.chmod(0o640)
+     if kind=='owner':os.chown(temp,65534,c.upload_gid)
+     else:temp.chmod(0o666)
+   with self.subTest(kind=kind):
+    with self.assertRaises(ValueError):
+     with c.locked():pass
+    self.assertTrue(temp.is_symlink() or temp.exists());self.assertEqual(outside.read_bytes(),b'preserve')
+   temp.unlink()
+ def test_unknown_temp_cannot_bypass_pending_capacity(self):
+  c=self.controller()
+  with c.locked():
+   temp=c.outbox/'.not-owned.tmp';temp.write_bytes(b'x')
+  with self.assertRaises(ValueError):c.run_once()
+  self.assertEqual(temp.read_bytes(),b'x')
+ def test_cleanup_rejects_foreign_private_directory_owner(self):
+  import os
+  c=self.controller()
+  with c.locked():
+   temp=c.state/('.journal.json.'+str(uuid.uuid4())+'.tmp');temp.write_bytes(b'partial');temp.chmod(0o600)
+  os.chown(c.state,65534,0)
+  try:
+   with self.assertRaises(ValueError):
+    with c.locked():pass
+   self.assertTrue(temp.exists())
+  finally:os.chown(c.state,0,0)
  def test_full_duration_two_restart_proofs(self):
   c=self.controller();r=c.run_once();self.assertEqual(r['status'],'COMPLETED')
   self.assertEqual(self.fake.calls,['cycle','stop','probe','restart','probe']);self.assertEqual(json.loads(next(c.outbox.glob('*.json')).read_text()),r)

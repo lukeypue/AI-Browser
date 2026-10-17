@@ -1,5 +1,5 @@
 """Durable monotonic Android cycles. Incomplete journal work never counts complete."""
-import fcntl,grp,hashlib,json,os,stat,time,uuid
+import fcntl,grp,hashlib,json,os,re,stat,time,uuid
 from contextlib import contextmanager
 from datetime import datetime,timezone
 from pathlib import Path
@@ -42,6 +42,32 @@ def read_json(path,limit=_wire.LIMIT):
  if limit==_wire.LIMIT:return strict_load(raw)
  # Journals can contain both local and finalized wire copies.
  return json.loads(raw,parse_constant=lambda _:(_ for _ in ()).throw(ValueError('invalid_number')))
+UUID_PATTERN=r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+def cleanup_owned_temps(path,kind,upload_gid):
+ # Caller holds cycle.lock. Directory FDs and no-follow stat keep cleanup
+ # inside the trusted directory; unknown names and final files are untouched.
+ safe_path(path)
+ fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try:
+  directory=os.fstat(fd)
+  private=kind=='journal' or kind=='receipt'
+  _wire.require(stat.S_ISDIR(directory.st_mode) and directory.st_uid==0)
+  _wire.require(stat.S_IMODE(directory.st_mode)==(0o700 if private else 0o750))
+  _wire.require(directory.st_gid in ({0,upload_gid} if private else {upload_gid}))
+  pattern=(r'\.journal\.json\.'+UUID_PATTERN+r'\.tmp') if kind=='journal' else (r'\.'+UUID_PATTERN+r'\.json\.'+UUID_PATTERN+r'\.tmp')
+  candidates=[]
+  for name in os.listdir(fd):
+   if re.fullmatch(pattern,name) is None:continue
+   info=os.stat(name,dir_fd=fd,follow_symlinks=False)
+   _wire.require(stat.S_ISREG(info.st_mode) and info.st_uid==0 and info.st_nlink==1)
+   # SIGKILL may land between create/chmod/chown. Those intermediate
+   # modes/groups remain private or uploader-readable and contain no links.
+   _wire.require(stat.S_IMODE(info.st_mode) in ({0o600} if private else {0o600,0o640}))
+   _wire.require(info.st_gid in {0,upload_gid})
+   candidates.append(name)
+  for name in candidates:os.unlink(name,dir_fd=fd)
+  if candidates:os.fsync(fd)
+ finally:os.close(fd)
 def utc():return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
 def boot_id():return Path('/proc/sys/kernel/random/boot_id').read_text().strip()
 class Controller:
@@ -60,6 +86,10 @@ class Controller:
   try:
    try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
    except BlockingIOError as error:raise Busy('cycle_locked') from error
+   cleanup_owned_temps(self.state,'journal',self.upload_gid)
+   cleanup_owned_temps(self.outbox,'report',self.upload_gid)
+   archive=safe_path(self.state/'published')
+   if archive.exists():cleanup_owned_temps(archive,'receipt',self.upload_gid)
    yield
   finally:os.close(fd)
  def stage(self,journal,phase):
@@ -71,7 +101,6 @@ class Controller:
   files=[];total=0
   for p in self.outbox.iterdir():
    safe_path(p)
-   if p.name.startswith('.') and p.name.endswith('.tmp'):continue
    _wire.require(p.suffix=='.json');_wire.identifier(p.stem)
    raw=read_bytes(p);files.append(p);total+=len(raw)
   _wire.require(len(files)<=10 and total<=10*1048576)

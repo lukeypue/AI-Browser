@@ -113,4 +113,23 @@ class AndroidPublisherTests(unittest.TestCase):
   self.assertEqual(pending.read_bytes(),original_outbox);self.assertEqual(list(self.receipts.iterdir()),[])
   self.assertEqual((city/'latest.json').read_bytes(),b'{"city":true}');self.assertEqual((phone/'index.json').read_bytes(),b'{"phone":true}')
 
+ def test_inflight_controller_temporary_is_not_read_or_published(self):
+  self.put();temporary=self.put(name='.'+ID+'.json.aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.tmp');temporary.write_bytes(b'incomplete private JSON')
+  original_open=os.open
+  def guarded_open(path,*args,**kwargs):
+   self.assertNotEqual(Path(path),temporary,'controller temporary file must never be opened')
+   return original_open(path,*args,**kwargs)
+  with patch.object(w.os,'open',side_effect=guarded_open):records=self.prepare()
+  self.assertEqual([r['cycle_id'] for r in records],[ID]);self.assertTrue(temporary.exists())
+  self.assertEqual(set(p.name for p in (self.repo/'android-cycles').iterdir()),{ID+'.json','index.json'})
+  (self.repo/'reports').mkdir();(self.repo/'reports/latest.json').write_text('existing city continues')
+ def test_inflight_temporary_requires_exact_name_and_safe_metadata(self):
+  name='.'+ID+'.json.aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.tmp';temporary=self.put(name=name)
+  temporary.chmod(0o666)
+  with self.assertRaises(ValueError):self.prepare()
+  temporary.unlink();temporary.symlink_to(self.root/'elsewhere')
+  with self.assertRaises(ValueError):self.prepare()
+  temporary.unlink();self.put(name='.'+ID+'.json.not-a-uuid.tmp')
+  with self.assertRaises(ValueError):self.prepare()
+
 if __name__=='__main__':unittest.main()
