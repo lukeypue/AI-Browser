@@ -6,4 +6,5 @@ object ServerLabRuntime {
     val active: Boolean get() = false
     fun profiles(default: List<SiteProfile>): List<SiteProfile> = default
     fun observe(report: JsonObject) {}
+    fun beginTest(id: String) {}
 }

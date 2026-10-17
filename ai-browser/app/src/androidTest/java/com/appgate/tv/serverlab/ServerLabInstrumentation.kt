@@ -48,7 +48,7 @@ class ServerLabInstrumentation : Instrumentation() {
         try {
             check(BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB)
             check(targetContext.packageName=="com.aibrowser.universal.serverlab")
-            ServerLabRuntime.install(targetContext) { r -> report.set(r); complete.countDown() }
+            ServerLabRuntime.install(targetContext, ServerLabRuntime.ReportIdentityGate { r -> report.set(r); complete.countDown() })
             // Explicitly disable transports; this never reads a planner key.
             PhoneSharing(targetContext).setEnabled(false)
             PlannerKeyStore.setTeacherEnabled(targetContext,false)

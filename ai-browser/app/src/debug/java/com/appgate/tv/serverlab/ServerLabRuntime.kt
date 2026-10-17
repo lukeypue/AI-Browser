@@ -10,16 +10,31 @@ import java.security.MessageDigest
 
 /** Debug-only seam. The Gradle property alone never activates fixture execution. */
 object ServerLabRuntime {
-    @Volatile private var observer: ((JsonObject) -> Unit)? = null
+    /** Installed before service recovery, armed synchronously only by beginPhoneTest's new UUID. */
+    class ReportIdentityGate(private val listener: (JsonObject) -> Unit) {
+        private var expectedId: String? = null
+        @Synchronized fun begin(id: String) {
+            require(java.util.UUID.fromString(id).toString() == id)
+            expectedId = id
+        }
+        @Synchronized fun observe(report: JsonObject) {
+            val id = expectedId ?: return
+            if (report.optString("report_id") != id) return
+            expectedId = null
+            listener(report)
+        }
+    }
+    @Volatile private var observer: ReportIdentityGate? = null
     val active: Boolean get() = BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB && observer != null
-    fun install(context: Context, listener: (JsonObject) -> Unit) {
+    fun install(context: Context, listener: ReportIdentityGate) {
         check(BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB)
         check(context.packageName == "com.aibrowser.universal.serverlab")
         check(observer == null)
         observer = listener
     }
     fun detach() { observer = null }
-    fun observe(report: JsonObject) { if (active) observer?.invoke(report) }
+    fun observe(report: JsonObject) { if (active) observer?.observe(report) }
+    fun beginTest(id: String) { if (active) observer?.begin(id) }
     fun profiles(default: List<SiteProfile>): List<SiteProfile> {
         if (!active) return default
         return listOf("classifieds", "cars", "marketplace", "offerup").map { key ->

@@ -98,6 +98,7 @@ class DiagnosticsLog(private val context: Context) {
         val startedRevision = com.appgate.tv.BuildConfig.DIAGNOSTICS_REVISION
         val startedVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
         phoneTestId = id
+        com.appgate.tv.serverlab.ServerLabRuntime.beginTest(id)
         writer.append {
             phonePrefs.edit().putString("id", id).putLong("elapsed", elapsed).putLong("wall", wall)
                 .putInt("boot", startedBoot).putInt("test_trim", trimGeneration).putLong("consent_generation", owner).putLong("live_elapsed",0)
