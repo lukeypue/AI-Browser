@@ -339,7 +339,7 @@ class BrainService : Service() {
             main.post(liveHeartbeat)
         }
         val includeAccountSites = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("learn_account_sites", false)
-        val sites = SiteProfiles.training.filter { includeAccountSites || !it.requiresLogin }
+        val sites = com.appgate.tv.serverlab.ServerLabRuntime.profiles(SiteProfiles.training.filter { includeAccountSites || !it.requiresLogin })
         val sess = LearningSession(eng, memory, engineEvents, sites)
         sess.siteIndex = getSharedPreferences("brain_jobs", MODE_PRIVATE).getInt("learning_site_index", 0)
         learning = sess
@@ -503,7 +503,14 @@ class BrainService : Service() {
 
     // ------------------------------------------------------------------ internals
 
+    /** Debug instrumentation only: queues behind the actual engine job, including cancellation cleanup. */
+    fun serverLabBarrier(): Future<*> {
+        check(com.appgate.tv.serverlab.ServerLabRuntime.active)
+        return engineThread.submit {}
+    }
+
     private fun plannerOrNull(): Planner? {
+        if (com.appgate.tv.serverlab.ServerLabRuntime.active) return null
         if (!PlannerKeyStore.teacherEnabled(this) || !memory.teacherBudget.snapshot(PlannerKeyStore.unrestricted(this)).allowed) return null
         val config = PlannerKeyStore.config(this) ?: return null
         val observer = com.appgate.brain.planner.BudgetedTeacher(memory.teacherBudget, { PlannerKeyStore.teacherEnabled(this) }, { PlannerKeyStore.unrestricted(this) }) { usage ->

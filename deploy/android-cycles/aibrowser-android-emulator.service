@@ -1,0 +1,27 @@
+[Unit]
+Description=Isolated AI Browser Android synthetic test emulator
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/var/lib/aibrowser-android-lab/home
+Environment=ANDROID_AVD_HOME=/var/lib/aibrowser-android-lab/avd
+Environment=ANDROID_SDK_ROOT=/opt/ai-browser-dev/android-sdk
+Environment=ANDROID_HOME=/opt/ai-browser-dev/android-sdk
+Environment=PATH=/opt/ai-browser-dev/android-sdk/platform-tools:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/var/lib/aibrowser-android-lab
+ExecStart=/opt/ai-browser-dev/android-sdk/emulator/emulator -avd AI_Browser_Server_API35 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -accel on -cores 2 -memory 1536 -skin 480x800 -dpi-device 160 -port 5580
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+CPUQuota=200%
+MemoryMax=4096M
+TasksMax=512
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/aibrowser-android-lab
+InaccessiblePaths=-/root -/var/lib/aibrowser-phone-receiver -/var/lib/aibrowser-practice-city-upload

@@ -157,6 +157,10 @@ class DiagnosticsLog(private val context: Context) {
                         sharing.enqueueLive(report,owner,finishedLiveOwner)
                     }.onFailure { sharing.liveSnapshotFailed() }
                 }
+                if (com.appgate.tv.serverlab.ServerLabRuntime.active) {
+                    val strict = PhoneReportExporter.export(phoneContext(id), phoneEvents(), finishedElapsed, finishedWall, trimGeneration, interrupted, com.appgate.tv.BuildConfig.DIAGNOSTICS_REVISION, context.packageManager.getPackageInfo(context.packageName, 0).versionCode, currentBoot = finishedBoot)
+                    com.appgate.tv.serverlab.ServerLabRuntime.observe(strict)
+                }
                 if (sharing.enabled() && sharing.generation() == owner) {
                     val test = PhoneTestContext(id, phonePrefs.getLong("elapsed", 0), phonePrefs.getLong("wall", 0), phonePrefs.getInt("test_trim", 0), phonePrefs.getInt("boot", -1),
                         appRevision = phonePrefs.getString("test_revision", null),

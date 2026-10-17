@@ -1,0 +1,28 @@
+[Unit]
+Description=Continuous actual Android cycles against synthetic HTTPS fixtures
+Wants=aibrowser-android-emulator.service
+After=network-online.target aibrowser-android-emulator.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+[Service]
+Type=simple
+Environment=HOME=/var/lib/aibrowser-android-lab/home
+Environment=PATH=/opt/ai-browser-dev/android-sdk/platform-tools:/usr/local/bin:/usr/bin:/bin
+Environment=LANG=C.UTF-8
+WorkingDirectory=/opt/aibrowser-android-cycles
+ExecStart=/usr/bin/python3 /opt/aibrowser-android-cycles/android-cycle.py
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+MemoryMax=192M
+TasksMax=64
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/aibrowser-android-lab
+InaccessiblePaths=-/root -/var/lib/aibrowser-phone-receiver -/var/lib/aibrowser-practice-city-upload
+[Install]
+WantedBy=multi-user.target

@@ -13,3 +13,9 @@ Success: persistent verified skills survive process restart, improve held-out su
 The owner reports that human login/verification for the current sites is already completed and recorded. Treat it as done; preserve and reuse established sessions where available. Do not repeatedly request setup again or repeat generic boundary reminders in updates. Intended behavior is one initial human setup followed by continued use of that established session.
 
 Only raise a specific human-action issue after evidence of a missing/unavailable session, expired login, new challenge, or new site. A fresh isolated server-browser probe is not evidence that the owner's existing session was lost. Phone/server sessions remain distinct unless a supported authorized connection actually shares them. Do not read or copy credentials/cookies to bridge them.
+
+## Standing objective and approvals — owner reaffirmation
+
+Every turn serves the same objective: a reusable browser brain that retains learning, stops repeating failed approaches, improves from verified evidence, and runs continuous server experiments. Finish the current four sites before expansion. Measured gains matter more than release counts.
+
+Continued implementation, authorized AI requests, server training, fixes, verification and the existing stable signed update pipeline are already approved. Completed password/login/CAPTCHA setup stays marked done; reuse established supported sessions. Do not repeatedly reopen approvals, request setup, or recite generic limitations. Default to diagnose, reproduce, fix, verify, retain and continue. Report actual progress. Escalate only a specific observed blocker requiring missing access or human action, stating exactly what is missing. Do not invent session availability or successful verification.
