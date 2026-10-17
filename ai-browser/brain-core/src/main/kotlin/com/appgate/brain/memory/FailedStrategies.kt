@@ -4,14 +4,13 @@ import com.appgate.brain.model.*
 import com.appgate.brain.perception.Vocabulary
 import com.appgate.brain.util.Hashing
 
-/** Bounded, content-free circuit breaker for overnight practice across task ledgers.
- * A changed control layout or a different procedure can be tried immediately. A repeated
- * failure history survives site retries; the site's thirty-second scheduler is unchanged.
- * Two failures hold the unchanged procedure for six hours, unless verification clears it.
+/** Bounded, content-free failure memory shared by ordinary tasks and practice.
+ * One failed concrete procedure is held across tasks, restarts and clock changes.
+ * Relevant changed controls or a different procedure remain eligible immediately.
+ * Repair-request pacing is separate: permission to ask is never permission to replay.
  */
 object FailedStrategies {
-    private const val WINDOW_MS = 6 * 60 * 60_000L
-    private const val LIMIT = 2
+    private const val REPAIR_LIMIT = 2
     private const val MAX_RECORDS = 64
 
     fun facet(key: String?): String? = key?.takeIf { it.removeSuffix("_min").removeSuffix("_max") in Vocabulary.facetLexicon }
@@ -41,31 +40,44 @@ object FailedStrategies {
         val controls = controlShape(sps, capability)
         val procedure = steps?.joinToString("|") {
             val f = it.facetKey?.let { k -> if (k.startsWith("$")) params[k.drop(1)] else k }
-            "${it.kind}:${it.role}:${facet(f)}:${it.submit}:${it.optional}"
+            // A changed bounded movement is a new approach; query/input text is not identity.
+            val movement = when (it.kind) {
+                StepKind.SCROLL -> it.arg?.toIntOrNull()?.coerceIn(-10000, 10000)?.takeIf { n -> n != 900 }?.let { n -> ":distance=$n" }.orEmpty()
+                StepKind.WAIT -> it.arg?.toIntOrNull()?.coerceIn(0, 10000)?.takeIf { n -> n != 1500 }?.let { n -> ":wait=$n" }.orEmpty()
+                else -> ""
+            }
+            "${it.kind}:${it.role}:${facet(f)}:${it.submit}:${it.optional}$movement"
         } ?: "planner"
-        // Never include names, input values, queries, URLs, listing keys or page text.
-        return Hashing.short("${sps.pageType}|${sps.dialogOpen}|${sps.resultKeys.isNotEmpty()}|$controls|$capability|$procedure")
+        // Target-specific failures must not blacklist every listing. Only the final
+        // opaque digest is retained, never names, queries, URLs, item IDs or page text.
+        val target = if (steps != null && capability in setOf("open_item", "expand_description", "go_back")) {
+            val explicit = params["item"] ?: steps.firstOrNull { it.role == Role.RESULT_ITEM }?.arg?.let {
+                if (it.startsWith("$")) params[it.drop(1)] else it
+            }
+            val identity = explicit ?: if (sps.pageType == PageType.DETAIL) sps.url else sps.resultKeys.sorted().joinToString("|")
+            "|target:" + Hashing.short(identity)
+        } else ""
+        return Hashing.short("${sps.pageType}|${sps.dialogOpen}|${sps.resultKeys.isNotEmpty()}|$controls|$capability|$procedure$target")
     }
 
     fun allowed(site: SiteModel, key: String, now: Long): Boolean {
-        prune(site, now)
-        return (site.strategyFailures[key]?.count ?: 0) < LIMIT
+        return (site.strategyFailures[key]?.count ?: 0) == 0
     }
 
     /** Admit the first alternative repair after thirty seconds, then back off
      * unchanged failed states (60s, 120s, 240s, at most 5 minutes). Relevant new
      * controls get a different key and remain eligible immediately. Concrete
-     * failed programs retain their six-hour hold; site probes keep their cadence. */
+     * failed programs stay held regardless of elapsed time; site probes keep their cadence. */
     fun repairAllowed(site: SiteModel, key: String, now: Long): Boolean {
-        if (allowed(site, key, now)) return true
-        val failure = site.strategyFailures.getValue(key)
+        val failure = site.strategyFailures[key] ?: return true
+        if (now < failure.at) return false
+        if (failure.count < REPAIR_LIMIT) return true
         val delay = (com.appgate.brain.engine.Curriculum.RETRY_MS *
-            (1L shl (failure.count - LIMIT).coerceIn(0, 4))).coerceAtMost(5 * 60_000L)
+            (1L shl (failure.count - REPAIR_LIMIT).coerceIn(0, 4))).coerceAtMost(5 * 60_000L)
         return now - failure.at >= delay
     }
 
     fun record(site: SiteModel, key: String, success: Boolean, now: Long) {
-        prune(site, now)
         if (success) site.strategyFailures.remove(key)
         else site.strategyFailures[key] = StrategyFailure(key, ((site.strategyFailures[key]?.count ?: 0) + 1).coerceAtMost(64), now)
         if (site.strategyFailures.size > MAX_RECORDS) {
@@ -73,7 +85,4 @@ object FailedStrategies {
         }
     }
 
-    private fun prune(site: SiteModel, now: Long) {
-        site.strategyFailures.entries.removeAll { now < it.value.at || now - it.value.at >= WINDOW_MS }
-    }
 }

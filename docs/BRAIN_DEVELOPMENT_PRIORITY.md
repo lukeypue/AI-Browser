@@ -1,0 +1,15 @@
+# Brain development priority — owner instruction, 2026-10-16
+
+Build the brain first. Prioritize continuous server-side training, retained reusable learning, fast parallel experiments, and repeated verified improvement. Product distribution and consent-screen design are deferred. The owner authorizes routine implementation, isolated experiments, authorized AI requests, checks, and server training deployment without repeated approvals.
+
+Preserve existing privacy controls, secrets, signing, human-only login/CAPTCHA/2FA/payment boundaries, and human Android installation. Preserve the running city and report uploader. Use actually verified AI connections. Do not create a duplicate review automation. Do not call fresh-memory synthetic scores cumulative learning or live-site mastery.
+
+Work on the four current profiles before expansion: KSL Classifieds, KSL Cars, Facebook Marketplace, OfferUp (inferred from the current profile group; additional profiles already exist but are outside the initial training scope). Server replicas must remain clearly labelled synthetic; this does not claim the real sites are mastered.
+
+Success: persistent verified skills survive process restart, improve held-out success or action efficiency relative to cold memory, retain previous capability performance, and require no teacher during evaluation. Source fixes still require reproduction and all relevant checks. Intermediate server learning does not require another APK release.
+
+## Completed human setup — owner clarification
+
+The owner reports that human login/verification for the current sites is already completed and recorded. Treat it as done; preserve and reuse established sessions where available. Do not repeatedly request setup again or repeat generic boundary reminders in updates. Intended behavior is one initial human setup followed by continued use of that established session.
+
+Only raise a specific human-action issue after evidence of a missing/unavailable session, expired login, new challenge, or new site. A fresh isolated server-browser probe is not evidence that the owner's existing session was lost. Phone/server sessions remain distinct unless a supported authorized connection actually shares them. Do not read or copy credentials/cookies to bridge them.

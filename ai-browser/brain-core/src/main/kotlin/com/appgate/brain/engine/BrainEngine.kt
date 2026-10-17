@@ -352,13 +352,13 @@ class BrainEngine(
                         val learned = memory.skills.reusable(sps, decision.skillId, skillParams(ledger) + decision.params, ledger)
                         val params = skillParams(ledger) + decision.params
                         val skill = listOfNotNull(learned, memory.skills.get(decision.skillId)).firstOrNull {
-                            ledger.goal.intent != GoalIntent.LEARN_SITE || FailedStrategies.allowed(site, FailedStrategies.key(sps, decision.skillId, it.body, params), clock())
+                            FailedStrategies.allowed(site, FailedStrategies.key(sps, decision.skillId, it.body, params), clock())
                         }
                         if (skill == null) {
                             ledger.attemptedSkills += decision.skillId
                             if (!askPlanner(ledger, sps, site, profile, "recently failed procedure; try another approach", decision.skillId)) {
                                 ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
-                                ledger.terminalReason = "recently failed approaches; retry after page change or cooldown"
+                                ledger.terminalReason = "known failed procedure; use a different approach or changed controls"
                             }
                             continue
                         }
@@ -448,11 +448,11 @@ class BrainEngine(
                 expect = s.expect.map { bindExpect(it, params) })
         }
         val page = latestPage
-        if (ledger.goal.intent == GoalIntent.LEARN_SITE && page != null &&
-            !FailedStrategies.allowed(memory.site(ledger.host), FailedStrategies.key(page, capability, ledger.currentProgram), clock())) {
+        if (page != null &&
+            !FailedStrategies.allowed(memory.site(ledger.host), FailedStrategies.key(page, capability, ledger.currentProgram, skillParams(ledger)), clock())) {
             ledger.currentProgram = emptyList()
             ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
-            ledger.terminalReason = "recently failed approaches; retry after page change or cooldown"
+            ledger.terminalReason = "known failed procedure; use a different approach or changed controls"
             memory.saveLedger(ledger)
             return
         }
@@ -533,7 +533,7 @@ class BrainEngine(
                     ledger.consecutiveFailures++
                     ledger.note("blocked: ${outcome.reason}")
                     events.step(ledger, "$stepDesc blocked: ${outcome.reason}", VerifyStatus.FAILED)
-                    finishProgram(ledger, before, site, success = false)
+                    finishProgram(ledger, before, site, success = false, rememberFailure = false)
                 }
             }
             is ExecOutcome.Failed -> {
@@ -563,7 +563,7 @@ class BrainEngine(
                 }
                 if (outcome.timeout) handleRendererFailure(ledger, outcome.reason, true)
                 else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "exec:" + outcome.reason.take(40)) }
-                finishProgram(ledger, before, site, success = false)
+                finishProgram(ledger, before, site, success = false, rememberFailure = !outcome.timeout && !stale)
             }
             is ExecOutcome.Done -> {
                 var after = outcome.after
@@ -614,7 +614,7 @@ class BrainEngine(
                     }
                     if (grounded.action.kind == ActionKind.SCROLL) ledger.scrollRoundsWithoutNew++   // exploration, not a failure
                     else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "unverified") }
-                    finishProgram(ledger, after, site, success = false)
+                    finishProgram(ledger, after, site, success = false, rememberFailure = result.status == VerifyStatus.FAILED && before.settle == com.appgate.brain.model.Settle.IDLE && after.settle == com.appgate.brain.model.Settle.IDLE)
                 }
                 memory.saveLedger(ledger)
             }
@@ -648,7 +648,10 @@ class BrainEngine(
         collectCards(ledger, after)
     }
 
-    private fun finishProgram(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, success: Boolean) {
+    private fun finishProgram(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, success: Boolean) =
+        finishProgram(ledger, sps, site, success, rememberFailure = true)
+
+    private fun finishProgram(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, success: Boolean, rememberFailure: Boolean) {
         val before = programBefore
         val required = ledger.currentProgram.indices.filter { !ledger.currentProgram[it].optional }
         val capabilityHolds = when (ledger.programCapability) {
@@ -668,8 +671,7 @@ class BrainEngine(
                 }
             }
             "open_item" -> sps.pageType == PageType.DETAIL
-            "load_more", "scroll_results", "next_page" -> ledger.goal.intent != GoalIntent.LEARN_SITE ||
-                before != null && sps.pageType == PageType.RESULTS &&
+            "load_more", "scroll_results", "next_page" -> before != null && sps.pageType == PageType.RESULTS &&
                 Verifier.holds(Postcondition.NewResults, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
             else -> true
         }
@@ -684,17 +686,22 @@ class BrainEngine(
         val terminalEnd = success && !capabilityHolds && before != null && required.isNotEmpty() &&
             required.all { it in programSatisfiedSteps } && ledger.programPost.isNotEmpty() &&
             ledger.programPost.all { Verifier.holds(it, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf()) } &&
-            ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.programCapability in setOf("load_more", "scroll_results", "next_page") &&
+            ledger.programCapability in setOf("load_more", "scroll_results", "next_page") &&
             Verifier.holds(Postcondition.EndOfResults, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
+        // Moving toward a footer is useful exploration, not proof of loading or failure.
+        // Transport uncertainty and interlock refusals cannot quarantine sound learned skills.
+        val advancingScroll = success && before != null && ledger.programCapability == "scroll_results" && sps.scrollY > before.scrollY
+        val neutral = terminalEnd || !verified && (!rememberFailure || advancingScroll)
         ledger.programCompleted = verified
         val source = ledger.programSource
-        if (ledger.goal.intent == GoalIntent.LEARN_SITE && before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked && !terminalEnd) {
-            FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability, ledger.currentProgram), verified, clock())
+        if (before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked && !neutral &&
+            (verified || rememberFailure) && (source.startsWith("skill:") || source in setOf("planner", "local"))) {
+            FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability, ledger.currentProgram, skillParams(ledger)), verified, clock())
             if (verified) FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability), true, clock())
         }
         if (source.startsWith("skill:")) {
             val id = source.removePrefix("skill:")
-            if (!terminalEnd) memory.skills.recordOutcome(id, ledger.host, verified)
+            if (!neutral) memory.skills.recordOutcome(id, ledger.host, verified)
             if (verified) {
                 ledger.successfulSkills += ledger.programCapability
                 Curriculum.markSkillVerified(site, ledger.programCapability, clock())
@@ -705,10 +712,10 @@ class BrainEngine(
             Curriculum.markSkillVerified(site, ledger.programCapability, clock())
         }
         if (terminalEnd) ledger.note("end of results verified; no new loading lesson credited")
-        if (!verified && success && !terminalEnd) ledger.consecutiveFailures++
-        if (!verified && !terminalEnd && (source.startsWith("skill:") || source == "local") && !ledger.blocked)
+        if (!verified && success && !neutral) ledger.consecutiveFailures++
+        if (!verified && !neutral && (source.startsWith("skill:") || source == "local") && !ledger.blocked)
             ledger.repairReason = "repair failed ${ledger.programCapability} procedure"
-        if (!verified && !terminalEnd && source == "planner") ledger.plannerFailures++
+        if (!verified && !neutral && source == "planner") ledger.plannerFailures++
         ledger.currentProgram = emptyList()
         ledger.cursor = 0
         ledger.programSource = ""
@@ -904,7 +911,7 @@ class BrainEngine(
         ledger.record(LedgerStep(clock(), ledger.phase, sps.hash, step.describe(), VerifyStatus.FAILED, reason, ledger.programSource))
         events.step(ledger, "cannot execute ${step.kind} ${step.role}: $reason", VerifyStatus.FAILED)
         recordFailureMemory(site, sps, step, "$reason:${sps.siteVersion}")
-        finishProgram(ledger, sps, site, success = false)
+        finishProgram(ledger, sps, site, success = false, rememberFailure = reason == "no_target" && sps.settle == com.appgate.brain.model.Settle.IDLE)
     }
 
     private fun progress(ledger: TaskLedger, key: String, reason: String) {

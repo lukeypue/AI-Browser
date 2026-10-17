@@ -106,12 +106,13 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
   `skills`, `episodes/<host>` (≤2000, content-free), `ledger/<id>`, `labels/<host>`.
 - `BetaStat` — Beta(α, β) with daily decay 0.98; routing uses posterior mean *and* count.
 - `Consolidation` — retire bindings (p<0.3 after 5 trials, 60 days unseen), shadow weak legacy version bindings, prune failures/edges, dedupe compiled skills, budgets, **Brier > 0.25 ⇒ quarantine**.
-- `FailedStrategies` — overnight practice remembers failed procedure shapes and AI repair attempts
-  across task ledgers. Two unsuccessful attempts hold an unchanged concrete procedure for six hours; changed
-  controls and different procedures remain eligible. AI proposal history is retained, but a fresh
+- `FailedStrategies` — ordinary tasks and overnight practice remember failed procedure shapes and AI repair attempts
+  across task ledgers and process restarts. One unsuccessful concrete procedure holds unchanged replay;
+  elapsed time and clock rollback do not clear it. Relevant changed controls and different procedures remain eligible. AI proposal history is retained, but a fresh
   first alternative repair proposal may be reserved after thirty seconds. Further unchanged failures
   back off to 60, 120, 240, and at most 300 seconds, within existing task/teacher budgets.
-  Failure counts survive reload (bounded at 64). At most 64 content-free records per host.
+  Failure counts survive reload (bounded at 64). At most 64 content-free records per host; oldest records may be evicted at capacity.
+  Renderer timeouts, unsettled/ambiguous observations, and ordinary end-of-results do not prove a permanently broken procedure.
   Before allocating a learning lesson, the scheduler checks concrete learned/builtin and local repair holds for the live target (including shared prerequisites), then the teacher backoff. A fully held target yields without a task or ordinal increment; diagnostics report `procedure_cooldown`.
   Site rotation still retries after thirty seconds. A verified procedure clears its failure record.
 - Learning a loading/pagination capability requires newly observed result keys across that program.

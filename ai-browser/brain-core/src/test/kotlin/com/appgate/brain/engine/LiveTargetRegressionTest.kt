@@ -123,7 +123,7 @@ class LiveTargetRegressionTest {
             override val describe = "fixture"
             override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
                 teacherCalled = true
-                return """{"steps":[{"kind":"TYPE","role":"SEARCH_BOX","arg":"Ford","submit":true,"expect":["PAGE_IS_RESULTS"]}],"confidence":0.99}"""
+                return """{"steps":[{"kind":"TYPE","role":"SEARCH_BOX","arg":"Ford","submit":false},{"kind":"CLICK","role":"SUBMIT","expect":["PAGE_IS_RESULTS"]}],"confidence":0.99}"""
             }
         })
         val goal = Goal("search", GoalIntent.LEARN_SITE, "practice", "Ford", emptyList(), budget = Budget(actions = 20, llmCalls = 1, wallMs = 10000))
@@ -135,7 +135,7 @@ class LiveTargetRegressionTest {
         assertEquals(TaskStatus.DONE, out.status)
     }
 
-    @Test fun namedOpenerTeacherRepairCanContinueToVerifiedFacetSelection() {
+    @Test fun namedOpenerTeacherCannotReplayTheSameHeldProcedure() {
         val fake = FakeSite().apply { dialogShown = false; navigate("https://fake.market/search?q=Ford", 1000) }
         var teacherCalled = false; var opened = false; var selected = false
         val renderer = object : Renderer by fake {
@@ -167,9 +167,10 @@ class LiveTargetRegressionTest {
             EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0)) { 1000L }
             .runTask(TaskLedger("facet", goal, fake.host, fake.url).apply { lesson = "select_facet" })
         assertTrue(teacherCalled)
-        assertEquals(out.notes.joinToString(), TaskStatus.DONE, out.status)
-        assertTrue("select_facet" in out.successfulSkills)
-        assertTrue(out.steps.any { it.source == "planner" && it.status == VerifyStatus.VERIFIED })
+        // Merely receiving an AI answer cannot erase the failed identical click.
+        assertNotEquals(out.notes.joinToString(), TaskStatus.DONE, out.status)
+        assertFalse("select_facet" in out.successfulSkills)
+        assertFalse(out.steps.any { it.source == "planner" && it.status == VerifyStatus.VERIFIED })
     }
 
     @Test fun closingConditionOptionsRetainsTheAppliedPathConstraint() {

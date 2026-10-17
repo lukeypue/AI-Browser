@@ -30,3 +30,6 @@ Improve the Site Brain's ability to safely understand and navigate websites. Foc
 - `sitebrain-lab/`
 
 Prefer deterministic known-site execution. Use AI only for unknown/repair cases.
+
+## Current maintainer priority
+Read `docs/BRAIN_DEVELOPMENT_PRIORITY.md` before planning work. Prioritize retained server brain learning and measured improvement; defer product consent/distribution work while preserving existing boundaries.
