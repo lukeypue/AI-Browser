@@ -89,7 +89,13 @@ object Curriculum {
     fun practiceLesson(site: SiteModel, now: Long, page: SemanticPageState, canAttempt: (String) -> Boolean = { true }): String {
         if (page.isHumanOnly || page.dialogOpen || page.settle != com.appgate.brain.model.Settle.IDLE ||
             page.pageType != com.appgate.brain.model.PageType.RESULTS || allLessonsComplete(site)) return ""
-        if (site.curriculum.any { !it.done && LearningOpportunities.target(page, it.id) != null }) return ""
+        // Only runnable unfinished work takes priority: a persisted procedure hold
+        // must not starve a different due, verified capability.
+        if (site.curriculum.any { item ->
+                if (item.done || item.retryAt > now) return@any false
+                val live = LearningOpportunities.target(page, item.id) ?: return@any false
+                (live.skillId != "seek_pagination" || site.paginationDiscoveryRetryAt <= now) && canAttempt(item.id)
+            }) return ""
         return site.curriculum.filter { it.done && it.retryAt <= now && now >= it.completedAt &&
             now - it.completedAt >= REHEARSAL_INTERVAL_MS &&
             LearningOpportunities.target(page, it.id)?.skillId == it.id && it.id != "search" && canAttempt(it.id) }
