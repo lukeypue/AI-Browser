@@ -304,4 +304,67 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(visible['source_sha'], CANDIDATE)
         self.assertEqual(list(self.state.glob('.ledger-*')), [])
 
+    def synthetic_download_verifier(self, entries=None, digest=None, size=None, raw_apk=None):
+        import hashlib
+        import io
+        import zipfile
+        from unittest.mock import patch
+        from release_control.controller import API, PACKAGE
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            for name, data in (entries or {'classes.dex': b'dex\n'+CANDIDATE.encode()}).items():
+                archive.writestr(name, data)
+        apk = stream.getvalue() if raw_apk is None else raw_apk
+        expected_hash = hashlib.sha256(apk).hexdigest()
+        prefix = 'https://github.com/lukeypue/AI-Browser/releases/download/ai-browser-latest/'
+        meta = dict(commit=CANDIDATE, versionCode=919, versionName='fixture.build805')
+        release = {'assets':[{'name':'latest-version.json', 'browser_download_url':prefix+'latest-version.json'},
+                             {'name':'AI-Browser-latest.apk', 'browser_download_url':prefix+'AI-Browser-latest.apk',
+                              'digest':digest if digest is not None else 'sha256:'+expected_hash,
+                              'size':size if size is not None else len(apk)}]}
+        replies = {API+'/releases/tags/ai-browser-latest':json.dumps(release).encode(),
+                   prefix+'latest-version.json':json.dumps(meta).encode(), prefix+'AI-Browser-latest.apk':apk}
+        (self.state/'ai-browser-release.json').write_text(json.dumps(dict(versionCode=114,versionName='fixture')))
+        adapter = Production(self.state)
+        adapter.sdk = self.state/'sdk'
+        (adapter.sdk/'build-tools/37.0.0').mkdir(parents=True,exist_ok=True)
+        def command(argv, **kwargs):
+            if Path(argv[0]).name == 'apksigner': return 'Signer #1 certificate SHA-256 digest: '+PIN
+            return f"package: name='{PACKAGE}' versionCode='919' versionName='fixture.build805'"
+        with patch.object(adapter,'download',side_effect=lambda url,limit:replies[url]), patch.object(adapter,'command',side_effect=command):
+            result = adapter.verify_download(CANDIDATE, {'run_number':805})
+        self.assertEqual(result['apk_sha256'], expected_hash)
+        return result
+
+    def test_real_verifier_accepts_matching_asset_digest_and_multidex_candidate(self):
+        self.synthetic_download_verifier({'classes.dex':b'other', 'classes2.dex':b'dex\n'+CANDIDATE.encode()})
+
+    def test_real_verifier_rejects_missing_malformed_or_wrong_asset_digest(self):
+        for digest in ('', 'sha1:'+'d'*64, 'sha256:bad', 'sha256:'+'0'*64):
+            with self.subTest(digest=digest):
+                with self.assertRaises(ReleaseError): self.synthetic_download_verifier(digest=digest)
+
+    def test_real_verifier_rejects_wrong_asset_size(self):
+        with self.assertRaises(ReleaseError): self.synthetic_download_verifier(size=1)
+
+    def test_real_verifier_requires_candidate_inside_dex(self):
+        with self.assertRaises(ReleaseError):
+            self.synthetic_download_verifier({'classes.dex':b'wrong revision', 'assets/revision.txt':CANDIDATE.encode()})
+
+    def test_real_verifier_bounds_decompressed_dex_reads(self):
+        from unittest.mock import patch
+        with patch('release_control.controller.DEX_ENTRY_LIMIT',16,create=True):
+            with self.assertRaises(ReleaseError):
+                self.synthetic_download_verifier({'classes.dex':CANDIDATE.encode()})
+
+    def test_real_verifier_bounds_total_dex_size_and_entry_count(self):
+        from unittest.mock import patch
+        entries = {'classes.dex':CANDIDATE.encode(), 'classes2.dex':CANDIDATE.encode()}
+        for setting, limit in (('DEX_TOTAL_LIMIT',60), ('DEX_ENTRY_COUNT',1)):
+            with self.subTest(setting=setting), patch('release_control.controller.'+setting,limit):
+                with self.assertRaises(ReleaseError): self.synthetic_download_verifier(entries)
+
+    def test_real_verifier_rejects_invalid_or_truncated_apk_archive(self):
+        with self.assertRaises(ReleaseError): self.synthetic_download_verifier(raw_apk=b'not a complete APK ZIP')
+
 if __name__ == '__main__': unittest.main()

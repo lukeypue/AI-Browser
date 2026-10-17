@@ -3,6 +3,7 @@ import argparse
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import tempfile
 import time
 import urllib.request
 import urllib.parse
+import zipfile
 
 STATE = Path('/var/lib/aibrowser-release-control')
 PIN = '118079b156fabeae30aca7ad845f1a15cd7eea89740bc1472be2163400d40239'
@@ -22,6 +24,9 @@ API = 'https://api.github.com/repos/lukeypue/AI-Browser'
 WORKFLOW = 'Build AppGate APK'
 PACKAGE = 'com.aibrowser.universal'
 KOTLIN_STDLIB = '/opt/ai-browser-dev/verification-home/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.10/30de6faa127a4a012db8e71bf1b9c0a99b1402b2/kotlin-stdlib-2.2.10.jar'
+DEX_ENTRY_LIMIT = 64*1024*1024
+DEX_TOTAL_LIMIT = 256*1024*1024
+DEX_ENTRY_COUNT = 64
 
 class ReleaseError(RuntimeError):
     pass
@@ -219,6 +224,27 @@ class Production:
                 and meta.get('versionName') == source_version['versionName']+'.build'+str(run['run_number']),
                 'Published source/version allocation mismatch')
         apk = asset('AI-Browser-latest.apk', 512*1024*1024)
+        apk_hash = hashlib.sha256(apk).hexdigest()
+        apk_asset = assets['AI-Browser-latest.apk']
+        digest = apk_asset.get('digest')
+        require(isinstance(digest, str) and re.fullmatch('sha256:[0-9a-f]{64}', digest)
+                and digest == 'sha256:'+apk_hash, 'GitHub APK asset digest mismatch or unavailable')
+        require(type(apk_asset.get('size')) is int and apk_asset['size'] == len(apk), 'GitHub APK asset size mismatch')
+        try:
+            with zipfile.ZipFile(io.BytesIO(apk)) as archive:
+                dex = [info for info in archive.infolist() if re.fullmatch(r'classes(?:[1-9][0-9]*)?\.dex', info.filename)]
+                require(0 < len(dex) <= DEX_ENTRY_COUNT, 'APK DEX entry count invalid')
+                total, found = 0, False
+                for info in dex:
+                    total += info.file_size
+                    require(info.file_size <= DEX_ENTRY_LIMIT and total <= DEX_TOTAL_LIMIT, 'APK DEX size bound exceeded')
+                    with archive.open(info) as stream:
+                        content = stream.read(DEX_ENTRY_LIMIT+1)
+                    require(len(content) == info.file_size and len(content) <= DEX_ENTRY_LIMIT, 'APK DEX read bound or size mismatch')
+                    found |= candidate.encode('ascii') in content
+                require(found, 'Candidate source revision absent from APK DEX')
+        except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError):
+            raise ReleaseError('Invalid or unsupported APK DEX archive') from None
         tools = sorted((self.sdk/'build-tools').glob('[0-9]*'), key=lambda p:tuple(int(x) for x in p.name.split('.') if x.isdigit()))
         require(bool(tools), 'Android build tools unavailable')
         with tempfile.TemporaryDirectory(prefix='verified-release-') as temp:
@@ -231,7 +257,7 @@ class Production:
             package = re.search(r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging)
             require(package and package.group(1) == PACKAGE and int(package.group(2)) == meta['versionCode']
                     and package.group(3) == meta['versionName'], 'APK package/version mismatch')
-        return dict(meta, package=PACKAGE, certificate_sha256=PIN, apk_sha256=hashlib.sha256(apk).hexdigest())
+        return dict(meta, package=PACKAGE, certificate_sha256=PIN, apk_sha256=apk_hash)
 
 def main():
     parser = argparse.ArgumentParser(description='Explicit verified stable release; never installs on a phone')
