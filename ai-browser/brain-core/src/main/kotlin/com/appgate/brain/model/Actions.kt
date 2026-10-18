@@ -110,6 +110,7 @@ sealed class Postcondition {
     open fun toJson(): JsonObject = JsonObject().put("kind", name)
 
     object ResultsChanged : Postcondition() { override val name = "RESULTS_CHANGED" }
+    object ResultOrderChanged : Postcondition() { override val name = "RESULT_ORDER_CHANGED" }
     object NewResults : Postcondition() { override val name = "NEW_RESULTS" }
     object EndOfResults : Postcondition() { override val name = "END_OF_RESULTS" }
     object TextExpanded : Postcondition() { override val name = "TEXT_EXPANDED" }
@@ -166,6 +167,7 @@ sealed class Postcondition {
             return when (o.optString("kind")) {
                 "ANY_OF" -> AnyOf(o.optArray("of")?.objects()?.mapNotNull { fromJson(it) } ?: emptyList())
                 "RESULTS_CHANGED" -> ResultsChanged
+                "RESULT_ORDER_CHANGED" -> ResultOrderChanged
                 "NEW_RESULTS" -> NewResults
                 "END_OF_RESULTS" -> EndOfResults
                 "TEXT_EXPANDED" -> TextExpanded

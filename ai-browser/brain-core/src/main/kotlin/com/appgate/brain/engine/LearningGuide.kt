@@ -57,6 +57,7 @@ data class LearningGuide(
 
         fun condition(p: Postcondition): String = when (p) {
             Postcondition.ResultsChanged -> "the observed result list changes"
+            Postcondition.ResultOrderChanged -> "the observed listings change order"
             Postcondition.NewResults -> "new result items appear"
             Postcondition.EndOfResults -> "the observed list reaches its end with no next/load-more control"
             Postcondition.TextExpanded -> "more description text becomes visible"

@@ -53,6 +53,16 @@ object Verifier {
             if (ok) evidence += "results changed (${b.size} items, ${b.count { it !in a }} new keys)"
             ok
         }
+        is Postcondition.ResultOrderChanged -> {
+            val a = before.results?.itemKeys.orEmpty(); val b = after.results?.itemKeys.orEmpty()
+            val ok = before.host.lowercase().removePrefix("www.") == after.host.lowercase().removePrefix("www.") &&
+                before.pageType == PageType.RESULTS && after.pageType == PageType.RESULTS &&
+                before.settle == Settle.IDLE && after.settle == Settle.IDLE &&
+                a.size >= 2 && a.size == b.size && a.toSet().size == a.size && b.toSet().size == b.size &&
+                a.toSet() == b.toSet() && a != b
+            if (ok) evidence += "observed result order changed (${b.size} items)"
+            ok
+        }
         is Postcondition.NewResults -> {
             val fresh = after.resultKeys.filter { it !in before.resultKeys && it !in visited }
             val ok = fresh.isNotEmpty()
@@ -183,7 +193,7 @@ object Verifier {
                 Role.FACET_OPEN -> listOf(Postcondition.anyOf(Postcondition.DialogOpened, Postcondition.PageTypeIs(PageType.FACET_PANEL), Postcondition.RoleAppeared(Role.FACET), Postcondition.RoleAppeared(Role.FACET_APPLY)))
                 Role.FACET_APPLY -> listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.DialogClosed, Postcondition.PageTypeIs(PageType.RESULTS)))
                 Role.FACET_CLEAR -> listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.UrlChanged))
-                Role.SORT -> listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.UrlQueryHas("sort"), Postcondition.DialogOpened))
+                Role.SORT -> listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.ResultOrderChanged))
                 Role.PAGE_NEXT, Role.PAGE_PREV -> listOf(Postcondition.anyOf(Postcondition.NewResults, Postcondition.ResultsChanged))
                 Role.LOAD_MORE -> listOf(Postcondition.anyOf(Postcondition.NewResults, Postcondition.EndOfResults))
                 Role.RESULT_ITEM -> listOf(Postcondition.DetailMatches(action.target?.itemKey))

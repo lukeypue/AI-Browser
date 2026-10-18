@@ -31,6 +31,7 @@ for(const style of ['classifieds','cars','marketplace','offerup']) test(style+' 
   await page.getByRole('button',{name:'Search',exact:true}).click();
   await page.waitForURL('**/*q=mountain*');
   assert.equal(await page.locator('a.card').count(),4);
+  assert.equal(await page.getByRole('dialog').count(),0,'default fixture remains notice-free');
   await page.evaluate(readFileSync(new URL('../../ai-browser/app/src/main/assets/sitebrain/content.js',import.meta.url),'utf8'));
   const obs=await page.evaluate(()=>window.__brainObserve());
   assert.equal(obs.items.length,4,'real perception recognizes fixture cards');
@@ -55,5 +56,10 @@ for(const style of ['classifieds','cars','marketplace','offerup']) test(style+' 
   await page.getByRole('link',{name:'Back to results'}).click();
   assert.equal(await page.locator('a.card').count(),4);
   assert.equal(await page.locator('input[type=password]').count(),0);
+  await page.getByRole('link',{name:'Next page',exact:true}).click();
+  assert.equal(new URL(page.url()).searchParams.get('page'),'2');
+  assert.equal(await page.getByRole('link',{name:'Next page',exact:true}).count(),0);
+  assert.equal(await page.locator('a.card').count(),4);
+  assert.ok((await page.locator('a.card').evaluateAll(cards=>cards.map(card=>Number(new URL(card.href).searchParams.get('item'))))).every(id=>id>=13&&id<=24));
  } finally {await browser.close();}
 });

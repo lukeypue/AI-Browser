@@ -101,12 +101,12 @@ object BuiltinSkills {
     )
 
     val sortResults = Skill(
-        id = "sort_results", version = 2, intent = "change the result ordering",
+        id = "sort_results", version = 3, intent = "change the result ordering",
         params = listOf("order"),
         pre = listOf(Precondition.PageTypeIn(resultPages), Precondition.HasRole(Role.SORT)),
         body = listOf(Step(StepKind.SELECT, Role.SORT, arg = "\$order",
-            expect = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.UrlQueryHas("sort"), Postcondition.DialogOpened)))),
-        post = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.UrlQueryHas("sort"))),
+            expect = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.ResultOrderChanged)))),
+        post = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.ResultOrderChanged)),
         origin = SkillOrigin.BUILTIN, tags = setOf("sort")
     )
 

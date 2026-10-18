@@ -125,7 +125,7 @@ object SkillCompiler {
             val actionKind = when (kind) { StepKind.TYPE -> com.appgate.brain.model.ActionKind.TYPE; StepKind.SELECT -> com.appgate.brain.model.ActionKind.SELECT; StepKind.SCROLL -> com.appgate.brain.model.ActionKind.SCROLL; StepKind.BACK -> com.appgate.brain.model.ActionKind.BACK; else -> com.appgate.brain.model.ActionKind.CLICK }
             val expectations = when {
                 role == Role.FACET && arg != null -> listOf(Postcondition.ValueIs(facet!!, arg))
-                role == Role.SORT -> listOf(Postcondition.ResultsChanged)
+                role == Role.SORT -> listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.ResultOrderChanged))
                 else -> com.appgate.brain.verify.Verifier.defaultExpectations(com.appgate.brain.model.Action(actionKind, com.appgate.brain.model.AffordanceRef(role, facet), text = arg, submit = t.optBoolean("submit")), before)
             }
             Step(kind, role, facet, arg, submit = t.optBoolean("submit"), expect = expectations)
@@ -269,7 +269,7 @@ internal object PortableSkills {
                 } }
             }
             "apply_filters" -> has(Role.FACET_APPLY) && proves(post) { it == Postcondition.ResultsChanged || it == Postcondition.DialogClosed || it == Postcondition.PageTypeIs(PageType.RESULTS) }
-            "sort_results" -> has(Role.SORT) && proves(post) { it == Postcondition.ResultsChanged }
+            "sort_results" -> has(Role.SORT) && proves(post) { it == Postcondition.ResultsChanged || it == Postcondition.ResultOrderChanged }
             "next_page" -> pagination() && proves(post, ::result)
             "load_more", "scroll_results" -> pagination() &&
                 proves(post) { it == Postcondition.NewResults || it == Postcondition.EndOfResults }

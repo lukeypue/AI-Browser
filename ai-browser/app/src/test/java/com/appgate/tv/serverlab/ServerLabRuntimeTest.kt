@@ -9,6 +9,25 @@ import org.junit.Test
 import java.nio.file.Files
 
 class ServerLabRuntimeTest {
+    @Test fun labProfilesExposeSyntheticNoticeWithoutChangingProductionProfiles() {
+        ServerLabRuntime.detach()
+        val baseline=SiteProfiles.training
+        assertEquals(baseline,ServerLabRuntime.profiles(baseline))
+        if (!com.appgate.tv.BuildConfig.SERVER_ANDROID_LAB) return
+        val field=ServerLabRuntime::class.java.getDeclaredField("observer").apply { isAccessible=true }
+        field.set(null,ServerLabRuntime.ReportIdentityGate { })
+        try {
+            val profiles=ServerLabRuntime.profiles(baseline)
+            assertEquals(4,profiles.size)
+            profiles.forEach {
+                assertTrue(it.startUrl.startsWith("https://reports.ryzod.com/practice-fixtures/"))
+                assertTrue("synthetic dialog opportunity must be explicitly enabled",it.startUrl.contains("notice=1"))
+                assertTrue(it.searchUrl!!.contains("notice=1"))
+            }
+        } finally { ServerLabRuntime.detach() }
+        assertEquals(baseline,ServerLabRuntime.profiles(baseline))
+    }
+
     @Test fun inactiveSeamPreservesProductionProfiles() {
         ServerLabRuntime.detach()
         val expected = SiteProfiles.training.filter { !it.requiresLogin }

@@ -349,7 +349,8 @@ class BrainService : Service() {
         }
         val includeAccountSites = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("learn_account_sites", false)
         val sites = com.appgate.tv.serverlab.ServerLabRuntime.profiles(SiteProfiles.training.filter { includeAccountSites || !it.requiresLogin })
-        val sess = LearningSession(eng, memory, engineEvents, sites)
+        val sess = LearningSession(eng, memory, engineEvents, sites,
+            completedRehearsal = com.appgate.tv.serverlab.ServerLabRuntime.active)
         sess.siteIndex = getSharedPreferences("brain_jobs", MODE_PRIVATE).getInt("learning_site_index", 0)
         learning = sess
         publish(state.copy(mode = Mode.LEARNING, status = "Overnight learning started"))

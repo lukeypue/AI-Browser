@@ -86,9 +86,13 @@ object Curriculum {
     }
 
     /** Local rehearsal keeps available skills usable while an absent capability waits. */
-    fun practiceLesson(site: SiteModel, now: Long, page: SemanticPageState, canAttempt: (String) -> Boolean = { true }): String {
+    fun practiceLesson(site: SiteModel, now: Long, page: SemanticPageState, canAttempt: (String) -> Boolean = { true }): String =
+        practiceLesson(site, now, page, canAttempt, includeComplete = false)
+
+    /** Completed-site rehearsals are an explicit synthetic-lab opt-in, with the same safety and spacing. */
+    fun practiceLesson(site: SiteModel, now: Long, page: SemanticPageState, canAttempt: (String) -> Boolean = { true }, includeComplete: Boolean): String {
         if (page.isHumanOnly || page.dialogOpen || page.settle != com.appgate.brain.model.Settle.IDLE ||
-            page.pageType != com.appgate.brain.model.PageType.RESULTS || allLessonsComplete(site)) return ""
+            page.pageType != com.appgate.brain.model.PageType.RESULTS || (!includeComplete && allLessonsComplete(site))) return ""
         // Only runnable unfinished work takes priority: a persisted procedure hold
         // must not starve a different due, verified capability.
         if (site.curriculum.any { item ->

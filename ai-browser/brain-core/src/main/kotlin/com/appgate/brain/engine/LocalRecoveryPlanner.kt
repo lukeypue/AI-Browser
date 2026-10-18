@@ -105,8 +105,8 @@ object LocalRecoveryPlanner {
         val control = sps.byRole(Role.SORT).singleOrNull()?.takeIf { safe(it) } ?: return null
         if (control.choices.count { normalized(it) == normalized(wanted) } != 1 || normalized(control.value.orEmpty()) == normalized(wanted)) return null
         return LocalRecoveryPlan(
-            listOf(Step(StepKind.SELECT, Role.SORT, arg = "\$order", nameHint = control.name, expect = listOf(Postcondition.ResultsChanged))),
-            mapOf("order" to wanted), listOf(Postcondition.ResultsChanged, Postcondition.PageTypeIs(PageType.RESULTS))
+            listOf(Step(StepKind.SELECT, Role.SORT, arg = "\$order", nameHint = control.name, expect = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.ResultOrderChanged)))),
+            mapOf("order" to wanted), listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.ResultOrderChanged), Postcondition.PageTypeIs(PageType.RESULTS))
         )
     }
 

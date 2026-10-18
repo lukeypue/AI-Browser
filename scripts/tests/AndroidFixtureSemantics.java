@@ -18,7 +18,8 @@ class AndroidFixtureSemantics {
   String mode=input.optString("mode","");
   Postcondition post=switch(mode) {
    case "expand" -> Postcondition.TextExpanded.INSTANCE;
-   case "new_results" -> Postcondition.NewResults.INSTANCE;
+   case "new_results", "next" -> Postcondition.NewResults.INSTANCE;
+   case "dialog" -> Postcondition.DialogClosed.INSTANCE;
    case "sort" -> BuiltinSkills.INSTANCE.getSortResults().getPost().get(0);
    case "condition" -> new Postcondition.ConstraintApplied("condition","Good");
    default -> throw new IllegalArgumentException("unknown synthetic proof mode");
@@ -27,12 +28,15 @@ class AndroidFixtureSemantics {
   boolean holds=Verifier.INSTANCE.holds(post,action,before,after,Set.of(),new ArrayList<>());
   JsonObject output=new JsonObject();
   output.put("holds",holds);
-  String lesson=switch(mode){case "expand"->"expand_description";case "condition"->"select_facet";case "sort"->"sort_results";default->"scroll_results";};
+  String lesson=switch(mode){case "expand"->"expand_description";case "condition"->"select_facet";case "sort"->"sort_results";case "next"->"next_page";case "dialog"->"dismiss_dialog";default->"scroll_results";};
   LearningTarget target=LearningOpportunities.INSTANCE.target(before,lesson);
   output.put("target_skill",target==null?"":target.getSkillId());
   output.put("target_value",target==null?"":target.getParams().getOrDefault("value",""));
   output.put("target_order",target==null?"":target.getParams().getOrDefault("order",""));
   output.put("expand_role",before.has(Role.EXPAND_TEXT));
+  output.put("next_role",before.has(Role.PAGE_NEXT));
+  output.put("dialog_role",before.getRegions().stream().anyMatch(region -> region.getRole() == RegionRole.DIALOG));
+  output.put("close_role",before.has(Role.CLOSE));
   output.put("condition_facet",before.facet("condition")!=null);
   output.put("text_delta",after.getTextLength()-before.getTextLength());
   output.put("detail_delta",after.getDetailText().length()-before.getDetailText().length());

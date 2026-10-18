@@ -7,6 +7,23 @@ PACKAGE='com.aibrowser.universal.serverlab'
 RUNNER='com.aibrowser.universal.serverlab.test/com.appgate.tv.serverlab.ServerLabInstrumentation'
 SERVICE='aibrowser-android-emulator.service'
 LOCAL_KEYS=set('schema_version cycle_id status end_reason app_elapsed_ms diagnostics memory_before memory_after engine_ready version_code source_revision'.split())
+class TransportFailure(subprocess.SubprocessError):
+ """Only closed metadata crosses the process/typed-output failure boundary."""
+ PHASES=frozenset(('CLEAN_OUTPUT','INVOKE_RUNNER','READ_OUTPUT','DECODE_OUTPUT','VALIDATE_OUTPUT'))
+ REASONS=frozenset(('TIMEOUT','INVALID_RESULT','COMMAND_FAILED','OS_ERROR'))
+ def __init__(self,safe_phase,safe_reason):
+  _wire.require(safe_phase in self.PHASES and safe_reason in self.REASONS)
+  self.safe_phase=safe_phase;self.safe_reason=safe_reason
+  super().__init__(safe_phase,safe_reason)
+def transport_step(phase,operation,*args,**kwargs):
+ try:return operation(*args,**kwargs)
+ except (OSError,ValueError,TimeoutError,subprocess.SubprocessError) as error:
+  reason=('TIMEOUT' if isinstance(error,(TimeoutError,subprocess.TimeoutExpired)) else
+          'INVALID_RESULT' if isinstance(error,ValueError) else
+          'COMMAND_FAILED' if isinstance(error,subprocess.SubprocessError) else 'OS_ERROR')
+ # Raise outside the handler: no argv, output, exception text or cause/context
+ # from the underlying failure is attached to the typed exception.
+ raise TransportFailure(phase,reason) from None
 def strict_load(raw):
  def pairs(items):
   result={}
@@ -61,16 +78,17 @@ class Transport:
  def adb(self,*args,**kw):return self.run([ADB,'-s',SERIAL,*args],**kw)
  def pull(self,cycle_id,probe=False):
   _wire.identifier(cycle_id)
-  return strict_load(self.adb('exec-out','run-as',PACKAGE,'cat','files/serverlab/'+('probe' if probe else cycle_id)+'.json',capture=True,timeout=30))
+  raw=transport_step('READ_OUTPUT',self.adb,'exec-out','run-as',PACKAGE,'cat','files/serverlab/'+('probe' if probe else cycle_id)+'.json',capture=True,timeout=30)
+  return transport_step('DECODE_OUTPUT',strict_load,raw)
  def command(self,command,cycle_id):
   _wire.require(command in ('cycle','probe','smoke'));_wire.identifier(cycle_id)
   # Android shell can return zero when instrumentation crashes. Remove only
   # this command's typed output first so a missing new write cannot replay an
   # earlier process/emulator probe, smoke or same-UUID cycle result.
   output='files/serverlab/'+('probe' if command=='probe' else cycle_id)+'.json'
-  self.adb('shell','run-as',PACKAGE,'rm','-f','--',output,timeout=30)
-  self.adb('shell','am','instrument','-w','-r','-e','command',command,'-e','cycle_id',cycle_id,RUNNER,timeout=2100 if command=='cycle' else 180)
-  return validate_local(self.pull(cycle_id,command=='probe'),cycle_id,command)
+  transport_step('CLEAN_OUTPUT',self.adb,'shell','run-as',PACKAGE,'rm','-f','--',output,timeout=30)
+  transport_step('INVOKE_RUNNER',self.adb,'shell','am','instrument','-w','-r','-e','command',command,'-e','cycle_id',cycle_id,RUNNER,timeout=2100 if command=='cycle' else 180)
+  return transport_step('VALIDATE_OUTPUT',validate_local,self.pull(cycle_id,command=='probe'),cycle_id,command)
  def cycle(self,cycle_id):
   self.wait_boot();return self.command('cycle',cycle_id)
  def probe(self,cycle_id):return self.command('probe',cycle_id)

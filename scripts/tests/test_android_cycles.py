@@ -133,6 +133,41 @@ class ControllerTests(unittest.TestCase):
     return r
    self.fake.probe=bad
    r=self.controller().run_once();self.assertEqual(r['status'],'FAILED')
+ def test_probe_transport_boundaries_are_private_closed_stages(self):
+  import subprocess
+  original=self.fake.probe
+  phases=('CLEAN_OUTPUT','INVOKE_RUNNER','READ_OUTPUT','DECODE_OUTPUT','VALIDATE_OUTPUT')
+  for target,prefix in ((1,'APP_PROBE'),(2,'EMULATOR_PROBE')):
+   for phase in phases:
+    calls=0
+    def probe(id):
+     nonlocal calls
+     calls+=1
+     if calls!=target:return original(id)
+     def run(args,**kw):
+      boundary='READ_OUTPUT' if args[3]=='exec-out' else 'INVOKE_RUNNER' if args[3:6]==['shell','am','instrument'] else 'CLEAN_OUTPUT'
+      if boundary==phase:raise subprocess.CalledProcessError(1,['PRIVATE_ARGV'],output=b'PRIVATE_STDOUT',stderr=b'PRIVATE_STDERR')
+      if boundary=='READ_OUTPUT':return b'{PRIVATE_PAYLOAD' if phase=='DECODE_OUTPUT' else b'{"PRIVATE_FIELD":"PRIVATE_VALUE"}'
+      return b''
+     return Transport(run=run).probe(id)
+    self.fake.probe=probe;c=self.controller();report=c.run_once()
+    evidence=json.loads((c.state/'runtime-failures'/(report['cycle_id']+'.json')).read_text())
+    with self.subTest(prefix=prefix,phase=phase):
+     self.assertEqual(evidence['stage'],prefix+'_'+phase)
+     self.assertEqual(evidence['reason'],'INVALID_RESULT' if phase in ('DECODE_OUTPUT','VALIDATE_OUTPUT') else 'COMMAND_FAILED')
+     self.assertEqual(set(evidence),set('schema_version cycle_id source_revision stage reason local_sha256 expected_fingerprint observed_fingerprint app_restart_verified'.split()))
+     self.assertEqual(evidence['app_restart_verified'],target==2)
+     self.assertEqual(report['status'],'FAILED');self.assertIsNotNone(report['diagnostics'])
+     self.assertEqual(set(report),set(fixture.report()))
+     self.assertNotIn('PRIVATE_',json.dumps(evidence)+json.dumps(report))
+ def test_untyped_probe_exception_cannot_inject_stage(self):
+  import subprocess
+  def probe(id):
+   error=subprocess.SubprocessError('PRIVATE_ERROR');error.safe_phase='PRIVATE_PHASE';raise error
+  self.fake.probe=probe;c=self.controller();report=c.run_once()
+  evidence=json.loads((c.state/'runtime-failures'/(report['cycle_id']+'.json')).read_text())
+  self.assertEqual(evidence['stage'],'APP_PROBE');self.assertEqual(evidence['reason'],'COMMAND_FAILED')
+  self.assertNotIn('PRIVATE_',json.dumps(evidence)+json.dumps(report))
  def test_failed_emulator_probe_preserves_validated_app_evidence(self):
   original=self.fake.probe;calls=0
   def probe(id):
@@ -286,6 +321,46 @@ class RetryTests(unittest.TestCase):
   self.assertEqual(controller.calls,2);self.assertEqual(sleeps,[60])
 
 class TransportTests(unittest.TestCase):
+ def test_transport_failure_rejects_unbounded_phase_or_reason(self):
+  from android_cycles import transport
+  failure=getattr(transport,'TransportFailure',None)
+  self.assertIsNotNone(failure)
+  for phase,reason in (('PRIVATE_PHASE','COMMAND_FAILED'),('READ_OUTPUT','PRIVATE_REASON')):
+   with self.subTest(phase=phase,reason=reason):
+    with self.assertRaises(ValueError) as caught:failure(phase,reason)
+    self.assertNotIn('PRIVATE_',str(caught.exception))
+ def test_probe_command_failure_identifies_boundary_without_raw_context(self):
+  import subprocess
+  for phase in ('CLEAN_OUTPUT','INVOKE_RUNNER','READ_OUTPUT'):
+   def run(args,**kw):
+    boundary='READ_OUTPUT' if args[3]=='exec-out' else 'INVOKE_RUNNER' if args[3:6]==['shell','am','instrument'] else 'CLEAN_OUTPUT'
+    if boundary==phase:raise subprocess.CalledProcessError(1,['PRIVATE_ARGV'],output=b'PRIVATE_STDOUT',stderr=b'PRIVATE_STDERR')
+    return b''
+   with self.subTest(phase=phase):
+    with self.assertRaises(Exception) as caught:Transport(run=run).probe(str(uuid.uuid4()))
+    error=caught.exception
+    self.assertEqual(getattr(error,'safe_phase',None),phase)
+    self.assertEqual(getattr(error,'safe_reason',None),'COMMAND_FAILED')
+    self.assertEqual(set(vars(error)),{'safe_phase','safe_reason'})
+    self.assertIsNone(error.__cause__);self.assertIsNone(error.__context__)
+    self.assertNotIn('PRIVATE_',str(error)+repr(vars(error)))
+ def test_probe_malformed_payload_distinguishes_decode_from_validation(self):
+  for raw,phase in ((b'{PRIVATE_PAYLOAD','DECODE_OUTPUT'),(b'\xffPRIVATE_PAYLOAD','DECODE_OUTPUT'),(b'{"PRIVATE_FIELD":"PRIVATE_VALUE"}','VALIDATE_OUTPUT')):
+   def run(args,**kw):return raw if args[3]=='exec-out' else b''
+   with self.subTest(phase=phase):
+    with self.assertRaises(Exception) as caught:Transport(run=run).probe(str(uuid.uuid4()))
+    self.assertEqual(getattr(caught.exception,'safe_phase',None),phase)
+    self.assertEqual(getattr(caught.exception,'safe_reason',None),'INVALID_RESULT')
+    self.assertNotIn('PRIVATE_',str(caught.exception)+repr(vars(caught.exception)))
+ def test_probe_timeout_and_os_error_keep_reason_with_boundary(self):
+  import subprocess
+  for error,reason in ((subprocess.TimeoutExpired(['PRIVATE_ARGV'],1,output=b'PRIVATE_OUTPUT'),'TIMEOUT'),(OSError('PRIVATE_ERROR'),'OS_ERROR')):
+   def run(args,**kw):raise error
+   with self.subTest(reason=reason):
+    with self.assertRaises(Exception) as caught:Transport(run=run).probe(str(uuid.uuid4()))
+    self.assertEqual(getattr(caught.exception,'safe_phase',None),'CLEAN_OUTPUT')
+    self.assertEqual(getattr(caught.exception,'safe_reason',None),reason)
+    self.assertNotIn('PRIVATE_',str(caught.exception)+repr(vars(caught.exception)))
  def test_capture_kills_oversize_and_times_out(self):
   with self.assertRaises(ValueError):
    run_command([sys.executable,'-c',"import os,time;os.write(1,b'x'*1048577);time.sleep(10)"],capture=True,timeout=0.5)
@@ -310,7 +385,9 @@ class TransportTests(unittest.TestCase):
     # am instrument exits zero even if the runner crashes before its write.
     return b''
    with self.subTest(command=command):
-    with self.assertRaises(subprocess.CalledProcessError):Transport(run=run).command(command,id)
+    with self.assertRaises(subprocess.SubprocessError) as caught:Transport(run=run).command(command,id)
+    self.assertEqual(getattr(caught.exception,'safe_phase',None),'READ_OUTPUT')
+    self.assertEqual(getattr(caught.exception,'safe_reason',None),'COMMAND_FAILED')
    self.assertEqual(calls[0][3:],['shell','run-as','com.aibrowser.universal.serverlab','rm','-f','--',path])
  def test_fresh_probe_written_after_cleanup_is_accepted(self):
   id=str(uuid.uuid4());path='files/serverlab/probe.json';files={path:b'old'}

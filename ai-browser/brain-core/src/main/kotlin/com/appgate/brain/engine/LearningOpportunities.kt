@@ -71,7 +71,8 @@ object LearningOpportunities {
                 else if (canSeekPagination && !has(Role.PAGE_NEXT)) LearningTarget("seek_pagination") else null
             "scroll_results" -> if (results && page.resultKeys.isNotEmpty() && page.scrollHeight > page.scrollY + page.viewportHeight + 200) LearningTarget(lesson) else null
             "sort_results" -> if (!results) null else controls.firstOrNull { it.role == Role.SORT && alternative(it) != null }
-                ?.let { LearningTarget(lesson, mapOf("order" to alternative(it)!!)) }
+                ?.let { LearningTarget(lesson, mapOf("order" to alternative(it)!!),
+                    listOf(Constraint("sort", ConstraintOp.EQ, alternative(it)!!, sources = setOf(ConstraintSource.FILTERABLE)))) }
             "select_facet" -> if (!facets) null else {
                 val facet = controls.firstOrNull { it.role == Role.FACET && it.facetKey in choiceKeys && choiceValue(it) != null }
                 if (facet != null) {

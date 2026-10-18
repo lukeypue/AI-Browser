@@ -75,7 +75,8 @@ class LearningSession(
     private val events: EngineEvents,
     private val sites: List<SiteProfile> = SiteProfiles.training,
     private val perSiteChunkMs: Long = 20 * 60_000L,
-    private val clock: () -> Long = { System.currentTimeMillis() }
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val completedRehearsal: Boolean = false
 ) {
     @Volatile var siteIndex: Int = 0
     @Volatile var stopRequested: Boolean = false
@@ -120,6 +121,15 @@ class LearningSession(
             }
             if (site.challengeDay != clock() / 86_400_000L) { site.challengeDay = clock() / 86_400_000L; site.challengesToday = 0 }
             val now = clock()
+            val completedLab = completedRehearsal && Curriculum.allLessonsComplete(site)
+            // Only the completed curriculum's recorded day deferral is shortened.
+            // Human/challenge and shorter lesson/procedure holds remain intact.
+            if (completedLab && !site.learningNeedsHuman && site.challengesToday < 3 &&
+                site.learningBlockedUntil >= Curriculum.nextReviewAt(site) &&
+                site.learningBlockedUntil > now + Curriculum.REHEARSAL_INTERVAL_MS) {
+                site.learningBlockedUntil = now + Curriculum.REHEARSAL_INTERVAL_MS
+                memory.saveSite(site)
+            }
             Curriculum.migrateRetries(site, now)
             // Migrate old generic cooldowns, but never shorten a pending lesson's retry.
             if (!site.learningNeedsHuman && site.challengesToday < 3 && !Curriculum.allLessonsComplete(site) &&
@@ -127,7 +137,7 @@ class LearningSession(
                 site.learningBlockedUntil = maxOf(now + lessonRetryMs, Curriculum.earliestRetryAt(site, now))
                 memory.saveSite(site)
             }
-            if (site.challengesToday >= 3 || site.learningNeedsHuman || site.learningBlockedUntil > clock() || !Curriculum.reviewDue(site, clock())) {
+            if (site.challengesToday >= 3 || site.learningNeedsHuman || site.learningBlockedUntil > clock() || (!completedLab && !Curriculum.reviewDue(site, clock()))) {
                 events.status("${profile.name}: ${if (site.learningNeedsHuman) "waiting for sign-in or review" else if (Curriculum.allLessonsComplete(site)) "all lessons verified; review scheduled" else "cooling down"}")
                 memory.saveSite(site); siteIndex++; visited++; skipped++
                 if (skipped >= sites.size && visited < maxSites) {
@@ -149,8 +159,11 @@ class LearningSession(
                 val canAttempt: (String) -> Boolean = { id ->
                     engine.learningLessonAvailable(profile, page!!, id).also { if (!it) heldProcedure = true }
                 }
-                val lesson = if (page == null || site.learningNeedsHuman) "" else Curriculum.nextLesson(site, clock(), page, canAttempt)
-                    .ifBlank { Curriculum.practiceLesson(site, clock(), page, canAttempt) }
+                val completedLabRehearsal = completedRehearsal && Curriculum.allLessonsComplete(site)
+                val lesson = if (page == null || site.learningNeedsHuman) ""
+                    else if (completedLabRehearsal) Curriculum.practiceLesson(site, clock(), page, canAttempt, includeComplete = true)
+                    else Curriculum.nextLesson(site, clock(), page, canAttempt)
+                        .ifBlank { Curriculum.practiceLesson(site, clock(), page, canAttempt) }
                 if (lesson.isBlank()) {
                     site.learningBlockedUntil = maxOf(clock() + lessonRetryMs, Curriculum.earliestRetryAt(site, clock()))
                     if (!site.learningNeedsHuman) site.lastLearningStatus = "Waiting for an observed lesson opportunity"
@@ -158,10 +171,13 @@ class LearningSession(
                     memory.saveSite(site)
                     break
                 }
-                val rehearsing = !Curriculum.allLessonsComplete(site) && site.curriculum.any { it.id == lesson && it.done }
+                val rehearsing = (completedLabRehearsal || !Curriculum.allLessonsComplete(site)) &&
+                    site.curriculum.any { it.id == lesson && it.done }
                 if (rehearsing) events.diagnostic(site.host, "learning_recheck",
                     SemanticDiagnostics.learningRecheck(site, page, clock()).put("rehearsal", SemanticDiagnostics.capability(lesson)))
-                val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal++, page, lesson)
+                val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal++, page, lesson).let {
+                    if (completedLabRehearsal) it.copy(budget = it.budget.copy(llmCalls = 0)) else it
+                }
                 goalsThisVisit++
                 val ledger = TaskLedger(Hashing.short("learn" + System.nanoTime()), goal, profile.hosts.first(), page!!.url)
                 ledger.lesson = lesson
@@ -195,12 +211,16 @@ class LearningSession(
                     break
                 }
                 if (rehearsing) {
-                    site.learningBlockedUntil = clock() + lessonRetryMs
+                    site.learningBlockedUntil = clock() + if (completedLabRehearsal) Curriculum.REHEARSAL_INTERVAL_MS else lessonRetryMs
                     memory.saveSite(site)
                     break
                 }
                 if (blockedInARow >= 3) { site.learningBlockedUntil = clock() + lessonRetryMs; memory.saveSite(site); events.log("info", "${profile.name}: three goals without a new verified lesson; retry in 30 sec"); break }
-                if (Curriculum.allLessonsComplete(site)) { site.learningBlockedUntil = clock() + 24 * 60 * 60_000L; memory.saveSite(site); break }
+                if (Curriculum.allLessonsComplete(site)) {
+                    site.learningBlockedUntil = clock() + if (completedRehearsal) Curriculum.REHEARSAL_INTERVAL_MS else 24 * 60 * 60_000L
+                    memory.saveSite(site)
+                    break
+                }
             }
             siteIndex++
             visited++
@@ -218,7 +238,7 @@ class LearningSession(
                 val next = sites.mapNotNull { profile ->
                     val site = memory.site(profile.hosts.first())
                     if (site.learningNeedsHuman) null else maxOf(site.learningBlockedUntil,
-                        Curriculum.nextReviewAt(site),
+                        if (completedRehearsal && Curriculum.allLessonsComplete(site)) 0L else Curriculum.nextReviewAt(site),
                         if (site.challengesToday >= 3) (site.challengeDay + 1) * 86_400_000L else 0L)
                 }.minOrNull()
                 if (next != null && next <= now) return

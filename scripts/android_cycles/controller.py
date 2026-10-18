@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime,timezone
 from pathlib import Path
 from . import canonical_report,validate_android_cycle,_wire
-from .transport import Transport,strict_load,validate_local
+from .transport import Transport,TransportFailure,strict_load,validate_local
 class Busy(RuntimeError):pass
 def safe_path(path):
  path=Path(path)
@@ -181,6 +181,9 @@ class Controller:
     reason=('TIMEOUT' if isinstance(error,(TimeoutError,__import__('subprocess').TimeoutExpired)) else
             'INVALID_RESULT' if isinstance(error,ValueError) else
             'COMMAND_FAILED' if isinstance(error,__import__('subprocess').SubprocessError) else 'OS_ERROR')
+    if isinstance(error,TransportFailure) and error.safe_phase in TransportFailure.PHASES and error.safe_reason in TransportFailure.REASONS:
+     reason=error.safe_reason
+     if stage in ('APP_PROBE','EMULATOR_PROBE'):stage+='_'+error.safe_phase
     try:
      failures=self.state/'runtime-failures';mkdir(failures,0o700)
      atomic_json(failures/(journal['cycle_id']+'.json'),dict(schema_version=1,cycle_id=journal['cycle_id'],

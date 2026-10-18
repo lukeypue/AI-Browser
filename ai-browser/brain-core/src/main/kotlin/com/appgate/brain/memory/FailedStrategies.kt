@@ -46,7 +46,12 @@ object FailedStrategies {
                 StepKind.WAIT -> it.arg?.toIntOrNull()?.coerceIn(0, 10000)?.takeIf { n -> n != 1500 }?.let { n -> ":wait=$n" }.orEmpty()
                 else -> ""
             }
-            "${it.kind}:${it.role}:${facet(f)}:${it.submit}:${it.optional}$movement"
+            // A corrected sort verification contract is a scoped repair candidate.
+            // Legacy failures remain held; failing this contract holds it too.
+            fun ordered(p: Postcondition): Boolean = p == Postcondition.ResultOrderChanged ||
+                p is Postcondition.AnyOf && p.alternatives.any { child -> ordered(child) }
+            val contract = if (capability == "sort_results" && it.expect.any(::ordered)) ":order-v1" else ""
+            "${it.kind}:${it.role}:${facet(f)}:${it.submit}:${it.optional}$movement$contract"
         } ?: "planner"
         // Target-specific failures must not blacklist every listing. Only the final
         // opaque digest is retained, never names, queries, URLs, item IDs or page text.

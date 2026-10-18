@@ -103,6 +103,7 @@ class Planner(private val client: PlannerClient) {
 
     private fun expectFromName(name: String, s: JsonObject): Postcondition? = when (name) {
         "RESULTS_CHANGED" -> Postcondition.ResultsChanged
+        "RESULT_ORDER_CHANGED" -> Postcondition.ResultOrderChanged
         "NEW_RESULTS" -> Postcondition.NewResults
         "END_OF_RESULTS" -> Postcondition.EndOfResults
         "TEXT_EXPANDED" -> Postcondition.TextExpanded
@@ -149,7 +150,7 @@ class Planner(private val client: PlannerClient) {
     companion object {
         val ROLE_NAMES: List<String> = Role.values().filter { !it.isCommit && it != Role.UNKNOWN && it != Role.LOGIN && it != Role.ACCOUNT }.map { it.name }
         val STEP_KINDS: List<String> = StepKind.values().map { it.name }
-        val EXPECT_NAMES: List<String> = listOf("RESULTS_CHANGED", "NEW_RESULTS", "END_OF_RESULTS", "TEXT_EXPANDED", "DIALOG_CLOSED", "DIALOG_OPENED", "URL_CHANGED", "COMPOSER_READY", "PAGE_IS_RESULTS", "PAGE_IS_DETAIL", "CONSTRAINT_APPLIED", "FACETS_APPEARED", "FACET_OPENERS_APPEARED")
+        val EXPECT_NAMES: List<String> = listOf("RESULTS_CHANGED", "RESULT_ORDER_CHANGED", "NEW_RESULTS", "END_OF_RESULTS", "TEXT_EXPANDED", "DIALOG_CLOSED", "DIALOG_OPENED", "URL_CHANGED", "COMPOSER_READY", "PAGE_IS_RESULTS", "PAGE_IS_DETAIL", "CONSTRAINT_APPLIED", "FACETS_APPEARED", "FACET_OPENERS_APPEARED")
 
         const val PROGRAM_INSTRUCTIONS = """You are the planning module of an on-device web agent that helps a person find marketplace listings. You never see HTML; you see a typed summary of the current page: affordances with roles, facets with canonical keys, collections and active constraints.
 Return a short program (1-6 steps) of typed steps over affordance ROLES that advances the goal from this page state. Rules:

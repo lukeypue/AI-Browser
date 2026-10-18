@@ -40,7 +40,7 @@ object ServerLabRuntime {
         return listOf("classifieds", "cars", "marketplace", "offerup").map { key ->
             val url = "https://reports.ryzod.com/practice-fixtures/$key/"
             SiteProfile(key="serverlab_$key", name="Synthetic $key", hosts=listOf("reports.ryzod.com"),
-                startUrl=url, searchUrl=url+"?q={q}&price_max={price_max}&mileage_max={mileage_max}&year_min={year_min}",
+                startUrl=url+"?notice=1", searchUrl=url+"?notice=1&q={q}&price_max={price_max}&mileage_max={mileage_max}&year_min={year_min}",
                 facetVocabulary=mapOf("maximum price" to "price", "maximum mileage" to "mileage", "minimum year" to "year", "sort by" to "sort"),
                 categories=if(key=="cars")setOf("vehicles") else setOf("general","shopping"),
                 trainingQueries=listOf("synthetic bicycle","synthetic truck","synthetic drill"))
