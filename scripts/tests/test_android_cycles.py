@@ -145,7 +145,7 @@ class ControllerTests(unittest.TestCase):
      calls+=1
      if calls!=target:return original(id)
      def run(args,**kw):
-      boundary='READ_OUTPUT' if args[3]=='exec-out' else 'INVOKE_RUNNER' if args[3:6]==['shell','am','instrument'] else 'CLEAN_OUTPUT'
+      boundary='READ_OUTPUT' if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat'] else 'INVOKE_RUNNER' if args[3:6]==['shell','am','instrument'] else 'CLEAN_OUTPUT'
       if boundary==phase:raise subprocess.CalledProcessError(1,['PRIVATE_ARGV'],output=b'PRIVATE_STDOUT',stderr=b'PRIVATE_STDERR')
       if boundary=='READ_OUTPUT':return b'{PRIVATE_PAYLOAD' if phase=='DECODE_OUTPUT' else b'{"PRIVATE_FIELD":"PRIVATE_VALUE"}'
       return b''
@@ -321,6 +321,26 @@ class RetryTests(unittest.TestCase):
   self.assertEqual(controller.calls,2);self.assertEqual(sleeps,[60])
 
 class TransportTests(unittest.TestCase):
+ def test_missing_typed_file_is_read_command_failure_not_json_decode_failure(self):
+  import subprocess
+  for command in ('probe','cycle','smoke'):
+   calls=[]
+   def run(args,**kw):
+    calls.append(args)
+    if args[3]=='exec-out':return b'cat: PRIVATE_TYPED_PATH: PRIVATE_REMOTE_ERROR'
+    if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:
+     raise subprocess.CalledProcessError(1,args,output=b'PRIVATE_STDOUT',stderr=b'PRIVATE_STDERR')
+    return b''
+   with self.subTest(command=command):
+    with self.assertRaises(subprocess.SubprocessError) as caught:Transport(run=run).command(command,str(uuid.uuid4()))
+    error=caught.exception
+    self.assertEqual(getattr(error,'safe_phase',None),'READ_OUTPUT')
+    self.assertEqual(getattr(error,'safe_reason',None),'COMMAND_FAILED')
+    self.assertEqual(set(vars(error)),{'safe_phase','safe_reason'})
+    self.assertIsNone(error.__cause__);self.assertIsNone(error.__context__)
+    self.assertNotIn('PRIVATE_',str(error)+repr(vars(error)))
+    self.assertEqual(calls[-1][3:8],['shell','-T','run-as','com.aibrowser.universal.serverlab','cat'])
+    self.assertEqual(len(calls),3,'a failed read must not retry or reinvoke instrumentation')
  def test_transport_failure_rejects_unbounded_phase_or_reason(self):
   from android_cycles import transport
   failure=getattr(transport,'TransportFailure',None)
@@ -333,7 +353,7 @@ class TransportTests(unittest.TestCase):
   import subprocess
   for phase in ('CLEAN_OUTPUT','INVOKE_RUNNER','READ_OUTPUT'):
    def run(args,**kw):
-    boundary='READ_OUTPUT' if args[3]=='exec-out' else 'INVOKE_RUNNER' if args[3:6]==['shell','am','instrument'] else 'CLEAN_OUTPUT'
+    boundary='READ_OUTPUT' if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat'] else 'INVOKE_RUNNER' if args[3:6]==['shell','am','instrument'] else 'CLEAN_OUTPUT'
     if boundary==phase:raise subprocess.CalledProcessError(1,['PRIVATE_ARGV'],output=b'PRIVATE_STDOUT',stderr=b'PRIVATE_STDERR')
     return b''
    with self.subTest(phase=phase):
@@ -346,7 +366,7 @@ class TransportTests(unittest.TestCase):
     self.assertNotIn('PRIVATE_',str(error)+repr(vars(error)))
  def test_probe_malformed_payload_distinguishes_decode_from_validation(self):
   for raw,phase in ((b'{PRIVATE_PAYLOAD','DECODE_OUTPUT'),(b'\xffPRIVATE_PAYLOAD','DECODE_OUTPUT'),(b'{"PRIVATE_FIELD":"PRIVATE_VALUE"}','VALIDATE_OUTPUT')):
-   def run(args,**kw):return raw if args[3]=='exec-out' else b''
+   def run(args,**kw):return raw if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat'] else b''
    with self.subTest(phase=phase):
     with self.assertRaises(Exception) as caught:Transport(run=run).probe(str(uuid.uuid4()))
     self.assertEqual(getattr(caught.exception,'safe_phase',None),phase)
@@ -379,7 +399,7 @@ class TransportTests(unittest.TestCase):
     calls.append(args)
     if args[3:7]==['shell','run-as','com.aibrowser.universal.serverlab','rm']:
      files.pop(args[-1],None);return b''
-    if args[3]=='exec-out':
+    if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:
      if args[-1] not in files:raise subprocess.CalledProcessError(1,args)
      return files[args[-1]]
     # am instrument exits zero even if the runner crashes before its write.
@@ -399,7 +419,7 @@ class TransportTests(unittest.TestCase):
     files.pop(args[-1],None)
    elif args[3:6]==['shell','am','instrument']:
     self.assertNotIn(path,files);files[path]=json.dumps(r).encode()
-   elif args[3]=='exec-out':return files[args[-1]]
+   elif args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:return files[args[-1]]
    return b''
   self.assertEqual(Transport(run=run).probe(id),r)
   self.assertEqual(len(calls),3)
@@ -431,7 +451,7 @@ class TransportTests(unittest.TestCase):
    if args[3:]==['shell','getprop','sys.boot_completed']:
     ready=clock.value>=2;return b'1' if ready else b'0'
    self.assertTrue(ready)
-   if args[3]=='exec-out':return json.dumps(local).encode()
+   if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:return json.dumps(local).encode()
    return b''
   Transport(run=run,monotonic=clock,sleep=sleep).cycle(id)
   self.assertEqual(clock.value,2);self.assertEqual(calls[0][3:],['shell','getprop','sys.boot_completed'])
@@ -439,6 +459,6 @@ class TransportTests(unittest.TestCase):
   calls=[]
   def run(args,**kw):calls.append(args);return b'{}'
   t=Transport(run=run);id=str(uuid.uuid4());t.pull(id)
-  self.assertEqual(calls[0],['/opt/ai-browser-dev/android-sdk/platform-tools/adb','-s','emulator-5580','exec-out','run-as','com.aibrowser.universal.serverlab','cat','files/serverlab/'+id+'.json'])
+  self.assertEqual(calls[0],['/opt/ai-browser-dev/android-sdk/platform-tools/adb','-s','emulator-5580','shell','-T','run-as','com.aibrowser.universal.serverlab','cat','files/serverlab/'+id+'.json'])
   with self.assertRaises(ValueError):t.pull('../../cookies')
 if __name__=='__main__':unittest.main()

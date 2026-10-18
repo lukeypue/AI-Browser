@@ -78,7 +78,8 @@ class Transport:
  def adb(self,*args,**kw):return self.run([ADB,'-s',SERIAL,*args],**kw)
  def pull(self,cycle_id,probe=False):
   _wire.identifier(cycle_id)
-  raw=transport_step('READ_OUTPUT',self.adb,'exec-out','run-as',PACKAGE,'cat','files/serverlab/'+('probe' if probe else cycle_id)+'.json',capture=True,timeout=30)
+  # shell-v2 keeps remote cat failures out of the JSON decode boundary.
+  raw=transport_step('READ_OUTPUT',self.adb,'shell','-T','run-as',PACKAGE,'cat','files/serverlab/'+('probe' if probe else cycle_id)+'.json',capture=True,timeout=30)
   return transport_step('DECODE_OUTPUT',strict_load,raw)
  def command(self,command,cycle_id):
   _wire.require(command in ('cycle','probe','smoke'));_wire.identifier(cycle_id)
