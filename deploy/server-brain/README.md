@@ -1,0 +1,7 @@
+# Retained server brain learning
+
+This training timer is separate from the existing Practice City benchmark timer and review automation. It retains verified procedural memory. The current curriculum covers synthetic search on four profile styles; frozen held-out search evaluation uses SimulationMarket. The four Chromium smoke workers cover dialog controls and do not establish learned-search browser or real-site mastery.
+
+Install only after core/app tests, build/lint, runner/receiver/browser checks and independent review pass. Use a committed immutable source copy at `/opt/aibrowser-server-brain/source`, copy verified compiled JVM classes/jars under `/opt/aibrowser-server-brain/lab`, and replace all three service placeholders with the verified classpath and source/manifest pins. State belongs to root mode0700 at `/var/lib/aibrowser-server-brain`. Model transport uses the existing authorized Codex CLI without exposing credentials and with tools disabled.
+
+One cycle runs 60 seconds after the prior cycle ends. At most six model reservations/hour, 24/day and one/15minutes; quiet evaluation of an already mastered champion makes no model requests. No source-code self-editing or APK publication occurs in this service. A failed proposal is remembered and deduplicated; no-gain proposals are cleared and typed feedback permits a different proposal after cooldown. Historical state is bounded; inspect the typed cycle result and hashes, not credential files.
