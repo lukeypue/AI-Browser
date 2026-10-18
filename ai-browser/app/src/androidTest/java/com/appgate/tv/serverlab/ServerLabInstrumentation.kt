@@ -41,6 +41,7 @@ class ServerLabInstrumentation : Instrumentation() {
         var end="RUNTIME_FAILED"
         var elapsed=0L
         var stage="GUARD"
+        var startupWait:ServerLabStartupWait?=null
         val connection=object:ServiceConnection {
             override fun onServiceConnected(name:ComponentName,binder:IBinder) { service=(binder as BrainService.LocalBinder).service; ready.countDown() }
             override fun onServiceDisconnected(name:ComponentName) {}
@@ -52,17 +53,17 @@ class ServerLabInstrumentation : Instrumentation() {
             // Explicitly disable transports; this never reads a planner key.
             PhoneSharing(targetContext).setEnabled(false)
             PlannerKeyStore.setTeacherEnabled(targetContext,false)
-            stage="BIND_SERVICE"
-            runOnMainSync {
-                BrainService.start(targetContext)
-                bound=targetContext.bindService(Intent(targetContext,BrainService::class.java),connection,Context.BIND_AUTO_CREATE)
-            }
-            check(bound && ready.await(30,TimeUnit.SECONDS))
-            val s=service ?: error("SERVICE_UNAVAILABLE")
-            stage="ENGINE_READY"
-            val readinessDeadline=SystemClock.elapsedRealtime()+90_000L
-            while(!s.state.engineReady && SystemClock.elapsedRealtime()<readinessDeadline) SystemClock.sleep(100)
-            check(s.state.engineReady)
+            val startup=ServerLabStartupWait(SystemClock::elapsedRealtime, SystemClock::sleep) { stage=it.name }
+            startupWait=startup
+            check(startup.awaitBinding(requestBind={
+                runOnMainSync {
+                    BrainService.start(targetContext)
+                    bound=targetContext.bindService(Intent(targetContext,BrainService::class.java),connection,Context.BIND_AUTO_CREATE)
+                }
+                bound
+            }, awaitBound={ timeout -> ready.await(timeout,TimeUnit.MILLISECONDS) }))
+            val s=service ?: run { stage="SERVICE_UNAVAILABLE"; error("SERVICE_UNAVAILABLE") }
+            check(startup.awaitEngineReady { s.state.engineReady })
             engineReady=true
             waitForIdleSync()
             stage="MEMORY_BEFORE"
@@ -119,6 +120,14 @@ class ServerLabInstrumentation : Instrumentation() {
         FileOutputStream(temp).use { out -> out.write(bytes); out.fd.sync() }
         check(temp.renameTo(File(dir,name)))
         finish(if(status=="FAILED") Activity.RESULT_CANCELED else Activity.RESULT_OK,
-            Bundle().apply { putString("result",status); putString("stage",stage); putString("output","files/serverlab/$name") })
+            Bundle().apply {
+                putString("result",status); putString("stage",stage); putString("output","files/serverlab/$name")
+                putBoolean("bind_accepted",startupWait?.bindAccepted ?: false)
+                putString("bind_wait_outcome",startupWait?.bindOutcome?.name ?: "NOT_REQUESTED")
+                putLong("bind_wait_ms",startupWait?.bindWaitMs ?: 0L)
+                putLong("engine_wait_ms",startupWait?.engineWaitMs ?: 0L)
+                putLong("startup_wait_ms",startupWait?.startupWaitMs ?: 0L)
+                putBoolean("legacy_bind_30s_exceeded",startupWait?.legacyBind30sExceeded ?: false)
+            })
     }
 }
