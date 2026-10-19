@@ -54,9 +54,10 @@ class ServerLabInstrumentation : Instrumentation() {
         val id=runCatching { UUID.fromString(rawId).toString().also { require(it==rawId) } }.getOrElse {
             finish(Activity.RESULT_CANCELED,Bundle().apply { putString("result","INVALID_CYCLE_ID") }); return
         }
-        if(command !in setOf("smoke","cycle","probe","fault_probe")) {
+        if(command !in setOf("smoke","cycle","probe","fault_probe","anr_probe")) {
             finish(Activity.RESULT_CANCELED,Bundle().apply { putString("result","INVALID_COMMAND") }); return
         }
+        if(command=="anr_probe") { inspectOwnAnr(id); return }
         var service:BrainService?=null
         var bound=false
         val ready=CountDownLatch(1)
@@ -168,5 +169,48 @@ class ServerLabInstrumentation : Instrumentation() {
                 putBoolean("legacy_bind_30s_exceeded",startupWait?.legacyBind30sExceeded ?: false)
             })
         faultId=null
+    }
+    /** No runtime installation, service binding, learning, or personal state access. */
+    private fun inspectOwnAnr(id: String) {
+        if(!BuildConfig.DEBUG || !BuildConfig.SERVER_ANDROID_LAB ||
+            targetContext.packageName!=ServerLabAnrTrace.PACKAGE) {
+            finish(Activity.RESULT_CANCELED,Bundle().apply {putString("result","INVALID_LAB")});return
+        }
+        val raw=args.getString("exit_timestamp_ms") ?: ""
+        val timestamp=raw.takeIf { it.matches(Regex("[1-9][0-9]{11,12}")) }?.toLongOrNull()
+        if(timestamp==null) {
+            finish(Activity.RESULT_CANCELED,Bundle().apply {putString("result","INVALID_EVENT_TIMESTAMP")});return
+        }
+        var matched=false
+        val result=try {
+            if(Build.VERSION.SDK_INT<30) ServerLabAnrTrace.Result(ServerLabAnrTrace.Status.UNAVAILABLE)
+            else {
+                val manager=targetContext.getSystemService(android.app.ActivityManager::class.java)
+                val records=manager.getHistoricalProcessExitReasons(ServerLabAnrTrace.PACKAGE,0,16)
+                val events=records.map { ServerLabAnrTrace.Event(it.processName,it.pid,it.reason,it.timestamp) }
+                val index=ServerLabAnrTrace.selectEventIndex(events,timestamp)
+                if(index==null) ServerLabAnrTrace.Result(ServerLabAnrTrace.Status.UNKNOWN)
+                else {
+                    matched=true
+                    val event=records[index]
+                    ServerLabAnrTrace.collect(event.pid) { event.traceInputStream }
+                }
+            }
+        } catch(_:Exception) { ServerLabAnrTrace.Result(ServerLabAnrTrace.Status.UNAVAILABLE) }
+        val output=JsonObject().put("schema_version",1).put("cycle_id",id)
+            .put("source_revision",BuildConfig.DIAGNOSTICS_REVISION).put("version_code",BuildConfig.VERSION_CODE)
+            .put("expected_event_timestamp_ms",timestamp).put("event_matched",matched)
+            .put("synthetic_maintenance_only",true).put("classification",result.toJson())
+        val bytes=output.toString().toByteArray(Charsets.UTF_8);check(bytes.size<=4096)
+        val directory=File(targetContext.filesDir,"serverlab").apply {check(mkdirs() || isDirectory)}
+        val name="$id.anr-evidence.json";val target=File(directory,name);check(!target.exists())
+        val temporary=File(directory,"$name.tmp")
+        try {
+            FileOutputStream(temporary).use {it.write(bytes);it.fd.sync()}
+            check(!target.exists() && temporary.renameTo(target))
+        } finally {temporary.delete()}
+        finish(Activity.RESULT_OK,Bundle().apply {
+            putString("result","ANR_EVIDENCE");putString("output","files/serverlab/$name")
+        })
     }
 }
