@@ -14,7 +14,7 @@ enum class EngineMode { TRAIN, ASSIST, COMMIT }
 sealed class ExecOutcome {
     data class Done(val after: SemanticPageState, val detail: String, val ms: Long) : ExecOutcome()
     data class Blocked(val reason: String, val needGrant: Boolean = false) : ExecOutcome()
-    data class Failed(val reason: String, val timeout: Boolean = false) : ExecOutcome()
+    data class Failed(val reason: String, val timeout: Boolean = false, val rejected: Boolean = false) : ExecOutcome()
 }
 
 /**
@@ -63,7 +63,7 @@ class Executor(
         } catch (t: RendererGone) {
             return ExecOutcome.Failed("renderer gone: ${t.message}", timeout = true)
         }
-        if (!result.ok) return ExecOutcome.Failed(result.detail.ifBlank { "renderer rejected action" })
+        if (!result.ok) return ExecOutcome.Failed(result.detail.ifBlank { "renderer rejected action" }, rejected = true)
 
         val settleCap = if (action.kind == ActionKind.NAVIGATE || action.kind == ActionKind.BACK || action.effect == EffectClass.NAVIGATE) timeouts.settleAfterNavigateMs else timeouts.settleMs
         runCatching { renderer.waitSettle(settleCap) }

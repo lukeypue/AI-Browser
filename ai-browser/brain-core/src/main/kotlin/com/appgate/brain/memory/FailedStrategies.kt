@@ -65,6 +65,25 @@ object FailedStrategies {
         return Hashing.short("${sps.pageType}|${sps.dialogOpen}|${sps.resultKeys.isNotEmpty()}|$controls|$capability|$procedure$target")
     }
 
+    /** A definite rejected facet SELECT stays held across program aliases. Only the
+     * final opaque digest is retained, never option text, names, IDs, URLs or queries.
+     * Bind to the chosen semantic control, so unrelated page changes cannot reopen it. */
+    fun rejectedFacetSelectKey(sps: SemanticPageState, action: Action): String? {
+        if (sps.isHumanOnly || sps.settle != Settle.IDLE || action.kind != ActionKind.SELECT ||
+            action.effect != EffectClass.MUTATE_LOCAL || action.target?.role != Role.FACET) return null
+        val target = sps.affordances.singleOrNull { it.id == action.target.affordanceId } ?: return null
+        val key = facet(target.facetKey) ?: return null
+        if (target.role != Role.FACET || target.tag != "select" || !target.visible || !target.enabled ||
+            !target.sameSite || target.isCommit || action.target.facetKey != key) return null
+        val raw = action.text?.takeIf { it.length in 1..128 } ?: return null
+        val option = raw.trim().lowercase(java.util.Locale.ROOT).replace(Regex("\\s+"), " ").takeIf { it.isNotBlank() && it.length <= 128 } ?: return null
+        if (target.choices.size > 64 || target.choices.any { it.length > 128 }) return null
+        val options = target.choices.map { it.trim().lowercase(java.util.Locale.ROOT).replace(Regex("\\s+"), " ") }
+            .distinct().sorted().joinToString("|") { "${it.length}:$it" }
+        val shape = "${sps.pageType}|${sps.dialogOpen}|$key|${target.tag}|${target.facetKind}|${target.inputType}|${target.regionRole}|${target.effect}"
+        return Hashing.sha256Hex("rejected-select-v1|$shape|choices:$options|option:${option.length}:$option", 64)
+    }
+
     fun allowed(site: SiteModel, key: String, now: Long): Boolean {
         return (site.strategyFailures[key]?.count ?: 0) == 0
     }

@@ -229,14 +229,33 @@ class BrainEngine(
         val params = skillParams(ledger) + target.params
         val learned = memory.skills.reusable(page, target.skillId, params, ledger)
         if (listOfNotNull(learned, memory.skills.get(target.skillId)).any {
-                FailedStrategies.allowed(site, FailedStrategies.key(page, target.skillId, it.body, params), clock())
+                FailedStrategies.allowed(site, FailedStrategies.key(page, target.skillId, it.body, params), clock()) &&
+                    !rejectedPrefixHeld(it.body, params, page, site, ledger,
+                        it.origin != com.appgate.brain.model.SkillOrigin.BUILTIN && ("verified_v2" in it.tags || "demonstrated_candidate_v2" in it.tags))
             }) return true
         val local = LocalRecoveryPlanner.propose(ledger, page, site, target.skillId)
         if (local != null) {
             val capability = if (local.completesCapability) target.skillId else "open_filters"
-            if (FailedStrategies.allowed(site, FailedStrategies.key(page, capability, local.steps, params + local.params), clock())) return true
+            if (FailedStrategies.allowed(site, FailedStrategies.key(page, capability, local.steps, params + local.params), clock()) &&
+                !rejectedPrefixHeld(local.steps, params + local.params, page, site, ledger, true)) return true
         }
         return allowTeacher && FailedStrategies.repairAllowed(site, FailedStrategies.key(page, target.skillId), clock()) && plannerFactory() != null
+    }
+
+    /** Inspect only the first actually runnable step. A distinct prerequisite may
+     * reveal a changed control, while an unchanged held SELECT cannot monopolize visits. */
+    private fun rejectedPrefixHeld(steps: List<Step>, params: Map<String, String>, page: SemanticPageState,
+                                   site: SiteModel, ledger: TaskLedger, strict: Boolean): Boolean {
+        val grounder = StepGrounder(site)
+        for (step in steps) when (val grounded = grounder.ground(step, params, page, ledger.visited, strict = strict)) {
+            is GroundingOutcome.Skip -> continue
+            is GroundingOutcome.Missing -> return false
+            is GroundingOutcome.Ready -> {
+                val key = FailedStrategies.rejectedFacetSelectKey(page, grounded.grounded.action) ?: return false
+                return !FailedStrategies.allowed(site, key, clock())
+            }
+        }
+        return false
     }
 
     fun runTask(ledger: TaskLedger, mode: EngineMode = EngineMode.ASSIST): TaskLedger {
@@ -612,6 +631,12 @@ class BrainEngine(
             missingStep(ledger, before, site, grounded.step, "outside_task_host")
             return
         }
+        val rejectedSelectKey = FailedStrategies.rejectedFacetSelectKey(before, action)
+        if (rejectedSelectKey != null && !FailedStrategies.allowed(site, rejectedSelectKey, clock())) {
+            ledger.note("unchanged rejected facet command held across strategies")
+            finishProgram(ledger, before, site, success = false, rememberFailure = false)
+            return
+        }
         if (ledger.goal.intent == GoalIntent.LEARN_SITE) events.guide(LearningGuide.snapshot(ledger, grounded.step.copy(expect = action.expect.ifEmpty { Verifier.defaultExpectations(action, before) })))
         val stepDesc = "${action.describe()} [${ledger.programSource}]"
         ledger.actions++
@@ -634,20 +659,20 @@ class BrainEngine(
                 }
             }
             is ExecOutcome.Failed -> {
-                val code = when { outcome.timeout -> DiagnosticCode.RENDERER_TIMEOUT; outcome.reason.contains("STALE_DOCUMENT") -> DiagnosticCode.STALE_DOCUMENT; else -> DiagnosticCode.ACTION_REJECTED }
+                val code = when { outcome.timeout -> DiagnosticCode.RENDERER_TIMEOUT; outcome.reason == "STALE_DOCUMENT" -> DiagnosticCode.STALE_DOCUMENT; else -> DiagnosticCode.ACTION_REJECTED }
                 diagnostic(ledger, before, null, grounded.step, VerifyStatus.FAILED, code)
-                ledger.record(LedgerStep(clock(), ledger.phase, before.hash, stepDesc, VerifyStatus.FAILED, outcome.reason, ledger.programSource))
+                ledger.record(LedgerStep(clock(), ledger.phase, before.hash, stepDesc, VerifyStatus.FAILED, code.name, ledger.programSource))
                 events.step(ledger, stepDesc, VerifyStatus.FAILED)
                 recordEpisode(site, before, grounded, VerifyStatus.FAILED, before.pageType, clock() - started)
                 // A document/target refusal happened before a click. Re-observe and ground
                 // the semantic step against the new document; never replay the old target.
-                val stale = outcome.reason.contains("STALE_DOCUMENT") || outcome.reason.contains("STALE_TARGET")
+                val stale = outcome.reason == "STALE_DOCUMENT" || outcome.reason == "STALE_TARGET" || outcome.reason == "TARGET_MISSING"
                 if (stale && retriesLeft > 0 && grounded.chosen != null && action.effect != com.appgate.brain.model.EffectClass.COMMIT_EXTERNAL) {
                     val observed = runCatching { executor.observe(clock()) }.getOrNull()
                     if (observed != null && acceptPage(ledger, observed, profile) && !observed.isHumanOnly &&
                         observed.pageType == before.pageType && !observed.dialogOpen) {
                         // IDs are document-local: a document refusal invalidates the old exclusion set.
-                        val excluded = if (outcome.reason.contains("STALE_DOCUMENT")) emptySet() else
+                        val excluded = if (outcome.reason == "STALE_DOCUMENT") emptySet() else
                             excludedIds + listOfNotNull(grounded.chosen.affordance.id)
                         val fresh = StepGrounder(site).ground(grounded.step, emptyMap(), observed, ledger.visited,
                             excluded, strict = strictGrounding(ledger))
@@ -658,8 +683,12 @@ class BrainEngine(
                     }
                     if (ledger.blocked || ledger.done) return
                 }
+                if (outcome.rejected && outcome.reason.startsWith("option not found: ") && !outcome.timeout && !stale && rejectedSelectKey != null) {
+                    FailedStrategies.record(site, rejectedSelectKey, false, clock())
+                    memory.saveSite(site)
+                }
                 if (outcome.timeout) handleRendererFailure(ledger, outcome.reason, true)
-                else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "exec:" + outcome.reason.take(40)) }
+                else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "exec:" + code.name) }
                 finishProgram(ledger, before, site, success = false, rememberFailure = !outcome.timeout && !stale)
             }
             is ExecOutcome.Done -> {

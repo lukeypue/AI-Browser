@@ -182,4 +182,25 @@ class LabCompletedRehearsalTest {
             assertEquals(1, f.ledgers.size)
         } finally { session.stop(); worker.interrupt(); worker.join(2000) }
     }
+    @Test fun heldFacetPrefixYieldsToAnotherDueCompletedCapability() {
+        val f=Fixture(AtomicLong(initial));val site=f.completeAll()
+        site.curriculum.single { it.id=="constrain_numeric" }.completedAt=initial-900_000L
+        site.curriculum.single { it.id=="next_page" }.completedAt=initial-800_000L
+        val page=SpsParser().parse(f.fake.observe(1000),initial)
+        val target=LearningOpportunities.target(page,"constrain_numeric")!!
+        val body=f.memory.skills.get("constrain_numeric")!!.body
+        val action=body.map { StepGrounder(site).ground(it,target.params,page,emptySet()) }
+            .filterIsInstance<GroundingOutcome.Ready>().first().grounded.action
+        val key=FailedStrategies.rejectedFacetSelectKey(page,action)!!
+        FailedStrategies.record(site,key,false,initial-1000L)
+        FailedStrategies.record(site,FailedStrategies.key(page,"constrain_numeric",body,target.params),false,initial-1000L)
+        f.memory.saveSite(site)
+        val engine=BrainEngine(f.fake,f.memory,{ f.planner },f.events,config) { f.time.get() }
+        assertFalse("held prefix must not allocate an empty rehearsal",engine.learningLessonAvailable(f.profile,page,"constrain_numeric",allowTeacher=false))
+        LearningSession(engine,f.memory,f.events,listOf(f.profile),clock={ f.time.get() },completedRehearsal=true).run(1)
+        assertEquals(1,f.ledgers.size)
+        assertEquals("next_page",f.ledgers.single().lesson)
+        assertTrue("next_page" in f.ledgers.single().successfulSkills)
+        assertEquals(0,f.teacherCalls)
+    }
 }
