@@ -70,8 +70,11 @@ def validate_challenge_evidence(r):
 def sanitize_dialog_clinic(c):
     def check(ok):
         if not ok:raise ValueError('invalid dialog clinic evidence')
-    hashes={'manifest_sha256':'94d28e1439971863a0867207d29fef3c986b32ffde22937e861548b720158981','fixture_sha256':'7fb2a0c66abef0626a3be05e13a5407b52ce11ad68405d43cff43e54caf3f853','extractor_sha256':'adfe635862be7b529604c65a28bb81a0ceb433aca97a2c83ead5db79aaea0be4'}
-    check(all(c.get(k)==v for k,v in hashes.items()))
+    hashes={'manifest_sha256':'94d28e1439971863a0867207d29fef3c986b32ffde22937e861548b720158981','fixture_sha256':'e0e30c1f063c8697c1d569a7620f3f1869aa1c27e3bdd357e9cb198b2418ecfa','extractor_sha256':'ee94cc45c607b37c1026fde1fed80053fb6fdaea7027fd826b8ba26a42bec309'}
+    # Keep already validated historical reports uploadable. Never mix the
+    # fixture of one capture with the extractor of another.
+    legacy=dict(hashes,fixture_sha256='7fb2a0c66abef0626a3be05e13a5407b52ce11ad68405d43cff43e54caf3f853',extractor_sha256='adfe635862be7b529604c65a28bb81a0ceb433aca97a2c83ead5db79aaea0be4')
+    check(any(all(c.get(k)==v for k,v in approved.items()) for approved in (hashes,legacy)))
     check(c.get('schema_version')==1 and c.get('fixture_cases')==12 and c.get('held_out_cases')==10)
     check(c.get('source')=='CHROMIUM_GENERATED_REPLAY' and c.get('teacher')=='LOCAL_SCRIPTED' and c.get('real_world_validated') is False)
     check(c.get('training_demonstrations')==4 and c.get('evaluation_teacher_calls')==0)

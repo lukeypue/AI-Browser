@@ -1,6 +1,8 @@
 package com.appgate.brain.engine
 
 import com.appgate.brain.model.*
+import com.appgate.brain.memory.FailedStrategies
+import com.appgate.brain.skills.BuiltinSkills
 import com.appgate.brain.perception.Vocabulary
 import com.appgate.brain.util.Text
 
@@ -24,7 +26,7 @@ object LocalRecoveryPlanner {
         if (sps.isHumanOnly || sps.settle == Settle.BUSY ||
             hostIdentity(sps.host) != hostIdentity(ledger.host) || hostIdentity(site.host) != hostIdentity(ledger.host)) return null
         return when (capability) {
-            "search" -> search(ledger, sps)
+            "search" -> search(ledger, sps, site)
             "constrain_numeric", "select_facet", "apply_filters" -> facet(ledger, sps, capability)
             "open_filters" -> if (sps.pageType in filterPages) open(sps, null, true) else null
             "sort_results" -> sort(ledger, sps)
@@ -32,15 +34,30 @@ object LocalRecoveryPlanner {
         }
     }
 
-    private fun search(ledger: TaskLedger, sps: SemanticPageState): LocalRecoveryPlan? {
+    private fun search(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel): LocalRecoveryPlan? {
         if (sps.dialogOpen || sps.pageType !in setOf(PageType.HOME, PageType.SEARCH, PageType.RESULTS, PageType.UNKNOWN)) return null
         val query = ledger.effectiveGoal.query.takeIf { it.isNotBlank() } ?: return null
         val control = sps.byRole(Role.SEARCH_BOX).singleOrNull()?.takeIf { safe(it) && editable(it) } ?: return null
-        return LocalRecoveryPlan(
+        val params = mapOf("query" to query)
+        val direct = LocalRecoveryPlan(
             listOf(Step(StepKind.TYPE, Role.SEARCH_BOX, arg = "\$query", submit = true, nameHint = control.name,
                 expect = listOf(Postcondition.anyOf(Postcondition.ResultsChanged, Postcondition.PageTypeIs(PageType.RESULTS))))),
-            mapOf("query" to query), listOf(Postcondition.PageTypeIs(PageType.RESULTS))
+            params, listOf(Postcondition.PageTypeIs(PageType.RESULTS))
         )
+        // The builtin's failed Enter must not be repeated under a shorter local
+        // program identity. Relevant changed controls still get a distinct key.
+        val enterHeld = !FailedStrategies.allowed(site, FailedStrategies.key(sps, "search", BuiltinSkills.search.body, params), 0L)
+        if (!enterHeld && FailedStrategies.allowed(site, FailedStrategies.key(sps, "search", direct.steps, params), 0L)) return direct
+        val submit = sps.byRole(Role.SUBMIT).singleOrNull()?.takeIf { safe(it) } ?: return null
+        // Draft input is not submission evidence. The button must actually change
+        // result identities, including when starting on an existing results page.
+        val post = listOf(Postcondition.ResultsChanged, Postcondition.PageTypeIs(PageType.RESULTS))
+        val alternative = LocalRecoveryPlan(listOf(
+            Step(StepKind.TYPE, Role.SEARCH_BOX, arg = "\$query", submit = false, nameHint = control.name,
+                expect = listOf(Postcondition.ValueIs("query", "\$query"))),
+            Step(StepKind.CLICK, Role.SUBMIT, nameHint = submit.name, expect = post)
+        ), params, post)
+        return alternative.takeIf { FailedStrategies.allowed(site, FailedStrategies.key(sps, "search", it.steps, params), 0L) }
     }
 
     private fun facet(ledger: TaskLedger, sps: SemanticPageState, capability: String): LocalRecoveryPlan? {

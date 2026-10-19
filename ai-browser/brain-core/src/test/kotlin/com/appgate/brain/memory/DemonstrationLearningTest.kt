@@ -39,7 +39,7 @@ class DemonstrationLearningTest {
         val fake = FakeSite("example.com").apply { dialogShown = false }
         val before = SpsParser().parse(fake.observe(1000), 1000)
         val skill = SkillCompiler.compileFromDemonstration(memory, null, before.host, trace(), before, before, 1000)!!
-        val task = ledger().copy(goal = ledger().goal.copy(budget = Budget(itemsInspected = 1, actions = 16, llmCalls = 0, wallMs = 10_000)))
+        val task = ledger().copy(goal = ledger().goal.copy(query = "Ford", budget = Budget(itemsInspected = 1, actions = 16, llmCalls = 0, wallMs = 10_000)))
         val out = BrainEngine(fake, memory, { null }, object : EngineEvents {}, EngineConfig(pacingOverrideMs = 0, ambiguousRecheckMs = 0)).runTask(task)
         assertTrue(out.steps.any { it.source == "skill:${skill.id}" && it.status == VerifyStatus.VERIFIED })
         assertTrue("${out.status} ${out.terminalReason} ${out.notes} steps=${out.steps} skill=${memory.skills.get(skill.id)}", "search" in out.successfulSkills)

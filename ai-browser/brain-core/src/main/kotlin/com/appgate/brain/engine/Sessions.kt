@@ -153,13 +153,13 @@ class LearningSession(
             events.status("Learning ${profile.name} — ${Curriculum.progress(site)}")
             while (!stopRequested && clock() - startedAt < perSiteChunkMs && goalsThisVisit < 4) {
                 // A retry recheck is an observation, not a new generic finding task.
-                val page = engine.probeLearning(profile)
+                val page = engine.probeLearning(profile, beginCompletedPracticeVisit = completedRehearsal && goalsThisVisit == 0 && Curriculum.allLessonsComplete(site))
                 if (page != null) Curriculum.observe(site, page, clock())
                 var heldProcedure = false
-                val canAttempt: (String) -> Boolean = { id ->
-                    engine.learningLessonAvailable(profile, page!!, id).also { if (!it) heldProcedure = true }
-                }
                 val completedLabRehearsal = completedRehearsal && Curriculum.allLessonsComplete(site)
+                val canAttempt: (String) -> Boolean = { id ->
+                    engine.learningLessonAvailable(profile, page!!, id, allowTeacher = !completedLabRehearsal).also { if (!it) heldProcedure = true }
+                }
                 val lesson = if (page == null || site.learningNeedsHuman) ""
                     else if (completedLabRehearsal) Curriculum.practiceLesson(site, clock(), page, canAttempt, includeComplete = true)
                     else Curriculum.nextLesson(site, clock(), page, canAttempt)
@@ -211,6 +211,9 @@ class LearningSession(
                     break
                 }
                 if (rehearsing) {
+                    // Clearing a blocking notice prepares the current visit; continue
+                    // to one due results capability before yielding to other profiles.
+                    if (completedLabRehearsal && lesson == "dismiss_dialog" && lesson in out.successfulSkills) continue
                     site.learningBlockedUntil = clock() + if (completedLabRehearsal) Curriculum.REHEARSAL_INTERVAL_MS else lessonRetryMs
                     memory.saveSite(site)
                     break

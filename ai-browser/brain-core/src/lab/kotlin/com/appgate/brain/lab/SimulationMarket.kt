@@ -162,6 +162,10 @@ class SimulationMarket(val scenario: Scenario) : Renderer {
             return id
         }
         when (scenario.fault) {
+            SimulationFault.CHALLENGE -> {
+                signals.put("challengeWidget", true).put("challengePath", true).put("sparse", true).put("textLength", 120)
+                raw.put("url", "https://${scenario.host}/challenge")
+            }
             SimulationFault.AUTH -> {
                 signals.put("passwordFields", 1).put("authPath", true).put("sparse", true).put("textLength", 120)
                 raw.put("url", "https://${scenario.host}/login")

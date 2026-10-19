@@ -29,6 +29,11 @@ class LearningEligibilityTest {
             FailedStrategies.record(site, FailedStrategies.key(page, "search", local), false, now)
             FailedStrategies.record(site, FailedStrategies.key(page, "search"), false, now)
         }
+        val probe = TaskLedger("held", Goal("held", GoalIntent.LEARN_SITE, "synthetic", "Ford", emptyList()), fake.host, fake.url)
+        val alternative = LocalRecoveryPlanner.propose(probe, page, site, "search")!!
+        assertEquals(listOf(StepKind.TYPE, StepKind.CLICK), alternative.steps.map { it.kind })
+        val alternativeKey = FailedStrategies.key(page, "search", alternative.steps, alternative.params)
+        repeat(2) { FailedStrategies.record(site, alternativeKey, false, now) }
         memory.saveSite(site)
         val restored = Memory(storage) { now }
         var finished = 0
@@ -63,7 +68,7 @@ class LearningEligibilityTest {
         assertTrue("a fresh bounded teacher repair remains available", engine.learningLessonAvailable(profile, page, "open_item"))
         assertEquals("eligibility never reserves or calls the teacher", 0, calls)
         now = initial
-        val localKey = FailedStrategies.key(page, "search", local)
+        val localKey = alternativeKey
         val failure = restored.site(fake.host).strategyFailures.remove(localKey)!!
         assertTrue("a different local repair remains eligible", engine.learningLessonAvailable(profile, page, "open_item"))
         restored.site(fake.host).strategyFailures[localKey] = failure

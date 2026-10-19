@@ -91,8 +91,17 @@ object Curriculum {
 
     /** Completed-site rehearsals are an explicit synthetic-lab opt-in, with the same safety and spacing. */
     fun practiceLesson(site: SiteModel, now: Long, page: SemanticPageState, canAttempt: (String) -> Boolean = { true }, includeComplete: Boolean): String {
-        if (page.isHumanOnly || page.dialogOpen || page.settle != com.appgate.brain.model.Settle.IDLE ||
-            page.pageType != com.appgate.brain.model.PageType.RESULTS || (!includeComplete && allLessonsComplete(site))) return ""
+        if (page.isHumanOnly || page.settle != com.appgate.brain.model.Settle.IDLE) return ""
+        // A completed curriculum still has to clear an ordinary blocking dialog before
+        // results practice. Never act behind it or dismiss a filter workspace.
+        if (includeComplete && allLessonsComplete(site) && page.dialogOpen && !LearningOpportunities.dialogHoldsFilters(page)) {
+            val item = site.curriculum.firstOrNull { it.id == "dismiss_dialog" } ?: return ""
+            return if (item.done && item.retryAt <= now && now >= item.completedAt &&
+                now - item.completedAt >= REHEARSAL_INTERVAL_MS &&
+                LearningOpportunities.target(page, item.id)?.skillId == item.id && canAttempt(item.id)) item.id else ""
+        }
+        if (page.dialogOpen || page.pageType != com.appgate.brain.model.PageType.RESULTS ||
+            (!includeComplete && allLessonsComplete(site))) return ""
         // Only runnable unfinished work takes priority: a persisted procedure hold
         // must not starve a different due, verified capability.
         if (site.curriculum.any { item ->

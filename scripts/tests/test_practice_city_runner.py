@@ -14,6 +14,66 @@ class PracticeCityRunnerTest(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_source_following_holds_both_locks_and_preserves_reports_on_failure(self):
+        import sys,types
+        from unittest.mock import patch
+        module=self.runner()
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);project=root/'checkout';output=root/'reports'
+            core=project/'ai-browser/brain-core';core.mkdir(parents=True);output.mkdir()
+            (project/'AGENTS.md').write_text('synthetic test checkout');(core/'settings.gradle').write_text('')
+            latest=output/'latest.json';latest.write_text('{"preserve":"previous report"}')
+            def unavailable(actual):
+                self.assertEqual(project,actual)
+                with self.assertRaises(module.AlreadyRunning):
+                    with module.session_lock(project,root/'different-output'):pass
+                with self.assertRaises(module.AlreadyRunning):
+                    with module.run_lock(output):pass
+                raise ValueError('synthetic unavailable source')
+            with patch.dict(sys.modules,{'city_source':types.SimpleNamespace(sync_source=unavailable)}):
+                result=module.main(['--project',str(project),'--output-dir',str(output),'--follow-stable'])
+            self.assertEqual(1,result)
+            self.assertEqual('{"preserve":"previous report"}',latest.read_text())
+
+
+    def test_source_only_sync_holds_both_locks_without_running_or_touching_reports(self):
+        import sys,types
+        from unittest.mock import patch
+        module=self.runner()
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);project=root/'checkout';output=root/'reports'
+            core=project/'ai-browser/brain-core';core.mkdir(parents=True);output.mkdir()
+            (project/'AGENTS.md').write_text('synthetic test checkout');(core/'settings.gradle').write_text('')
+            latest=output/'latest.json';latest.write_text('previous')
+            calls=[]
+            def sync(actual):
+                self.assertEqual(project,actual);calls.append(actual)
+                with self.assertRaises(module.AlreadyRunning):
+                    with module.session_lock(project,root/'other'):pass
+                with self.assertRaises(module.AlreadyRunning):
+                    with module.run_lock(output):pass
+                return {'source_revision':'a'*40,'updated':True}
+            with patch.dict(sys.modules,{'city_source':types.SimpleNamespace(sync_source=sync)}),patch.object(module,'run_command',side_effect=AssertionError('source updater must not run Gradle')):
+                result=module.main(['--project',str(project),'--output-dir',str(output),'--sync-source-only'])
+            self.assertEqual(0,result);self.assertEqual([project],calls);self.assertEqual('previous',latest.read_text())
+
+    def test_followed_source_must_match_actual_report_revision(self):
+        import sys,types
+        from unittest.mock import patch
+        module=self.runner()
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);project=root/'checkout';output=root/'reports'
+            core=project/'ai-browser/brain-core';core.mkdir(parents=True);output.mkdir()
+            (project/'AGENTS.md').write_text('synthetic test checkout');(core/'settings.gradle').write_text('')
+            latest=output/'latest.json';latest.write_text('previous')
+            def run(*args):
+                target=core/'build/reports/brain';target.mkdir(parents=True,exist_ok=True)
+                (target/'simulation.json').write_text(json.dumps({'source':{'revision':'b'*40},'manifest':{'training_episodes':3600}}))
+                (target/'dialog-clinic.json').write_text('{}')
+            with patch.dict(sys.modules,{'city_source':types.SimpleNamespace(sync_source=lambda _: {'source_revision':'a'*40,'updated':True})}),patch.object(module,'run_command',side_effect=run),patch.object(module,'validate_report',return_value=[]):
+                result=module.main(['--project',str(project),'--output-dir',str(output),'--follow-stable'])
+            self.assertNotEqual(0,result);self.assertEqual('previous',latest.read_text())
+
     def test_overlapping_run_is_refused(self):
         module = self.runner()
         with tempfile.TemporaryDirectory() as tmp:
@@ -114,3 +174,55 @@ class PracticeCityRunnerTest(unittest.TestCase):
                 self.assertEqual(0, module.main(args), 'Scheduled overlap is a safe skip')
                 self.assertNotEqual(0, module.main(args + ['--prepare-dependencies']),
                                     'Installation requires a real completed session')
+                self.assertNotEqual(0, module.main(args + ['--sync-source-only']), 'Source synchronization must not claim completion while busy')
+
+class ChallengeRunnerTests(unittest.TestCase):
+    def test_challenge_summary_cannot_be_ignored(self):
+        module=PracticeCityRunnerTest().runner()
+        r={'challenge_manifest':{'episodes':432,'districts':24},'challenge_baseline':{'episodes':432,'unsafe_actions':1}}
+        errors=module.validate_report(r)
+        self.assertTrue(any('challenge' in x for x in errors))
+
+class ChallengeEvidenceRunnerTests(unittest.TestCase):
+    def fixture(self):
+        import sys
+        directory=Path(__file__).parents[2]/'deploy/phone-reports/receiver'
+        sys.path.insert(0,str(directory))
+        try:
+            from test_synthetic_export import ChallengeExportTests
+            return ChallengeExportTests().challenge()
+        finally:sys.path.remove(str(directory))
+    def test_valid_frozen_case_evidence_passes(self):
+        self.assertEqual([],PracticeCityRunnerTest().runner().validate_report(self.fixture(),require_challenge=True))
+    def test_contradictory_case_and_changed_corpus_are_rejected(self):
+        import hashlib
+        module=PracticeCityRunnerTest().runner()
+        r=self.fixture();r['challenge_pairs'][0]['after']['unsafe_actions']=1
+        self.assertTrue(module.validate_report(r,require_challenge=True))
+        r=self.fixture();c=r['challenge_pairs'][0]['before']['scenario'].replace('/100010/','/999999/')
+        r['challenge_pairs'][0]={'before':{'scenario':c},'after':{'scenario':c}}
+        r['challenge_manifest']['sha256']=hashlib.sha256('\n'.join(x['before']['scenario'] for x in r['challenge_pairs']).encode()).hexdigest()
+        self.assertTrue(module.validate_report(r,require_challenge=True))
+
+class DialogClinicRunnerTests(unittest.TestCase):
+    def test_clinic_validator_rejects_unearned_mastery(self):
+        import sys
+        directory=Path(__file__).parents[2]/'deploy/phone-reports/receiver';sys.path.insert(0,str(directory))
+        try:
+            from test_dialog_clinic_export import clinic
+            c=clinic();module=PracticeCityRunnerTest().runner();self.assertEqual(4,module.sanitize_dialog_clinic(c)['compiled_transfer_uses'])
+            c['after'][4]['verified']=True
+            with self.assertRaises(ValueError):module.sanitize_dialog_clinic(c)
+        finally:sys.path.remove(str(directory))
+
+class DialogClinicConsistencyRunnerTests(unittest.TestCase):
+    def test_reuse_requires_compiled_memory_and_actions(self):
+        import sys
+        directory=Path(__file__).parents[2]/'deploy/phone-reports/receiver';sys.path.insert(0,str(directory))
+        try:
+            from test_dialog_clinic_export import clinic
+            module=PracticeCityRunnerTest().runner()
+            for mutate in [lambda c:c.update(compiled_dialog_skills=0),lambda c:c['after'][0].update(actions=0)]:
+                c=clinic();mutate(c)
+                with self.assertRaises(ValueError):module.sanitize_dialog_clinic(c)
+        finally:sys.path.remove(str(directory))

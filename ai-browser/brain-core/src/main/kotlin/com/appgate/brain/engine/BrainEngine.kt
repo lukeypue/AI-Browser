@@ -20,6 +20,7 @@ import com.appgate.brain.model.SemanticPageState
 import com.appgate.brain.model.SiteModel
 import com.appgate.brain.model.Skill
 import com.appgate.brain.model.Step
+import com.appgate.brain.model.StepKind
 import com.appgate.brain.model.TaskLedger
 import com.appgate.brain.model.TaskPhase
 import com.appgate.brain.model.TaskResult
@@ -104,7 +105,7 @@ class BrainEngine(
     // ------------------------------------------------------------------ public entry points
 
     /** One bounded, model-free opportunity check. No task or success credit is created. */
-    fun probeLearning(profile: SiteProfile): SemanticPageState? {
+    fun probeLearning(profile: SiteProfile, beginCompletedPracticeVisit: Boolean = false): SemanticPageState? {
         if (stopRequested.get()) return null
         val host = profile.hosts.first()
         val site = memory.site(host)
@@ -154,6 +155,13 @@ class BrainEngine(
             val emptyLandingDue = emptyLanding && !site.learningNeedsHuman && site.challengesToday < 3 &&
                 site.learningBlockedUntil <= clock() && knownSearch != null && knownSearch == current &&
                 (emptyLandingRecoveryAt[host]?.let { clock() - it >= Curriculum.RETRY_MS } ?: true)
+            // Synthetic completed practice starts a new bounded visit from this
+            // profile's known search, rather than relabelling the previous layout.
+            // Navigation earns no learning and never clears a failure or human hold.
+            val completedVisitReset = beginCompletedPracticeVisit && Curriculum.allLessonsComplete(site) &&
+                !site.learningNeedsHuman && site.challengesToday < 3 && site.learningBlockedUntil <= clock() &&
+                knownSearch != null && page?.let { p -> !p.isHumanOnly && !p.dialogOpen && p.settle == com.appgate.brain.model.Settle.IDLE &&
+                    p.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.RESULTS, PageType.FACET_PANEL, PageType.DETAIL) } == true
             // Description practice can start on this detail page. Back practice needs
             // a results checkpoint in the new lesson ledger, so first reestablish results.
             val usableDetail = page?.let { p ->
@@ -164,7 +172,7 @@ class BrainEngine(
                 }
             } == true
             // Always observe an already open auth/challenge before navigating elsewhere.
-            if (page?.isHumanOnly != true && (page == null || recoveryDue || emptyLandingDue || (page.pageType == PageType.ERROR && page.settle == com.appgate.brain.model.Settle.IDLE && !page.dialogOpen) || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
+            if (page?.isHumanOnly != true && (page == null || recoveryDue || emptyLandingDue || completedVisitReset || (page.pageType == PageType.ERROR && page.settle == com.appgate.brain.model.Settle.IDLE && !page.dialogOpen) || strandedPage || (page.pageType == PageType.DETAIL && !usableDetail) ||
                     (page.pageType in setOf(PageType.HOME, PageType.SEARCH, PageType.UNKNOWN) && !page.dialogOpen &&
                         page.settle == com.appgate.brain.model.Settle.IDLE && knownSearch != null && knownSearch != current))) {
                 val target = knownSearch?.takeIf { allowedUrl(probe, it, profile) }
@@ -173,11 +181,11 @@ class BrainEngine(
                 val outcome = executor.execute(Action(ActionKind.NAVIGATE, url = target,
                     effect = com.appgate.brain.model.EffectClass.NAVIGATE), emptySps(host), EngineMode.TRAIN, emptyList(), null, clock())
                 page = (outcome as? ExecOutcome.Done)?.after ?: return@runCatching null
-                if (recoveryDue || emptyLandingDue) {
+                if (recoveryDue || emptyLandingDue || completedVisitReset) {
                     learningBusySince.remove(host)
                     site.lastLearningStatus = "Rechecked safe search after a stalled page"
                     events.diagnostic(host, "learning_recovery", JsonObject()
-                        .put("reason", if (emptyLandingDue) "empty_landing" else if (busyExpired) "busy_timeout" else "failed_approach")
+                        .put("reason", if (completedVisitReset) "completed_practice_visit" else if (emptyLandingDue) "empty_landing" else if (busyExpired) "busy_timeout" else "failed_approach")
                         .put("page_type", page!!.pageType.name))
                 }
             }
@@ -210,7 +218,7 @@ class BrainEngine(
 
     /** Check the live prerequisite against the executor's failure holds before allocating a lesson.
      * This does not execute, reserve teacher budget, persist a ledger, or award credit. */
-    fun learningLessonAvailable(profile: SiteProfile, page: SemanticPageState, lesson: String): Boolean {
+    fun learningLessonAvailable(profile: SiteProfile, page: SemanticPageState, lesson: String, allowTeacher: Boolean = true): Boolean {
         val target = LearningOpportunities.target(page, lesson) ?: return false
         val site = memory.site(profile.hosts.first())
         val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal, page, lesson)
@@ -228,7 +236,7 @@ class BrainEngine(
             val capability = if (local.completesCapability) target.skillId else "open_filters"
             if (FailedStrategies.allowed(site, FailedStrategies.key(page, capability, local.steps, params + local.params), clock())) return true
         }
-        return FailedStrategies.repairAllowed(site, FailedStrategies.key(page, target.skillId), clock()) && plannerFactory() != null
+        return allowTeacher && FailedStrategies.repairAllowed(site, FailedStrategies.key(page, target.skillId), clock()) && plannerFactory() != null
     }
 
     fun runTask(ledger: TaskLedger, mode: EngineMode = EngineMode.ASSIST): TaskLedger {
@@ -445,8 +453,13 @@ class BrainEngine(
                              capability: String = source.removePrefix("skill:"), post: List<Postcondition> = emptyList()) {
         // Bind parameters now so the persisted program is self-contained.
         ledger.currentProgram = steps.map { s ->
-            s.copy(facetKey = s.facetKey?.let { StepGrounder.substitute(it, params) }, arg = s.arg?.let { StepGrounder.substitute(it, params) },
+            val bound = s.copy(facetKey = s.facetKey?.let { StepGrounder.substitute(it, params) }, arg = s.arg?.let { StepGrounder.substitute(it, params) },
                 expect = s.expect.map { bindExpect(it, params) })
+            // Persist the verifier's exact non-submit search default so a teacher
+            // plan has the same typed prerequisite contract as a local repair.
+            if (bound.kind == StepKind.TYPE && bound.role == Role.SEARCH_BOX && !bound.submit &&
+                bound.expect.isEmpty() && bound.arg != null)
+                bound.copy(expect = listOf(Postcondition.ValueIs("query", bound.arg))) else bound
         }
         val page = latestPage
         if (page != null &&
@@ -739,7 +752,9 @@ class BrainEngine(
         val before = programBefore
         val required = ledger.currentProgram.indices.filter { !ledger.currentProgram[it].optional }
         val capabilityHolds = when (ledger.programCapability) {
-            "search" -> TaskPolicy(profileFor(ledger), site).queryApplied(ledger.goal, sps) && sps.pageType == PageType.RESULTS
+            "search" -> before != null && sps.pageType == PageType.RESULTS &&
+                TaskPolicy(profileFor(ledger), site).queryApplied(ledger.goal, sps) &&
+                Verifier.holds(Postcondition.ResultsChanged, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
             "constrain_numeric", "select_facet" -> {
                 val facets = ledger.currentProgram.filter { it.role == Role.FACET && it.facetKey != null && it.arg != null }
                 // An apply-only repair still carries the original typed constraint contract.
@@ -759,7 +774,24 @@ class BrainEngine(
                 Verifier.holds(Postcondition.NewResults, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
             else -> true
         }
-        val programEvidence = success && before != null && required.isNotEmpty() && required.all { it in ledger.programVerifiedSteps } &&
+        // A failed Enter may already have filled the input. That exact, satisfied
+        // query is a prerequisite, not a second action to manufacture. Retain the
+        // ordinary required-TYPE portable contract, and accept its satisfied state
+        // only when a required Submit really transitioned and new results verify.
+        val submittedSearch = ledger.programCapability == "search" && capabilityHolds && before != null &&
+            Verifier.holds(Postcondition.ValueIs("query", ledger.goal.query), Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf()) &&
+            required.any { i -> ledger.currentProgram[i].let { step ->
+                step.kind == StepKind.CLICK && step.role == Role.SUBMIT &&
+                    Postcondition.ResultsChanged in step.expect && i in ledger.programVerifiedSteps
+            } }
+        fun hasStepEvidence(i: Int): Boolean {
+            if (i in ledger.programVerifiedSteps) return true
+            val step = ledger.currentProgram[i]
+            return submittedSearch && i in programSatisfiedSteps && step.kind == StepKind.TYPE &&
+                step.role == Role.SEARCH_BOX && !step.submit && step.arg == ledger.goal.query &&
+                step.expect == listOf(Postcondition.ValueIs("query", ledger.goal.query))
+        }
+        val programEvidence = success && before != null && required.isNotEmpty() && required.all(::hasStepEvidence) &&
             ledger.programPost.isNotEmpty() && ledger.programPost.all {
                 Verifier.holds(it, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
             }
@@ -775,7 +807,13 @@ class BrainEngine(
         // Moving toward a footer is useful exploration, not proof of loading or failure.
         // Transport uncertainty and interlock refusals cannot quarantine sound learned skills.
         val advancingScroll = success && before != null && ledger.programCapability == "scroll_results" && sps.scrollY > before.scrollY
-        val neutral = terminalEnd || !verified && (!rememberFailure || advancingScroll)
+        // Repeating an already applied query with identical listings proves no new
+        // search capability, but cannot blacklist a working form for future queries.
+        val unchangedSearch = ledger.programCapability == "search" && before != null &&
+            before.pageType == PageType.RESULTS && sps.pageType == PageType.RESULTS &&
+            before.resultKeys.isNotEmpty() && before.resultKeys == sps.resultKeys &&
+            committedQueryMatches(ledger.goal, before) && committedQueryMatches(ledger.goal, sps)
+        val neutral = unchangedSearch || terminalEnd || !verified && (!rememberFailure || advancingScroll)
         ledger.programCompleted = verified
         val source = ledger.programSource
         if (before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked && !neutral &&
@@ -791,11 +829,17 @@ class BrainEngine(
                 Curriculum.markSkillVerified(site, ledger.programCapability, clock())
             }
         } else if (source in setOf("planner", "local") && verified) {
-            SkillCompiler.compileVerified(memory, ledger, ledger.currentProgram, clock())
+            // Composite compilation proof includes the satisfied exact-query
+            // prerequisite. Keep the original ledger's causal transitions intact.
+            val compilationLedger = if (submittedSearch) ledger.copy(
+                programVerifiedSteps = (ledger.programVerifiedSteps + required.filter(::hasStepEvidence)).toMutableSet()
+            ) else ledger
+            SkillCompiler.compileVerified(memory, compilationLedger, ledger.currentProgram, clock())
             ledger.successfulSkills += ledger.programCapability
             Curriculum.markSkillVerified(site, ledger.programCapability, clock())
         }
         if (terminalEnd) ledger.note("end of results verified; no new loading lesson credited")
+        if (unchangedSearch) ledger.note("unchanged search context; no new learning credited")
         if (!verified && success && !neutral) ledger.consecutiveFailures++
         if (!verified && !neutral && (source.startsWith("skill:") || source == "local") && !ledger.blocked)
             ledger.repairReason = "repair failed ${ledger.programCapability} procedure"
@@ -813,6 +857,20 @@ class BrainEngine(
         memory.saveLedger(ledger)
         memory.saveSite(site)
     }
+
+
+    /** Neutral refreshes require committed URL evidence, never an editable draft. */
+    private fun committedQueryMatches(goal: Goal, sps: SemanticPageState): Boolean = runCatching {
+        fun normalized(value: String) = value.trim().lowercase().replace(Regex("""\s+"""), " ")
+        val wanted = normalized(goal.query)
+        if (wanted.isBlank()) return@runCatching false
+        val keys = setOf("q", "query", "keywords", "keyword", "search", "search_query", "searchterm", "term")
+        val values = java.net.URI(sps.url).rawQuery.orEmpty().split('&').mapNotNull { part ->
+            val key = java.net.URLDecoder.decode(part.substringBefore('='), "UTF-8").lowercase()
+            if (key !in keys) null else java.net.URLDecoder.decode(part.substringAfter('=', ""), "UTF-8")
+        }
+        values.isNotEmpty() && values.all { normalized(it) == wanted }
+    }.getOrDefault(false)
 
     // ------------------------------------------------------------------ learning
 

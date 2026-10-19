@@ -53,6 +53,32 @@ class LabCompletedRehearsalTest {
     private fun completedPractice(site: SiteModel, now: Long, page: SemanticPageState, available: (String) -> Boolean = { true }): String =
         Curriculum.practiceLesson(site, now, page, available, includeComplete = true)
 
+
+    @Test fun completedLabClearsBlockingDialogBeforeRehearsal() {
+        val f = Fixture(AtomicLong(initial)); val site = f.completeAll()
+        f.fake.dialogShown = true
+        session(f, true).run(1)
+        assertEquals("dialog preparation continues to one results rehearsal", 2, f.ledgers.size)
+        val out = f.ledgers.first()
+        assertEquals("dismiss_dialog", out.lesson)
+        assertTrue("dismissal must be verified", "dismiss_dialog" in out.successfulSkills)
+        assertFalse(f.fake.dialogShown)
+        assertEquals(0, f.teacherCalls)
+        assertEquals(11, site.curriculum.count { it.done })
+    }
+
+    @Test fun completedDialogPracticePreservesFailureAndRetryHolds() {
+        val f = Fixture(AtomicLong(initial)); val site = f.completeAll()
+        val page = SpsParser().parse(f.fake.apply { dialogShown = true }.observe(1000), initial).copy(settle = Settle.IDLE)
+        assertEquals("dismiss_dialog", completedPractice(site, initial, page))
+        assertEquals("", completedPractice(site, initial, page) { false })
+        site.curriculum.single { it.id == "dismiss_dialog" }.retryAt = initial + 30_000L
+        assertEquals("", completedPractice(site, initial, page))
+        assertEquals("", completedPractice(site, initial, page.copy(authWall = true)))
+        assertEquals("", completedPractice(site, initial, page.copy(challenge = true)))
+        assertEquals("", completedPractice(site, initial, page.copy(settle = Settle.BUSY)))
+    }
+
     @Test fun defaultKeepsTheNormalDayReviewHold() {
         val f = Fixture(AtomicLong(initial)); val site = f.completeAll()
         site.learningBlockedUntil = initial + day; f.memory.saveSite(site)

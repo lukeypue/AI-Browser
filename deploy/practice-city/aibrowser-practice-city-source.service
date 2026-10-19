@@ -1,0 +1,25 @@
+[Unit]
+Description=AI Browser published stable City source synchronization
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aibrowserlab
+Group=aibrowserlab
+UMask=0077
+Environment=HOME=/nonexistent
+WorkingDirectory=/var/lib/aibrowser-practice-city/source
+ExecStart=/usr/bin/python3 /opt/aibrowser-practice-city-source/practice-city.py --project /var/lib/aibrowser-practice-city/source --output-dir /var/lib/aibrowser-practice-city/reports --sync-source-only
+TimeoutStartSec=180
+KillMode=control-group
+Nice=10
+CPUQuota=50%
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aibrowser-practice-city/source /var/lib/aibrowser-practice-city/reports
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true

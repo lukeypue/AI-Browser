@@ -32,6 +32,10 @@ class LearningRecoveryCadenceTest {
             FailedStrategies.record(site, plannerKey, false, now)
             FailedStrategies.record(site, localKey, false, now)
         }
+        val probe = TaskLedger("held", Goal("held", GoalIntent.LEARN_SITE, "synthetic", "Ford", emptyList()), fake.host, fake.url)
+        val alternative = LocalRecoveryPlanner.propose(probe, page, site, "search")!!
+        assertEquals(listOf(StepKind.TYPE, StepKind.CLICK), alternative.steps.map { it.kind })
+        repeat(2) { FailedStrategies.record(site, FailedStrategies.key(page, "search", alternative.steps, alternative.params), false, now) }
         memory.saveSite(site)
         var calls = 0
         val planner = Planner(object : PlannerClient {

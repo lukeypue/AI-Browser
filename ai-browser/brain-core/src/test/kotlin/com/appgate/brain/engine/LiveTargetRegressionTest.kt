@@ -113,17 +113,18 @@ class LiveTargetRegressionTest {
         assertFalse("open_item" in out.successfulSkills)
     }
 
-    @Test fun concreteQueryTeacherRepairExecutesAndVerifies() {
-        val fake = FakeSite().apply { dialogShown = false }
+    @Test fun teacherCannotReplayTheNewlyHeldLocalButtonProcedure() {
+        val form = com.appgate.brain.test.SearchFormSite()
+        val fake = form.site
         var teacherCalled = false
-        val renderer = object : Renderer by fake {
-            override fun act(command: JsonObject, timeoutMs: Long) = if (!teacherCalled) RendererResult(false, "fixture rejection") else fake.act(command, timeoutMs)
+        val renderer = object : Renderer by form {
+            override fun act(command: JsonObject, timeoutMs: Long) = if (!teacherCalled) RendererResult(false, "fixture rejection") else form.act(command, timeoutMs)
         }
         val teacher = Planner(object : PlannerClient {
             override val describe = "fixture"
             override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
                 teacherCalled = true
-                return """{"steps":[{"kind":"TYPE","role":"SEARCH_BOX","arg":"Ford","submit":false},{"kind":"CLICK","role":"SUBMIT","expect":["PAGE_IS_RESULTS"]}],"confidence":0.99}"""
+                return """{"steps":[{"kind":"TYPE","role":"SEARCH_BOX","arg":"Ford","submit":false},{"kind":"CLICK","role":"SUBMIT","expect":["RESULTS_CHANGED","PAGE_IS_RESULTS"]}],"confidence":0.99}"""
             }
         })
         val goal = Goal("search", GoalIntent.LEARN_SITE, "practice", "Ford", emptyList(), budget = Budget(actions = 20, llmCalls = 1, wallMs = 10000))
@@ -131,8 +132,58 @@ class LiveTargetRegressionTest {
             EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0)) { 1000L }
             .runTask(TaskLedger("search", goal, fake.host, fake.url).apply { lesson = "search" })
         assertTrue(teacherCalled)
+        assertFalse("the teacher repeated the held local recipe", out.steps.any { it.source == "planner" && it.status == VerifyStatus.VERIFIED })
+        assertNotEquals(TaskStatus.DONE, out.status)
+        assertFalse("search" in out.successfulSkills)
+    }
+
+
+    @Test fun concreteQueryTeacherRepairExecutesAndVerifies() {
+        val form = com.appgate.brain.test.SearchFormSite()
+        val fake = form.site
+        var wrongButtonAttempts = 0
+        val renderer = object : Renderer by form {
+            override fun observe(timeoutMs: Long): String {
+                val raw = Json.parseObject(form.observe(timeoutMs))
+                raw.optArray("elements")!!.objects().first { it.optBoolean("submitType") }.put("name", "Search current listings")
+                raw.optArray("elements")!!.add(JsonObject().put("id", "archived-search").put("tag", "button")
+                    .put("name", "Search archived listings").put("visible", true).put("enabled", true).put("sameSite", true)
+                    .put("region", "r0").put("submitType", true).put("formHasSearch", true).put("inForm", true))
+                return raw.toString()
+            }
+            override fun act(command: JsonObject, timeoutMs: Long): RendererResult {
+                if (command.optString("id") == "archived-search") { wrongButtonAttempts++; return RendererResult(false) }
+                return form.act(command, timeoutMs)
+            }
+        }
+        assertEquals(2, SpsParser().parse(renderer.observe(1000)).byRole(Role.SUBMIT).size)
+        var calls = 0
+        val teacher = Planner(object : PlannerClient {
+            override val describe = "synthetic ambiguity repair"
+            override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
+                calls++
+                assertTrue(input.contains("Search current listings"))
+                assertTrue(input.contains("Search archived listings"))
+                return """{"steps":[{"kind":"TYPE","role":"SEARCH_BOX","arg":"Ford","submit":false},{"kind":"CLICK","role":"SUBMIT","name_hint":"Search current listings","expect":["RESULTS_CHANGED","PAGE_IS_RESULTS"]}],"confidence":0.99}"""
+            }
+        })
+        val goal = Goal("search", GoalIntent.LEARN_SITE, "practice", "Ford", emptyList(), budget = Budget(actions = 20, llmCalls = 1, wallMs = 10000))
+        val storage = InMemoryStorage()
+        val memory = Memory(storage) { 1000L }
+        val out = BrainEngine(renderer, memory, { teacher }, object : EngineEvents {},
+            EngineConfig(pacingOverrideMs = 0, plannerCooldownMs = 0, ambiguousRecheckMs = 0, idleSleepMs = 0)) { 1000L }
+            .runTask(TaskLedger("search", goal, fake.host, fake.url).apply { lesson = "search" })
+        assertEquals(1, calls)
         assertTrue(out.steps.any { it.source == "planner" && it.status == VerifyStatus.VERIFIED })
-        assertEquals(TaskStatus.DONE, out.status)
+        assertEquals("synthetic teacher trace: ${out.terminalReason} ${out.notes} ${out.steps}", TaskStatus.DONE, out.status)
+        assertTrue("search" in out.successfulSkills)
+        assertEquals("Ford", fake.query)
+        assertEquals(1, form.buttonAttempts)
+        assertEquals(0, wrongButtonAttempts)
+        assertFalse("a satisfied draft is not an independently causal transition", 0 in out.programVerifiedSteps)
+        assertTrue(1 in out.programVerifiedSteps)
+        assertTrue("verified teacher repair must survive memory reload as a reusable procedure",
+            Memory(storage) { 1000L }.skills.all().any { it.origin == SkillOrigin.COMPILED && "capability:search" in it.tags })
     }
 
     @Test fun namedOpenerTeacherCannotReplayTheSameHeldProcedure() {
