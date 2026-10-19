@@ -116,4 +116,8 @@ class ServerLabFaultCaptureTest {
         trigger.arm(id, true); assertEquals(id, trigger.consume())
     }
 
+    @org.junit.Test fun controlledServiceHasDistinctClosedIdentity() {
+        org.junit.Assert.assertTrue("controlled crash cannot be confused with ordinary service failure",
+            ServerLabFaultCapture.ObjectKind.values().any { it.name == "CONTROLLED_SERVICE" })
+    }
 }

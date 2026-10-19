@@ -36,6 +36,7 @@ class ServerLabInstrumentation : Instrumentation() {
         if (faultRecorded.getAndSet(true)) return
         val objectKind = when (obj) {
             is Instrumentation -> ServerLabFaultCapture.ObjectKind.INSTRUMENTATION
+            is ServerLabControlledFaultService -> ServerLabFaultCapture.ObjectKind.CONTROLLED_SERVICE
             is android.app.Service -> ServerLabFaultCapture.ObjectKind.SERVICE
             is android.app.Application -> ServerLabFaultCapture.ObjectKind.APPLICATION
             is Activity -> ServerLabFaultCapture.ObjectKind.ACTIVITY
