@@ -111,6 +111,7 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
   elapsed time and clock rollback do not clear it. Relevant changed controls and different procedures remain eligible. AI proposal history is retained, but a fresh
   first alternative repair proposal may be reserved after thirty seconds. Further unchanged failures
   back off to 60, 120, 240, and at most 300 seconds, within existing task/teacher budgets.
+  Definite native-select option-not-found responses use only a content-free command hold tied to the chosen control, available options and requested option. Unchanged commands stay held across aliases and reloads; a genuine option-list change permits another verified attempt. Older opaque whole-program holds remain intact because their original option context cannot be safely reconstructed.
   Failure counts survive reload (bounded at 64). At most 64 content-free records per host; oldest records may be evicted at capacity.
   Renderer timeouts, unsettled/ambiguous observations, and ordinary end-of-results do not prove a permanently broken procedure.
   Before allocating a learning lesson, the scheduler checks concrete learned/builtin and local repair holds for the live target (including shared prerequisites), then the teacher backoff. A fully held target yields without a task or ordinal increment; diagnostics report `procedure_cooldown`.

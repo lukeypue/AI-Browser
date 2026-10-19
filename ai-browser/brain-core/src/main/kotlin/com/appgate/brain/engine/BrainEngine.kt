@@ -683,13 +683,17 @@ class BrainEngine(
                     }
                     if (ledger.blocked || ledger.done) return
                 }
-                if (outcome.rejected && outcome.reason.startsWith("option not found: ") && !outcome.timeout && !stale && rejectedSelectKey != null) {
-                    FailedStrategies.record(site, rejectedSelectKey, false, clock())
+                val rejectedNativeOption = outcome.rejected && outcome.reason.startsWith("option not found: ") &&
+                    !outcome.timeout && !stale && rejectedSelectKey != null
+                if (rejectedNativeOption) {
+                    FailedStrategies.record(site, rejectedSelectKey!!, false, clock())
                     memory.saveSite(site)
                 }
                 if (outcome.timeout) handleRendererFailure(ledger, outcome.reason, true)
                 else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "exec:" + code.name) }
-                finishProgram(ledger, before, site, success = false, rememberFailure = !outcome.timeout && !stale)
+                // The scoped command hold already persists this definite rejection. A second
+                // shape-only hold would prevent a genuine option-list change from reopening it.
+                finishProgram(ledger, before, site, success = false, rememberFailure = !outcome.timeout && !stale && !rejectedNativeOption)
             }
             is ExecOutcome.Done -> {
                 var after = outcome.after
