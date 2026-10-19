@@ -423,17 +423,65 @@ class TransportTests(unittest.TestCase):
    return b''
   self.assertEqual(Transport(run=run).probe(id),r)
   self.assertEqual(len(calls),3)
+ def test_boot_completed_is_insufficient_until_storage_and_package_context_are_ready(self):
+  import subprocess
+  clock=Clock();calls=[]
+  def run(args,**kw):
+   tail=args[3:];calls.append((clock.value,tail))
+   self.assertGreater(kw['timeout'],0);self.assertLessEqual(kw['timeout'],10)
+   if tail==['shell','getprop','sys.boot_completed']:return b'1'
+   if tail==['shell','getprop','sys.user.0.ce_available']:return b'true' if clock.value>=2 else b'false'
+   self.assertEqual(tail,['shell','run-as','com.aibrowser.universal.serverlab','/system/bin/true'])
+   if clock.value<4:raise subprocess.CalledProcessError(1,args,stderr=b'PRIVATE_PACKAGE_ERROR')
+   return b''
+  Transport(run=run,monotonic=clock,sleep=lambda seconds:setattr(clock,'value',clock.value+seconds)).wait_boot()
+  self.assertEqual(clock.value,4)
+  self.assertFalse(any(tail[1:2]==['run-as'] and tick<2 for tick,tail in calls))
+  self.assertTrue(all('install' not in tail and 'rm' not in tail and 'cat' not in tail for _,tail in calls))
+ def test_missing_package_context_remains_a_bounded_failure_without_reinstall(self):
+  import subprocess
+  clock=Clock();calls=[]
+  def run(args,**kw):
+   calls.append(args);self.assertLessEqual(kw['timeout'],300-clock.value)
+   if args[3:]==['shell','getprop','sys.boot_completed']:return b'1'
+   if args[3:]==['shell','getprop','sys.user.0.ce_available']:return b'true'
+   raise subprocess.CalledProcessError(1,args,stderr=b'PRIVATE_PACKAGE_ERROR')
+  with self.assertRaises(TimeoutError) as caught:
+   Transport(run=run,monotonic=clock,sleep=lambda seconds:setattr(clock,'value',clock.value+seconds)).wait_boot()
+  self.assertEqual(clock.value,300)
+  self.assertNotIn('PRIVATE_',str(caught.exception));self.assertTrue(all('install' not in x and 'clear' not in x for x in calls))
+ def test_missing_credential_storage_property_never_starts_package(self):
+  clock=Clock();calls=[]
+  def run(args,**kw):
+   calls.append(args[3:]);return b'1' if args[-1]=='sys.boot_completed' else b''
+  with self.assertRaises(TimeoutError):
+   Transport(run=run,monotonic=clock,sleep=lambda seconds:setattr(clock,'value',clock.value+seconds)).wait_boot()
+  self.assertEqual(clock.value,300);self.assertTrue(all('run-as' not in x for x in calls))
+ def test_package_readiness_shares_original_boot_deadline(self):
+  clock=Clock();calls=[]
+  def run(args,**kw):
+   calls.append((args[3:],kw['timeout']))
+   if args[-1]=='sys.boot_completed':clock.value=299.5;return b'1'
+   self.assertEqual(args[-1],'sys.user.0.ce_available')
+   self.assertEqual(kw['timeout'],0.5);clock.value=300;return b'true'
+  with self.assertRaises(TimeoutError):
+   Transport(run=run,monotonic=clock,sleep=lambda seconds:setattr(clock,'value',clock.value+seconds)).wait_boot()
+  self.assertEqual(clock.value,300);self.assertEqual(len(calls),2)
  def test_wait_boot_retries_fixed_device_until_ready(self):
   import subprocess
   clock=Clock();calls=[];attempts=iter([subprocess.CalledProcessError(1,['adb']),b'0',b'1'])
   def run(args,**kw):
-   calls.append(args);value=next(attempts)
+   calls.append(args)
+   if args[-1]=='sys.user.0.ce_available':return b'true'
+   if args[-1]=='/system/bin/true':return b''
+   value=next(attempts)
    if isinstance(value,Exception):raise value
    return value
   def sleep(seconds):clock.value+=seconds
   Transport(run=run,monotonic=clock,sleep=sleep).wait_boot()
   self.assertEqual(clock.value,4)
-  self.assertTrue(all(args==['/opt/ai-browser-dev/android-sdk/platform-tools/adb','-s','emulator-5580','shell','getprop','sys.boot_completed'] for args in calls))
+  self.assertEqual([x[3:] for x in calls], [['shell','getprop','sys.boot_completed']]*3+[['shell','getprop','sys.user.0.ce_available'],['shell','run-as','com.aibrowser.universal.serverlab','/system/bin/true']])
+  self.assertTrue(all(x[:3]==['/opt/ai-browser-dev/android-sdk/platform-tools/adb','-s','emulator-5580'] for x in calls))
  def test_wait_boot_stops_at_300_second_deadline(self):
   clock=Clock();calls=[]
   def run(args,**kw):calls.append(args);return b'0'
@@ -451,6 +499,7 @@ class TransportTests(unittest.TestCase):
    if args[3:]==['shell','getprop','sys.boot_completed']:
     ready=clock.value>=2;return b'1' if ready else b'0'
    self.assertTrue(ready)
+   if args[3:]==['shell','getprop','sys.user.0.ce_available']:return b'true'
    if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:return json.dumps(local).encode()
    return b''
   Transport(run=run,monotonic=clock,sleep=sleep).cycle(id)

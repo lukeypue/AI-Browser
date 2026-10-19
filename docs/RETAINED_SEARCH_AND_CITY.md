@@ -27,3 +27,21 @@ The original six exam summaries, frozen 432-case challenge manifest, and twelve-
 ## Release verification
 
 Require core/app tests, all runner/receiver/publisher tests, pinned-core browser harnesses, Android build and lint, independent review and an actual complete thirty-minute synthetic Android cycle with retained app/emulator restart evidence. Use the existing locked verified stable release pipeline. A real phone report and real-site success require their own evidence; synthetic engine, Chromium replay and emulator results cannot stand in for them. No signing changes, phone installation, new review automation or credential transfer is part of this change.
+
+
+### Android cold-start package readiness
+
+A guarded cold restart observed Android `sys.boot_completed=1` while the fixed
+server-lab package data directory was unavailable to `run-as`. Its closed error
+hash matched the AOSP missing-data-directory error exactly; a subsequent cold
+probe retained the same sanitized memory projection. Boot readiness now also
+requires user-0 credential storage and a successful no-op in the fixed lab
+package context, within the original shared 300-second deadline. The gate never
+reads app files, reinstalls, clears data, or retries learning actions. A permanently
+unavailable package still fails. Full cycles retain their 30-minute deadline and
+app/emulator restart checks.
+
+The maintenance smoke checker was also corrected separately: its documented
+60-second explicit stop is `SMOKE / INTERRUPTED`, summary `stopped`; this cannot
+qualify as a completed 30-minute cycle. Earlier failed maintenance proofs remain
+archived rather than rewritten.

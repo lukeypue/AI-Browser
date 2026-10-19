@@ -98,10 +98,19 @@ class Transport:
   self.run(['/usr/bin/systemctl','restart',SERVICE],timeout=180)
   self.wait_boot()
  def wait_boot(self):
+  # Android can announce boot before credential-encrypted package data exists.
+  # Probe only the fixed lab package context; never read data or reset/reinstall it.
   deadline=self.monotonic()+300
+  def ready_command(*args,capture=True):
+   remaining=deadline-self.monotonic()
+   if remaining<=0:raise TimeoutError('emulator_boot_timeout')
+   return self.adb(*args,capture=capture,timeout=min(10,remaining))
   while self.monotonic()<deadline:
    try:
-    if self.adb('shell','getprop','sys.boot_completed',capture=True,timeout=min(10,max(0.001,deadline-self.monotonic()))).strip()==b'1':return
+    if (ready_command('shell','getprop','sys.boot_completed').strip()==b'1' and
+        ready_command('shell','getprop','sys.user.0.ce_available').strip()==b'true'):
+     ready_command('shell','run-as',PACKAGE,'/system/bin/true',capture=False)
+     return
    except (subprocess.SubprocessError,OSError):pass
    self.sleep(min(2,max(0,deadline-self.monotonic())))
   raise TimeoutError('emulator_boot_timeout')
