@@ -14,10 +14,37 @@ import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Invoke only against the isolated lab package, on emulator-5580. */
 class ServerLabInstrumentation : Instrumentation() {
     private lateinit var args: Bundle
+    @Volatile private var stage = "GUARD"
+    @Volatile private var faultId: String? = null
+    @Volatile private var faultStartedAt = 0L
+    private val faultRecorded = AtomicBoolean(false)
+
+    override fun onException(obj: Any?, error: Throwable?): Boolean =
+        ServerLabFaultCapture.recordThenDelegate({
+            if (error != null) recordStartupFault(obj, error)
+        }) { super.onException(obj, error) }
+
+    private fun recordStartupFault(obj: Any?, error: Throwable) {
+        val id = faultId ?: return
+        if (!BuildConfig.DEBUG || !BuildConfig.SERVER_ANDROID_LAB ||
+            targetContext.packageName != "com.aibrowser.universal.serverlab") return
+        if (faultRecorded.getAndSet(true)) return
+        val objectKind = when (obj) {
+            is Instrumentation -> ServerLabFaultCapture.ObjectKind.INSTRUMENTATION
+            is android.app.Service -> ServerLabFaultCapture.ObjectKind.SERVICE
+            is android.app.Application -> ServerLabFaultCapture.ObjectKind.APPLICATION
+            is Activity -> ServerLabFaultCapture.ObjectKind.ACTIVITY
+            else -> ServerLabFaultCapture.ObjectKind.OTHER
+        }
+        val marker = ServerLabFaultCapture.capture(id, BuildConfig.DIAGNOSTICS_REVISION,
+            BuildConfig.VERSION_CODE, stage, objectKind, error, SystemClock.elapsedRealtime() - faultStartedAt)
+        ServerLabFaultCapture.writeIfAbsent(File(targetContext.filesDir, "serverlab"), marker)
+    }
     override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); args=arguments ?: Bundle(); start() }
     override fun onStart() {
         val command=args.getString("command") ?: "smoke"
@@ -26,7 +53,7 @@ class ServerLabInstrumentation : Instrumentation() {
         val id=runCatching { UUID.fromString(rawId).toString().also { require(it==rawId) } }.getOrElse {
             finish(Activity.RESULT_CANCELED,Bundle().apply { putString("result","INVALID_CYCLE_ID") }); return
         }
-        if(command !in setOf("smoke","cycle","probe")) {
+        if(command !in setOf("smoke","cycle","probe","fault_probe")) {
             finish(Activity.RESULT_CANCELED,Bundle().apply { putString("result","INVALID_COMMAND") }); return
         }
         var service:BrainService?=null
@@ -40,7 +67,7 @@ class ServerLabInstrumentation : Instrumentation() {
         var status="FAILED"
         var end="RUNTIME_FAILED"
         var elapsed=0L
-        var stage="GUARD"
+        stage="GUARD"
         var startupWait:ServerLabStartupWait?=null
         val connection=object:ServiceConnection {
             override fun onServiceConnected(name:ComponentName,binder:IBinder) { service=(binder as BrainService.LocalBinder).service; ready.countDown() }
@@ -49,10 +76,19 @@ class ServerLabInstrumentation : Instrumentation() {
         try {
             check(BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB)
             check(targetContext.packageName=="com.aibrowser.universal.serverlab")
+            faultId=id; faultStartedAt=SystemClock.elapsedRealtime(); faultRecorded.set(false)
             ServerLabRuntime.install(targetContext, ServerLabRuntime.ReportIdentityGate { r -> report.set(r); complete.countDown() })
             // Explicitly disable transports; this never reads a planner key.
             PhoneSharing(targetContext).setEnabled(false)
             PlannerKeyStore.setTeacherEnabled(targetContext,false)
+            if (command=="fault_probe") {
+                // An expected failing maintenance probe, never a learning cycle or completion.
+                stage="BIND_SERVICE"
+                ServerLabControlledFaultService.arm(id)
+                runOnMainSync { targetContext.startService(Intent(targetContext,ServerLabControlledFaultService::class.java)) }
+                SystemClock.sleep(10_000)
+                error("CONTROLLED_SERVICE_FAILURE_DID_NOT_PROPAGATE")
+            }
             val startup=ServerLabStartupWait(SystemClock::elapsedRealtime, SystemClock::sleep) { stage=it.name }
             startupWait=startup
             check(startup.awaitBinding(requestBind={
@@ -100,7 +136,8 @@ class ServerLabInstrumentation : Instrumentation() {
                     end=if(interrupted) "INTERRUPTED" else "RUNTIME_FAILED"
                 }
             }
-        } catch(_:Throwable) {
+        } catch(error:Throwable) {
+            runCatching { recordStartupFault(this, error) }
             runCatching { runOnMainSync { service?.stopWork() } }
             // No exception messages, page content, logs or preferences leave this runner.
             status="FAILED"; end="RUNTIME_FAILED"
@@ -129,5 +166,6 @@ class ServerLabInstrumentation : Instrumentation() {
                 putLong("startup_wait_ms",startupWait?.startupWaitMs ?: 0L)
                 putBoolean("legacy_bind_30s_exceeded",startupWait?.legacyBind30sExceeded ?: false)
             })
+        faultId=null
     }
 }
