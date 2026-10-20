@@ -233,7 +233,9 @@ data class SemanticPageState(
                 if (a.facetKey != null) j.put("facet", a.facetKey)
                 if (a.facetKind != null) j.put("facet_kind", a.facetKind)
                 if (!a.enabled) j.put("enabled", false)
-                if (a.selected) j.put("selected", true)
+                // False on tabs means no positive selection signal, not proof of inactivity.
+                // Keep other unselected roles compact; preserve their existing true signals.
+                if (a.selected || a.role == Role.TAB) j.put("selected", a.selected)
                 if (a.value != null && !isHumanOnly) j.put("value", a.value.take(40))
                 if (a.choices.isNotEmpty()) j.putStrings("choices", a.choices.take(25).map { it.take(30) })
                 aff.add(j)
