@@ -303,6 +303,28 @@ class ControllerTests(unittest.TestCase):
   __import__('os').link(outside,c.outbox/(str(uuid.uuid4())+'.json'))
   with self.assertRaises(ValueError):c.run_once()
 
+
+ def test_emulator_probe_explicit_crash_retains_app_evidence_at_invocation_stage(self):
+  original=self.fake.probe;probe_count=0;pulls=[]
+  def probe(id):
+   nonlocal probe_count
+   probe_count+=1
+   if probe_count==1:return original(id)
+   def run(args,**kw):
+    if args[3:6]==['shell','am','instrument']:
+     return b'INSTRUMENTATION_RESULT: shortMsg=Process crashed.\nINSTRUMENTATION_CODE: 0\n'
+    if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:
+     pulls.append(args);raise OSError('PRIVATE_MISSING_PATH')
+    return b''
+   return Transport(run=run).probe(id)
+  self.fake.probe=probe;c=self.controller();r=c.run_once()
+  evidence=json.loads((c.state/'runtime-failures'/(r['cycle_id']+'.json')).read_text())
+  self.assertEqual(evidence['stage'],'EMULATOR_PROBE_INVOKE_RUNNER')
+  self.assertEqual(evidence['reason'],'COMMAND_FAILED');self.assertTrue(evidence['app_restart_verified'])
+  self.assertEqual(r['status'],'FAILED');self.assertEqual(r['app_elapsed_ms'],1800000)
+  self.assertIsNotNone(r['diagnostics']);self.assertFalse(r['restart']['emulator_restart_verified'])
+  self.assertEqual(pulls,[]);self.assertNotIn('PRIVATE_',json.dumps(evidence)+json.dumps(r))
+
 class RetryTests(unittest.TestCase):
  def test_persistent_cli_retries_transient_stop_transport_error(self):
   import subprocess
@@ -321,6 +343,71 @@ class RetryTests(unittest.TestCase):
   self.assertEqual(controller.calls,2);self.assertEqual(sleeps,[60])
 
 class TransportTests(unittest.TestCase):
+
+ def test_explicit_instrumentation_crash_is_invocation_failure_before_pull(self):
+  import subprocess
+  for command in ('cycle','probe','smoke'):
+   for suffix in (b'Process crashed.',b'Process crashed'):
+    calls=[]
+    def run(args,**kw):
+     calls.append((args,kw))
+     if args[3:6]==['shell','am','instrument']:
+      return b'INSTRUMENTATION_RESULT: shortMsg='+suffix+b'\r\nINSTRUMENTATION_CODE: 0\r\n'
+     if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:
+      raise subprocess.CalledProcessError(1,args)
+     return b''
+    with self.subTest(command=command,suffix=suffix):
+     with self.assertRaises(subprocess.SubprocessError) as caught:Transport(run=run).command(command,str(uuid.uuid4()))
+     self.assertEqual(caught.exception.safe_phase,'INVOKE_RUNNER')
+     self.assertEqual(caught.exception.safe_reason,'COMMAND_FAILED')
+     self.assertEqual(len(calls),2,'proven crash must not attempt pull or retry')
+     self.assertTrue(calls[-1][1]['capture'])
+     self.assertEqual(calls[-1][1]['timeout'],2100 if command=='cycle' else 180)
+     self.assertIsNone(caught.exception.__context__);self.assertIsNone(caught.exception.__cause__)
+ def test_explicit_instrumentation_aborted_or_failed_keeps_only_closed_failure(self):
+  for raw in (b'INSTRUMENTATION_FAILED: PRIVATE_DETAILS',b'INSTRUMENTATION_ABORTED: PRIVATE_DETAILS'):
+   calls=[]
+   def run(args,**kw):
+    calls.append(args)
+    return raw if args[3:6]==['shell','am','instrument'] else b''
+   with self.subTest(raw=raw):
+    with self.assertRaises(Exception) as caught:Transport(run=run).probe(str(uuid.uuid4()))
+    self.assertEqual(getattr(caught.exception,'safe_phase',None),'INVOKE_RUNNER')
+    self.assertEqual(getattr(caught.exception,'safe_reason',None),'COMMAND_FAILED')
+    self.assertEqual(set(vars(caught.exception)),{'safe_phase','safe_reason'})
+    self.assertNotIn('PRIVATE_',str(caught.exception)+repr(vars(caught.exception)))
+    self.assertIsNone(caught.exception.__context__);self.assertEqual(len(calls),2)
+ def test_terminal_zero_with_legitimate_failed_cycle_still_reads_typed_report(self):
+  id=str(uuid.uuid4())
+  local=dict(schema_version=1,cycle_id=id,status='FAILED',end_reason='RUNTIME_FAILED',app_elapsed_ms=0,diagnostics=None,memory_before=None,memory_after=None,engine_ready=False,version_code=918,source_revision='a'*40)
+  calls=[]
+  def run(args,**kw):
+   calls.append(args)
+   if args[3:6]==['shell','am','instrument']:return b'INSTRUMENTATION_RESULT: result=FAILED\nINSTRUMENTATION_CODE: 0\n'
+   if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:return json.dumps(local).encode()
+   return b''
+  self.assertEqual(Transport(run=run).command('cycle',id),local)
+  self.assertEqual(len(calls),3)
+ def test_incidental_crash_text_is_not_protocol_failure(self):
+  id=str(uuid.uuid4())
+  local=dict(schema_version=1,cycle_id=id,status='PROBE',end_reason='INTERRUPTED',app_elapsed_ms=0,diagnostics=None,memory_before=None,memory_after=fixture.report()['memory_after'],engine_ready=True,version_code=918,source_revision='a'*40)
+  def run(args,**kw):
+   if args[3:6]==['shell','am','instrument']:
+    return b'PRIVATE_LOG Process crashed.\nPRIVATE_LOG INSTRUMENTATION_FAILED: unrelated\nINSTRUMENTATION_RESULT: shortMsg=Different private diagnostic\nINSTRUMENTATION_CODE: 0\n'
+   if args[3:8]==['shell','-T','run-as','com.aibrowser.universal.serverlab','cat']:return json.dumps(local).encode()
+   return b''
+  self.assertEqual(Transport(run=run).probe(id),local)
+ def test_invalid_instrumentation_capture_fails_at_invocation_boundary(self):
+  for raw in (None,'PRIVATE_TEXT',b'x'*1048577):
+   calls=[]
+   def run(args,**kw):
+    calls.append(args)
+    return raw if args[3:6]==['shell','am','instrument'] else b''
+   with self.subTest(kind=type(raw).__name__):
+    with self.assertRaises(Exception) as caught:Transport(run=run).probe(str(uuid.uuid4()))
+    self.assertEqual(getattr(caught.exception,'safe_phase',None),'INVOKE_RUNNER')
+    self.assertEqual(getattr(caught.exception,'safe_reason',None),'INVALID_RESULT')
+    self.assertNotIn('PRIVATE_',str(caught.exception));self.assertEqual(len(calls),2)
  def test_missing_typed_file_is_read_command_failure_not_json_decode_failure(self):
   import subprocess
   for command in ('probe','cycle','smoke'):

@@ -24,6 +24,17 @@ def transport_step(phase,operation,*args,**kwargs):
  # Raise outside the handler: no argv, output, exception text or cause/context
  # from the underlying failure is attached to the typed exception.
  raise TransportFailure(phase,reason) from None
+def validate_instrumentation_output(raw):
+ # am instrument may return shell exit zero after a crashed/aborted runner.
+ # Detect only explicit protocol failures; terminal zero alone is also used by
+ # legitimate typed FAILED reports and must still reach normal file validation.
+ _wire.require(type(raw) is bytes and len(raw)<=_wire.LIMIT)
+ for line in raw.splitlines():
+  if (line in (b'INSTRUMENTATION_RESULT: shortMsg=Process crashed.',
+               b'INSTRUMENTATION_RESULT: shortMsg=Process crashed') or
+      line.startswith((b'INSTRUMENTATION_FAILED:',b'INSTRUMENTATION_ABORTED:'))):
+   raise subprocess.SubprocessError('instrumentation_failed')
+
 def strict_load(raw):
  def pairs(items):
   result={}
@@ -88,7 +99,8 @@ class Transport:
   # earlier process/emulator probe, smoke or same-UUID cycle result.
   output='files/serverlab/'+('probe' if command=='probe' else cycle_id)+'.json'
   transport_step('CLEAN_OUTPUT',self.adb,'shell','run-as',PACKAGE,'rm','-f','--',output,timeout=30)
-  transport_step('INVOKE_RUNNER',self.adb,'shell','am','instrument','-w','-r','-e','command',command,'-e','cycle_id',cycle_id,RUNNER,timeout=2100 if command=='cycle' else 180)
+  output=transport_step('INVOKE_RUNNER',self.adb,'shell','am','instrument','-w','-r','-e','command',command,'-e','cycle_id',cycle_id,RUNNER,capture=True,timeout=2100 if command=='cycle' else 180)
+  transport_step('INVOKE_RUNNER',validate_instrumentation_output,output)
   return transport_step('VALIDATE_OUTPUT',validate_local,self.pull(cycle_id,command=='probe'),cycle_id,command)
  def cycle(self,cycle_id):
   self.wait_boot();return self.command('cycle',cycle_id)
