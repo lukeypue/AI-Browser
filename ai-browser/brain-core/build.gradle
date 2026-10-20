@@ -51,3 +51,22 @@ tasks.register('dialogClinic', JavaExec) {
     workingDir = projectDir
     args layout.buildDirectory.file('reports/brain/dialog-clinic.json').get().asFile.absolutePath
 }
+
+tasks.register('frontierScreen', JavaExec) {
+    if (providers.gradleProperty('frontierMemory').isPresent() &&
+        (!providers.gradleProperty('frontierInput').isPresent() || providers.gradleProperty('frontierMode').getOrElse('scripted') != 'replay')) {
+        throw new GradleException('frontierMemory requires replay mode and frontierInput')
+    }
+    group = 'verification'
+    description = 'Isolated whole-engine procedural acquisition screen; synthetic only.'
+    classpath = sourceSets.lab.runtimeClasspath
+    mainClass = 'com.appgate.brain.lab.FrontierScreenMainKt'
+    args providers.gradleProperty('frontierMode').getOrElse('scripted'),
+        providers.gradleProperty('frontierOutput').getOrElse(layout.buildDirectory.dir('frontier-screen').get().asFile.absolutePath)
+    if (providers.gradleProperty('frontierInput').isPresent()) {
+        args providers.gradleProperty('frontierInput').get()
+    }
+    if (providers.gradleProperty('frontierMemory').isPresent()) {
+        args providers.gradleProperty('frontierMemory').get()
+    }
+}

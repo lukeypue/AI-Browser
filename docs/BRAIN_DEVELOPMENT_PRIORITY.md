@@ -19,3 +19,9 @@ Only raise a specific human-action issue after evidence of a missing/unavailable
 Every turn serves the same objective: a reusable browser brain that retains learning, stops repeating failed approaches, improves from verified evidence, and runs continuous server experiments. Finish the current four sites before expansion. Measured gains matter more than release counts.
 
 Continued implementation, authorized AI requests, server training, fixes, verification and the existing stable signed update pipeline are already approved. Completed password/login/CAPTCHA setup stays marked done; reuse established supported sessions. Do not repeatedly reopen approvals, request setup, or recite generic limitations. Default to diagnose, reproduce, fix, verify, retain and continue. Report actual progress. Escalate only a specific observed blocker requiring missing access or human action, stating exactly what is missing. Do not invent session availability or successful verification.
+
+## Standing Claude collaboration — owner authorization, 2026-10-19
+
+The owner explicitly authorizes using the established Claude connection for AI Browser project evidence reviews and idea exchanges on every update, including future sign-in through supported authentication. Reuse the dedicated protected server connection and its persisted login. Verify a real request succeeds before claiming Claude participated. Do not store or share credentials in project material.
+
+Before an update, gather current relevant code and validated evidence, obtain Claude advice through the supported connection, challenge its recommendations against the source, and include a focused critique of the proposed change or measured results. Distinguish Claude advice from independent code review, test evidence and learned capability. Keep existing spending limits explicit; authorization does not establish unlimited expenditure. Preserve the single existing review automation and its release gates.
