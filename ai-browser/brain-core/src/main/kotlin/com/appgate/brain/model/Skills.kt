@@ -61,10 +61,12 @@ data class Step(
     val optional: Boolean = false,       // Opt(step): skipped if its expect already holds or target is absent
     val submit: Boolean = false,
     val expect: List<Postcondition> = emptyList(),
-    val nameHint: String? = null
+    val nameHint: String? = null,
+    val untilRole: Role? = null          // verified pagination scroll prerequisite, never a planner loop
 ) {
     fun toJson(): JsonObject = JsonObject().put("kind", kind.name).put("role", role?.name).put("facet", facetKey).put("arg", arg)
         .put("opt", optional).put("submit", submit).put("name", nameHint).put("expect", JsonArray(expect.map { it.toJson() }))
+        .also { if (untilRole != null) it.put("until_role", untilRole.name) }
 
     fun describe(): String = "${if (optional) "opt " else ""}${kind.name.lowercase()} ${role?.name ?: ""}${facetKey?.let { "[$it]" } ?: ""}${arg?.let { " $it" } ?: ""}"
 
@@ -77,7 +79,8 @@ data class Step(
             optional = o.optBoolean("opt"),
             submit = o.optBoolean("submit"),
             expect = o.optArray("expect")?.objects()?.mapNotNull { Postcondition.fromJson(it) } ?: emptyList(),
-            nameHint = o.optStringOrNull("name")
+            nameHint = o.optStringOrNull("name"),
+            untilRole = o.optStringOrNull("until_role")?.let { Role.parse(it) }
         )
     }
 }

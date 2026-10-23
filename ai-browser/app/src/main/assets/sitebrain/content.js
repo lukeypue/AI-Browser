@@ -18,6 +18,19 @@
   window.__aiBrowserBrainInstalled = true;
   const documentId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
   let navigationPending = false;
+  // Addresses belong to this document and DOM node, never its ordinal in a
+  // viewport-sorted observation. Recycled nodes with changed meaning get a new
+  // address too. This map is ephemeral and weak; no page data is persisted.
+  const nodeAddresses = new WeakMap();
+  let nextNodeAddress = 0;
+  function addressFor(el, signature) {
+    let entry = nodeAddresses.get(el);
+    if (!entry || entry.signature !== signature) {
+      entry = { id: "a" + nextNodeAddress++, signature };
+      nodeAddresses.set(el, entry);
+    }
+    return entry.id;
+  }
 
   const MAX_ELEMENTS = 380;
   const MAX_ITEMS = 120;
@@ -507,7 +520,7 @@
       const siblings = parent ? parent.children.length : 0;
       const idx = parent ? Array.prototype.indexOf.call(parent.children, el) : 0;
       elements.push({
-        id: "a" + elements.length,
+        id: addressFor(el, JSON.stringify([tag, type, el.getAttribute("role"), name, href, el.getAttribute("rel")])),
         tag,
         type,
         role: el.getAttribute("role") || null,

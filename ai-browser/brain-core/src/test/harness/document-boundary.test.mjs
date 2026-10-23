@@ -29,3 +29,8 @@ test('the required document identity protocol upgrades existing 3.0.0 profiles',
   assert.ok(major > 3 || (major === 3 && (minor > 0 || patch > 0)), 'ensureBuiltIn keeps an equal-version installed extension');
   assert.equal(manifest.browser_specific_settings.gecko.id, 'sitebrain@aibrowser.local');
 });
+
+test('stable target identity is installed over existing 3.1.9 bridges', () => {
+  const [major,minor,patch]=manifest.version.split('.').map(Number);
+  assert.ok(major>3 || major===3 && (minor>1 || minor===1 && patch>9));
+});

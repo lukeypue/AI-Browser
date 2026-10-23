@@ -200,7 +200,9 @@ data class SemanticPageState(
     val scrollHeight: Int = 0,
     val scrollY: Int = 0,
     val capturedAt: Long = 0L,
-    val siteVersion: String = ""
+    val siteVersion: String = "",
+    val viewportWidth: Int = 0,
+    val documentId: String = ""
 ) {
     val results: Collection? get() = collections.firstOrNull { it.role == "results" }
     val resultKeys: Set<String> get() = results?.itemKeys?.toSet() ?: emptySet()
