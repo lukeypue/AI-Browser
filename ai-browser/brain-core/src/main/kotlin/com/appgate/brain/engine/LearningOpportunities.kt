@@ -106,6 +106,17 @@ object LearningOpportunities {
         }
     }
 
+    /** A held result is not evidence that every other result is unusable.
+     * Keep values task-local, deduplicate stable item keys, and bound each probe. */
+    fun targets(page: SemanticPageState, lesson: String): List<LearningTarget> {
+        val first = target(page, lesson) ?: return emptyList()
+        if (first.skillId != "open_item") return listOf(first)
+        return controls(page).asSequence()
+            .filter { it.role == Role.RESULT_ITEM && it.itemKey != null && it.itemKey in page.resultKeys }
+            .distinctBy { it.itemKey }.take(8)
+            .map { first.copy(params = mapOf("item" to it.itemKey!!)) }.toList()
+    }
+
     /** Observations from unrelated page contexts cannot erase a lesson seen elsewhere. */
     fun observe(site: SiteModel, page: SemanticPageState, now: Long) {
         if (page.isHumanOnly || page.settle != Settle.IDLE || page.host.removePrefix("www.") != site.host.removePrefix("www.")) return

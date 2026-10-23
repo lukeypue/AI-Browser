@@ -219,13 +219,13 @@ class BrainEngine(
     /** Check the live prerequisite against the executor's failure holds before allocating a lesson.
      * This does not execute, reserve teacher budget, persist a ledger, or award credit. */
     fun learningLessonAvailable(profile: SiteProfile, page: SemanticPageState, lesson: String, allowTeacher: Boolean = true): Boolean {
-        val target = LearningOpportunities.target(page, lesson) ?: return false
         val site = memory.site(profile.hosts.first())
         val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal, page, lesson)
         val ledger = TaskLedger("eligibility", goal, site.host, page.url).apply {
             this.lesson = lesson
             if (page.pageType == PageType.RESULTS) resultsUrl = page.url
         }
+        val target = learningTarget(ledger, page, site) ?: return false
         val params = skillParams(ledger) + target.params
         val learned = memory.skills.reusable(page, target.skillId, params, ledger)
         if (listOfNotNull(learned, memory.skills.get(target.skillId)).any {
@@ -240,6 +240,23 @@ class BrainEngine(
                 !rejectedPrefixHeld(local.steps, params + local.params, page, site, ledger, true)) return true
         }
         return allowTeacher && FailedStrategies.repairAllowed(site, FailedStrategies.key(page, target.skillId), clock()) && plannerFactory() != null
+    }
+
+    /** Resolve from the live observation for both scheduling and execution.
+     * Prefer another runnable item to repairing an unchanged held item. If all
+     * candidates are held, preserve the existing bounded repair path and holds. */
+    private fun learningTarget(ledger: TaskLedger, page: SemanticPageState, site: SiteModel): LearningTarget? {
+        val candidates = LearningOpportunities.targets(page, ledger.lesson)
+        if (candidates.size <= 1) return candidates.firstOrNull()
+        return candidates.firstOrNull { target ->
+            val params = skillParams(ledger) + target.params
+            val learned = memory.skills.reusable(page, target.skillId, params, ledger)
+            listOfNotNull(learned, memory.skills.get(target.skillId)).any { skill ->
+                FailedStrategies.allowed(site, FailedStrategies.key(page, target.skillId, skill.body, params), clock()) &&
+                    !rejectedPrefixHeld(skill.body, params, page, site, ledger,
+                        skill.origin != com.appgate.brain.model.SkillOrigin.BUILTIN && ("verified_v2" in skill.tags || "demonstrated_candidate_v2" in skill.tags))
+            }
+        } ?: candidates.firstOrNull()
     }
 
     /** Inspect only the first actually runnable step. A distinct prerequisite may
@@ -1154,7 +1171,7 @@ class BrainEngine(
     private fun learningDecision(ledger: TaskLedger, sps: SemanticPageState): PolicyDecision? {
         if (ledger.goal.intent != GoalIntent.LEARN_SITE || ledger.lesson.isBlank()) return null
         if (ledger.lesson in ledger.successfulSkills) return PolicyDecision.Finish(TaskStatus.DONE, "lesson verified: ${ledger.lesson}")
-        val target = LearningOpportunities.target(sps, ledger.lesson)
+        val target = learningTarget(ledger, sps, memory.site(ledger.host))
             ?: return PolicyDecision.Finish(TaskStatus.PARTIAL, "lesson control not available on this page; waiting for an opportunity")
         if (target.constraints.isNotEmpty() && ledger.effectiveGoal.filterable.isEmpty()) ledger.learningConstraints = target.constraints
         val key = "__lesson_target:${target.skillId}"
