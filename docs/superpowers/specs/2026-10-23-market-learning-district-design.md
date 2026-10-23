@@ -1,0 +1,19 @@
+# Marketplace learning district
+
+The owner requested an expansion around the four current profile families, targeting listing details, scrolling, pagination and dialogs. Add a separate JVM synthetic district, leaving the original fixed, unseen, City and challenge manifests unchanged. Existing scripted search and dialog clinics are controls, not proof of autonomous learning.
+
+Use the real parser, engine, verifier, compiler and durable storage. Four synthetic profile families each get two training layouts and four withheld layouts, covering open item, expand description, return, scroll, next page, load more and dialog closure. Layout IDs, result keys, order and labels vary. Each withheld layout has a working, acknowledged-no-op and human-only version. The environment's private state is the outcome oracle; it never enters page observations.
+
+Compare cold, trained/reloaded and learned-skill-removed memory on independent forks. Training demonstrations are explicitly LOCAL_SCRIPTED; evaluation has no planner and zero model budget. Persist training memory and reload it before evaluation; this is disk reload, not an actual process/emulator restart. Report procedure growth separately from verified uses and only claim attributed gain when retained success exceeds both cold and ablation with all safety/control gates satisfied. Existing abilities must remain checked by the full core suite and frozen manifest tests.
+
+Alternatives: adding more catalog seeds would mostly repeat saturated tests; replacing the existing exams would destroy comparison. A separate lab district is the selected first increment. Browser-generated fixtures and long composed tasks are follow-up work after measuring this district. No phone data, external model call, app/version/signing change, live memory import, service/timer change or automatic publication is part of this increment. A review branch/PR is the handoff to the current deployment owner.
+
+## Acquisition frontier and honest limits
+
+Independent source review and an actual signed-in Claude consultation showed that the primitive district is saturated. Its four names are synthetic family labels over one renderer; parity label/order/coordinate variants must not be presented as independent marketplace replicas. Keep these as regression controls.
+
+Add a separate 16-case training / 96-case evaluation pagination frontier. A real 500-pixel scroll must precede Next/Load-more; the physical oracle requires exactly the next result generation. Withheld parameter layouts 4 and 5 change the pagination element tags. Each arm uses an identical zero-model budget, which isolates causal memory reuse but does not compare against a cold external planner. Train reversed and click-only demonstrations through the same verifier/compiler; neither may produce passing behavior. A 32-case distance probe requires 1000 pixels, beyond the trained literal, and reports its actual failures.
+
+Pair 32 no-scroll-needed cases with an action budget of one. Score these by the physical goal plus an atomically verified transition; the engine finalizes a whole lesson on a later decision, so lesson completion is a different metric at this budget. Report selected sources and every counterfactual regression. `retained_macro_gain` describes only the demonstrated macro screen; any regression suppresses `attributed_learning_gain`. A saturated primitive run or a positive macro screen is not a server promotion gate. No actual process/emulator restart, independent renderer, adaptive-distance skill or real-site gain is established here.
+
+Source reports identify the Git revision and hash of the supplied source tree, explicitly not executing-binary attestation. Run through the Gradle task to bind the intended source directory. The new fixture manifests are developer-owned and visible during implementation, not a blind external benchmark.
