@@ -30,6 +30,21 @@ class DialogClinicConsistencyTests(unittest.TestCase):
 
 
 class DialogClinicProvenanceMigrationTests(unittest.TestCase):
+    def recaptured_clinic(self):
+        c=clinic()
+        # Actual unchanged-case Chromium capture from CI39997580825.
+        c.update(fixture_sha256='acf673b66f54cb09ee5891d070c17c6663caf87a68c7e50c48c9bb3e4089822b',extractor_sha256='70d949c5f3b8293d6ae10659e50d74bb0cdb62b2ba6fc8fc2f99b1f57090b6b2')
+        return c
+    def test_exact_document_address_recapture_is_accepted(self):
+        for sanitize in self.sanitizers():
+            with self.subTest(sanitize=sanitize.__module__):
+                c=self.recaptured_clinic();self.assertEqual(c,sanitize(c))
+    def test_recapture_does_not_allow_mixed_or_unknown_provenance(self):
+        for sanitize in self.sanitizers():
+            for fixture_hash,extractor_hash in [(clinic()['fixture_sha256'],self.recaptured_clinic()['extractor_sha256']),
+                (self.recaptured_clinic()['fixture_sha256'],clinic()['extractor_sha256']),('a'*64,self.recaptured_clinic()['extractor_sha256'])]:
+                c=self.recaptured_clinic();c.update(fixture_sha256=fixture_hash,extractor_sha256=extractor_hash)
+                with self.assertRaises(ValueError):sanitize(c)
     def sanitizers(self):
         import synthetic_export
         import importlib.util
