@@ -2,7 +2,7 @@ import {createRequire} from 'node:module';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
-const source=readFileSync(new URL('../ai-browser/app/src/main/assets/sitebrain/content.js',import.meta.url),'utf8');
+const source=readFileSync(process.argv[3] || new URL('../ai-browser/app/src/main/assets/sitebrain/content.js',import.meta.url),'utf8');
 const digest=x=>createHash('sha256').update(x).digest('hex');
 const cards='<main><h1>Search listings</h1>'+Array.from({length:4},(_,i)=>`<a style="display:block;height:100px" href="/item/${100000+i}">Mountain bike ${i} $${100+i}</a>`).join('')+'<p>'+('Synthetic marketplace listing details. '.repeat(30))+'</p></main>';
 const modal=body=>`<section id="modal" role="dialog" aria-label="Notice" style="position:fixed;top:80px;left:10px;width:360px;height:320px;background:white;z-index:50"><p>Optional notice</p>${body}</section>`;

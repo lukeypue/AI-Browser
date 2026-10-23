@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import {test, before, after} from 'node:test';
 const {chromium} = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const source = readFileSync(new URL('../../../../app/src/main/assets/sitebrain/content.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./candidate-content.js', import.meta.url), 'utf8');
 let browser;
 before(async () => { browser = await chromium.launch({executablePath: process.env.CHROMIUM || undefined}); });
 after(async () => { await browser?.close(); });
@@ -294,4 +294,20 @@ test('offscreen explicit dialog leaves current results available', async () => {
     assert.equal(obs.signals.dialog, false);
     assert.equal(obs.items.length, 2);
   } finally { await page.close(); }
+});
+
+// Isolated capture validation; removed from the integration tree after retrieval.
+test('capture unchanged clinic cases with corrected extractor',async()=>{
+ const {execFileSync}=await import('node:child_process');
+ const {mkdtempSync}=await import('node:fs');
+ const {tmpdir}=await import('node:os');
+ const {fileURLToPath}=await import('node:url');
+ const output=mkdtempSync(tmpdir()+'/clinic-capture-')+'/clinic.json';
+ const script=fileURLToPath(new URL('../../../../../scripts/capture-dialog-clinic.mjs',import.meta.url));
+ const extractor=fileURLToPath(new URL('./candidate-content.js',import.meta.url));
+ execFileSync(process.execPath,[script,output,extractor],{env:process.env,timeout:120000});
+ const capture=JSON.parse(readFileSync(output,'utf8'));
+ assert.equal(capture.manifest_sha256,'94d28e1439971863a0867207d29fef3c986b32ffde22937e861548b720158981');
+ assert.equal(capture.cases.length,12);
+ console.log('AIBROWSER_CLINIC_CAPTURE '+JSON.stringify(capture));
 });
