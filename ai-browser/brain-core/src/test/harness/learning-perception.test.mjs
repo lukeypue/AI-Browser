@@ -20,6 +20,32 @@ async function fixture(html, url = 'https://fixtures.test/search') {
 const style = '<style>a.card{display:block;height:150px;width:300px;margin:10px}aside{width:300px;height:120px}</style>';
 const cards = count => Array.from({length: count}, (_, i) => `<a class="card" href="/item/${100001 + i}"><span>Mountain bike ${i + 1}</span><span>$${100 + i}</span></a>`).join('');
 
+test('document-scoped affordance IDs survive viewport ordering changes', async () => {
+  const page=await fixture('<main><button id="top">Top control</button><div style="height:1600px"></div><button id="next">Next page</button></main>');
+  try {
+    const before=await page.evaluate(()=>window.__brainObserve());
+    const id=before.elements.find(e=>e.name==='Next page').id;
+    await page.evaluate(()=>document.querySelector('#next').scrollIntoView());
+    const after=await page.evaluate(()=>window.__brainObserve());
+    assert.equal(after.documentId,before.documentId);
+    assert.equal(after.elements.find(e=>e.name==='Next page').id,id);
+  } finally {await page.close();}
+});
+
+test('a replacement node cannot inherit an earlier affordance address', async () => {
+  const page=await fixture('<main><button id="next">Next page</button></main>');
+  try {
+    const before=await page.evaluate(()=>window.__brainObserve());
+    const id=before.elements.find(e=>e.name==='Next page').id;
+    await page.evaluate(()=>{document.querySelector('#next').outerHTML='<button id="next" onclick="window.wrongClick=true">Next page</button>';});
+    const after=await page.evaluate(()=>window.__brainObserve());
+    assert.notEqual(after.elements.find(e=>e.name==='Next page').id,id);
+    const result=await page.evaluate(({id,after})=>window.__brainExecute({cmd:'click',id,expectedDocumentId:after.documentId,expectedUrl:after.url}),{id,after});
+    assert.equal(result.ok,false);
+    assert.equal(await page.evaluate(()=>window.wrongClick===true),false);
+  } finally {await page.close();}
+});
+
 test('fixed page chrome and empty layers do not block results learning', async () => {
   for (const layer of [
     '<header><div style="position:fixed;top:0;width:100%;height:400px;background:white;z-index:20"><button>Close</button></div></header>',

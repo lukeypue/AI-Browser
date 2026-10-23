@@ -101,7 +101,7 @@ class DialogClinic {
  }
  companion object {
   const val MANIFEST_SHA256="94d28e1439971863a0867207d29fef3c986b32ffde22937e861548b720158981"
-  const val FIXTURE_SHA256="e0e30c1f063c8697c1d569a7620f3f1869aa1c27e3bdd357e9cb198b2418ecfa"
+  const val FIXTURE_SHA256="acf673b66f54cb09ee5891d070c17c6663caf87a68c7e50c48c9bb3e4089822b"
   fun sha(bytes:ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it)}
  }
 }

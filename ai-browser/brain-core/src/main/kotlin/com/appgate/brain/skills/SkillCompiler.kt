@@ -31,11 +31,17 @@ object SkillCompiler {
         compileVerified(memory, ledger, program, now)
 
     /** Shared by verified local repairs and planner programs; proposing a program is never evidence. */
-    fun compileVerified(memory: Memory, ledger: TaskLedger, program: List<Step>, now: Long): Skill? {
+    fun compileVerified(memory: Memory, ledger: TaskLedger, program: List<Step>, now: Long,
+        verifiedScrollTargets: Map<Int, Role> = emptyMap()): Skill? {
         if (program.isEmpty() || !ledger.programCompleted || ledger.programPage == null || ledger.programPost.isEmpty()) return null
         if (program.indices.filter { !program[it].optional }.let { it.isEmpty() || !ledger.programVerifiedSteps.containsAll(it) }) return null
         if (ledger.programPage !in PortableSkills.pages || ledger.programCapability !in PortableSkills.capabilities + "custom") return null
-        val abstracted = abstractSteps(program, ledger)
+        val abstracted = abstractSteps(program.mapIndexed { i, step ->
+            val role = verifiedScrollTargets[i]
+            step.copy(untilRole = role?.takeIf {
+                com.appgate.brain.engine.PaginationScroll.following(program,i)?.role == it
+            })
+        }, ledger)
         val post = abstractSteps(listOf(Step(StepKind.WAIT, expect = ledger.programPost)), ledger).steps.single().expect
         if (!PortableSkills.safeProgram(abstracted.steps, post)) return null
         if (ledger.programCapability != "custom" && !PortableSkills.compatible(ledger.programCapability, abstracted.steps, post)) return null
@@ -58,7 +64,8 @@ object SkillCompiler {
             origin = SkillOrigin.COMPILED,
             statsByHost = mapOf(ledger.host to BetaStat().record(true, now)),
             provenance = listOf("verified:${Hashing.short(ledger.id)}"),
-            tags = setOf("compiled", "verified_v2", "capability:${ledger.programCapability}")
+            tags = setOf("compiled", "verified_v2", "capability:${ledger.programCapability}") +
+                if (abstracted.steps.any { it.untilRole != null }) setOf("verified_scroll_v1") else emptySet()
         )
         memory.skills.put(skill)
         return skill
@@ -178,6 +185,8 @@ internal object PortableSkills {
     fun entry(body: List<Step>): Step? = body.firstOrNull { !it.optional && it.kind != StepKind.WAIT }
 
     fun safeProgram(body: List<Step>, post: List<Postcondition>): Boolean = body.size in 1..8 && entry(body) != null &&
+        body.indices.all { i -> body[i].untilRole == null ||
+            com.appgate.brain.engine.PaginationScroll.following(body,i)?.role == body[i].untilRole } &&
         post.isNotEmpty() && post.all(::safePost) && body.all { s ->
             (s.role == null || s.role in safeRoles) && s.nameHint == null &&
                 (s.facetKey == null || key(s.facetKey)) && s.expect.all(::safePost) &&

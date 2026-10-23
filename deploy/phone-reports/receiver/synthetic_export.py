@@ -74,7 +74,10 @@ def sanitize_dialog_clinic(c):
     # Keep already validated historical reports uploadable. Never mix the
     # fixture of one capture with the extractor of another.
     legacy=dict(hashes,fixture_sha256='7fb2a0c66abef0626a3be05e13a5407b52ce11ad68405d43cff43e54caf3f853',extractor_sha256='adfe635862be7b529604c65a28bb81a0ceb433aca97a2c83ead5db79aaea0be4')
-    check(any(all(c.get(k)==v for k,v in approved.items()) for approved in (hashes,legacy)))
+    # Same frozen cases/oracle, recaptured with stable document-scoped node addresses.
+    # Exact bytes and all physical outcomes verified against CI39997580825.
+    document_addresses=dict(hashes,fixture_sha256='acf673b66f54cb09ee5891d070c17c6663caf87a68c7e50c48c9bb3e4089822b',extractor_sha256='70d949c5f3b8293d6ae10659e50d74bb0cdb62b2ba6fc8fc2f99b1f57090b6b2')
+    check(any(all(c.get(k)==v for k,v in approved.items()) for approved in (hashes,legacy,document_addresses)))
     check(c.get('schema_version')==1 and c.get('fixture_cases')==12 and c.get('held_out_cases')==10)
     check(c.get('source')=='CHROMIUM_GENERATED_REPLAY' and c.get('teacher')=='LOCAL_SCRIPTED' and c.get('real_world_validated') is False)
     check(c.get('training_demonstrations')==4 and c.get('evaluation_teacher_calls')==0)

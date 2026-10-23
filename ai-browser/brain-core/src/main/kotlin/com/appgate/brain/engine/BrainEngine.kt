@@ -84,6 +84,9 @@ class BrainEngine(
     private var lastPlannerCallAt = 0L
     private var latestPage: SemanticPageState? = null
     private var programBefore: SemanticPageState? = null
+    private val verifiedScrollTargets = mutableMapOf<Int, Role>()
+    private val scrollTargetIds = mutableMapOf<Int, String>()
+    private val scrollPrerequisitePages = mutableMapOf<Int, SemanticPageState>()
     // Atomic predicate satisfaction is separate from causal evidence for mastery.
     private val programSatisfiedSteps = mutableSetOf<Int>()
     private var lessonsBefore: Set<String> = emptySet()
@@ -281,6 +284,9 @@ class BrainEngine(
         currentLedger = ledger
         latestPage = null
         programBefore = null
+        verifiedScrollTargets.clear()
+        scrollTargetIds.clear()
+        scrollPrerequisitePages.clear()
         // A partial program cannot carry verification credit across a process/task resume.
         ledger.programVerifiedSteps.clear()
         programSatisfiedSteps.clear()
@@ -508,6 +514,9 @@ class BrainEngine(
         }
         ledger.cursor = 0
         programBefore = latestPage
+        verifiedScrollTargets.clear()
+        scrollTargetIds.clear()
+        scrollPrerequisitePages.clear()
         ledger.programPage = latestPage?.pageType
         ledger.programVerifiedSteps.clear()
         programSatisfiedSteps.clear()
@@ -617,7 +626,47 @@ class BrainEngine(
 
     private fun runProgramStep(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode) {
         if (programBefore == null) { programBefore = sps; ledger.programPage = sps.pageType }
-        val step = ledger.currentProgram[ledger.cursor]
+        var step = ledger.currentProgram[ledger.cursor]
+        fun stopPrerequisite(reason: String) {
+            ledger.status = TaskStatus.PARTIAL
+            ledger.terminalReason = reason
+            finishProgram(ledger,sps,site,success=false,rememberFailure=false)
+        }
+        if (step.untilRole != null) {
+            val skill = memory.skills.get(ledger.programSource.removePrefix("skill:"))
+            val next = PaginationScroll.following(ledger.currentProgram,ledger.cursor)
+            val target = next?.let { PaginationScroll.target(it,sps,site,ledger) }
+            val distance = target?.let { PaginationScroll.distance(it,sps) }
+            val identity = scrollTargetIds[ledger.cursor]
+            val previous = scrollPrerequisitePages[ledger.cursor]
+            if (!ledger.programSource.startsWith("skill:") || skill?.origin != com.appgate.brain.model.SkillOrigin.COMPILED ||
+                "verified_scroll_v1" !in skill.tags || next == null || target == null || distance == null ||
+                sps.documentId.isBlank() || previous != null && !PaginationScroll.sameContext(previous,sps) ||
+                identity != null && identity != PaginationScroll.identity(target) || identity == null && ledger.cursor in ledger.programVerifiedSteps) {
+                stopPrerequisite("pagination scroll needs stable document, results and target geometry")
+                return
+            }
+            scrollTargetIds[ledger.cursor] = PaginationScroll.identity(target)
+            scrollPrerequisitePages[ledger.cursor] = sps
+            if (distance == 0L) {
+                // A satisfied prerequisite is not an action or atomic success. The following
+                // click and the original program postcondition must still verify.
+                programSatisfiedSteps += ledger.cursor
+                ledger.cursor++
+                step = ledger.currentProgram[ledger.cursor]
+                memory.saveLedger(ledger)
+            }
+        }
+        if (ledger.cursor > 0 && ledger.currentProgram[ledger.cursor-1].untilRole != null) {
+            val index = ledger.cursor-1
+            val previous = scrollPrerequisitePages[index]
+            val target = PaginationScroll.target(step,sps,site,ledger)
+            if (previous == null || !PaginationScroll.sameContext(previous,sps) || target == null ||
+                PaginationScroll.identity(target) != scrollTargetIds[index] || PaginationScroll.distance(target,sps) != 0L) {
+                stopPrerequisite("pagination click prerequisite changed before execution")
+                return
+            }
+        }
         if (!ProgressSupervisor.permit(ledger, sps, step)) {
             missingStep(ledger, sps, site, step, "repeat_state_limit")
             return
@@ -644,6 +693,9 @@ class BrainEngine(
     private fun executeGrounded(ledger: TaskLedger, before: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode, grounded: GroundedStep, retriesLeft: Int, excludedIds: Set<String> = emptySet()) {
         if (ledger.actions >= ledger.goal.budget.actions || stopRequested.get()) return
         val action = grounded.action
+        val guardedPaginationClick = ledger.cursor > 0 &&
+            ledger.currentProgram.getOrNull(ledger.cursor-1)?.untilRole == grounded.step.role &&
+            grounded.step.kind == StepKind.CLICK
         if (action.url != null && !allowedUrl(ledger, action.url, profile)) {
             missingStep(ledger, before, site, grounded.step, "outside_task_host")
             return
@@ -684,6 +736,12 @@ class BrainEngine(
                 // A document/target refusal happened before a click. Re-observe and ground
                 // the semantic step against the new document; never replay the old target.
                 val stale = outcome.reason == "STALE_DOCUMENT" || outcome.reason == "STALE_TARGET" || outcome.reason == "TARGET_MISSING"
+                if (guardedPaginationClick) {
+                    ledger.status = TaskStatus.PARTIAL
+                    ledger.terminalReason = "guarded pagination target refused; no alternate click attempted"
+                    finishProgram(ledger,before,site,success=false,rememberFailure=false)
+                    return
+                }
                 if (stale && retriesLeft > 0 && grounded.chosen != null && action.effect != com.appgate.brain.model.EffectClass.COMMIT_EXTERNAL) {
                     val observed = runCatching { executor.observe(clock()) }.getOrNull()
                     if (observed != null && acceptPage(ledger, observed, profile) && !observed.isHumanOnly &&
@@ -746,11 +804,39 @@ class BrainEngine(
                         ledger.programVerifiedSteps += ledger.cursor
                     if (verifiedChange(grounded.action, before, after))
                         progress(ledger, "verified|${evidenceKey(before)}|${grounded.action.kind}|${grounded.step.role}|${evidenceKey(after)}", "new verified state")
-                    ledger.cursor++
+                    PaginationScroll.observed(ledger.currentProgram,ledger.cursor,before,after,site,ledger)?.let {
+                        verifiedScrollTargets[ledger.cursor] = it
+                    }
+                    if (grounded.step.untilRole != null) {
+                        val next = PaginationScroll.following(ledger.currentProgram,ledger.cursor)
+                        val a = next?.let { PaginationScroll.target(it,before,site,ledger) }
+                        val b = next?.let { PaginationScroll.target(it,after,site,ledger) }
+                        val from = a?.let { PaginationScroll.distance(it,before) }
+                        val to = b?.let { PaginationScroll.distance(it,after) }
+                        if (!PaginationScroll.sameContext(before,after) ||
+                            a == null || b == null || PaginationScroll.identity(a) != PaginationScroll.identity(b) || from == null || to == null || to >= from) {
+                            ledger.status = TaskStatus.PARTIAL
+                            ledger.terminalReason = "pagination scroll stopped after changed results, target or progress"
+                            finishProgram(ledger,after,site,success=false,rememberFailure=false)
+                            return
+                        }
+                        scrollPrerequisitePages[ledger.cursor] = after
+                        // The next decision observes the live page and checks the condition
+                        // again. Every repeat consumes the ordinary action/time budget.
+                    } else ledger.cursor++
                     afterVerified(ledger, before, after, grounded, site)
                 } else if (grounded.step.optional) {
                     ledger.cursor++            // optional steps may fail silently
                 } else {
+                    if (guardedPaginationClick) {
+                        ledger.consecutiveFailures++
+                        recordFailureMemory(site,before,grounded.step,"unverified")
+                        ledger.status = TaskStatus.PARTIAL
+                        ledger.terminalReason = "guarded pagination click did not verify; no alternate attempted"
+                        finishProgram(ledger,after,site,success=false,rememberFailure=result.status == VerifyStatus.FAILED &&
+                            before.settle == com.appgate.brain.model.Settle.IDLE && after.settle == com.appgate.brain.model.Settle.IDLE)
+                        return
+                    }
                     // DOM and effects can change during an action. Resolve a NEW live target.
                     val excluded = excludedIds + listOfNotNull(grounded.chosen?.affordance?.id)
                     val fresh = if (retriesLeft > 0 && grounded.chosen != null && after.pageType == before.pageType && !after.dialogOpen)
@@ -759,9 +845,15 @@ class BrainEngine(
                         executeGrounded(ledger, after, site, profile, executor, mode, fresh.grounded, retriesLeft - 1, excluded)
                         return
                     }
-                    if (grounded.action.kind == ActionKind.SCROLL) ledger.scrollRoundsWithoutNew++   // exploration, not a failure
+                    if (grounded.action.kind == ActionKind.SCROLL) {
+                        ledger.scrollRoundsWithoutNew++   // exploration, not a failure
+                        if (grounded.step.untilRole != null) {
+                            ledger.status = TaskStatus.PARTIAL
+                            ledger.terminalReason = "pagination scroll did not make verified progress"
+                        }
+                    }
                     else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "unverified") }
-                    finishProgram(ledger, after, site, success = false, rememberFailure = result.status == VerifyStatus.FAILED && before.settle == com.appgate.brain.model.Settle.IDLE && after.settle == com.appgate.brain.model.Settle.IDLE)
+                    finishProgram(ledger, after, site, success = false, rememberFailure = grounded.step.untilRole == null && result.status == VerifyStatus.FAILED && before.settle == com.appgate.brain.model.Settle.IDLE && after.settle == com.appgate.brain.model.Settle.IDLE)
                 }
                 memory.saveLedger(ledger)
             }
@@ -837,6 +929,8 @@ class BrainEngine(
         fun hasStepEvidence(i: Int): Boolean {
             if (i in ledger.programVerifiedSteps) return true
             val step = ledger.currentProgram[i]
+            if (step.untilRole != null && i in programSatisfiedSteps && ledger.programSource.startsWith("skill:") &&
+                PaginationScroll.following(ledger.currentProgram,i)?.role == step.untilRole) return true
             return submittedSearch && i in programSatisfiedSteps && step.kind == StepKind.TYPE &&
                 step.role == Role.SEARCH_BOX && !step.submit && step.arg == ledger.goal.query &&
                 step.expect == listOf(Postcondition.ValueIs("query", ledger.goal.query))
@@ -884,7 +978,7 @@ class BrainEngine(
             val compilationLedger = if (submittedSearch) ledger.copy(
                 programVerifiedSteps = (ledger.programVerifiedSteps + required.filter(::hasStepEvidence)).toMutableSet()
             ) else ledger
-            SkillCompiler.compileVerified(memory, compilationLedger, ledger.currentProgram, clock())
+            SkillCompiler.compileVerified(memory, compilationLedger, ledger.currentProgram, clock(), verifiedScrollTargets)
             ledger.successfulSkills += ledger.programCapability
             Curriculum.markSkillVerified(site, ledger.programCapability, clock())
         }
@@ -904,6 +998,9 @@ class BrainEngine(
             ledger.constraintAttempts.remove(discoveryKey)
         }
         programBefore = null
+        verifiedScrollTargets.clear()
+        scrollTargetIds.clear()
+        scrollPrerequisitePages.clear()
         memory.saveLedger(ledger)
         memory.saveSite(site)
     }
