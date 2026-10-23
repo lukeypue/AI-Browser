@@ -309,5 +309,8 @@ test('capture unchanged clinic cases with corrected extractor',async()=>{
  const capture=JSON.parse(readFileSync(output,'utf8'));
  assert.equal(capture.manifest_sha256,'94d28e1439971863a0867207d29fef3c986b32ffde22937e861548b720158981');
  assert.equal(capture.cases.length,12);
- console.log('AIBROWSER_CLINIC_CAPTURE '+JSON.stringify(capture));
+ console.log('AIBROWSER_CLINIC_HEADER '+JSON.stringify({schema_version:capture.schema_version,extractor_sha256:capture.extractor_sha256,manifest_sha256:capture.manifest_sha256}));
+ for(const row of capture.cases)console.log('AIBROWSER_CLINIC_CASE '+JSON.stringify(row));
+ const {createHash}=await import('node:crypto');
+ console.log('AIBROWSER_CLINIC_END '+createHash('sha256').update(readFileSync(output)).digest('hex'));
 });
