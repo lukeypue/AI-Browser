@@ -23,6 +23,11 @@ class ServerLabInstrumentation : Instrumentation() {
     @Volatile private var faultId: String? = null
     @Volatile private var faultStartedAt = 0L
     private val faultRecorded = AtomicBoolean(false)
+    private var startupTrace: ServerLabStartupTrace? = null
+    private fun enterStage(value: ServerLabStartupTrace.Stage) {
+        stage = value.name
+        startupTrace?.record(value)
+    }
 
     override fun onException(obj: Any?, error: Throwable?): Boolean =
         ServerLabFaultCapture.recordThenDelegate({
@@ -46,8 +51,25 @@ class ServerLabInstrumentation : Instrumentation() {
             BuildConfig.VERSION_CODE, stage, objectKind, error, SystemClock.elapsedRealtime() - faultStartedAt)
         ServerLabFaultCapture.writeIfAbsent(File(targetContext.filesDir, "serverlab"), marker)
     }
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); args=arguments ?: Bundle(); start() }
+    override fun onCreate(arguments: Bundle?) {
+        super.onCreate(arguments)
+        args = arguments ?: Bundle()
+        if (!args.containsKey("cycle_id")) args.putString("cycle_id", UUID.randomUUID().toString())
+        // Inspection must leave the original invocation's marker intact.
+        if (BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB &&
+            targetContext.packageName == "com.aibrowser.universal.serverlab" &&
+            (args.getString("command") ?: "smoke") in setOf("smoke", "cycle", "probe", "fault_probe")) {
+            startupTrace = runCatching {
+                ServerLabStartupTrace(File(targetContext.filesDir, "serverlab"),
+                    args.getString("cycle_id") ?: "", BuildConfig.DIAGNOSTICS_REVISION,
+                    BuildConfig.VERSION_CODE, SystemClock::elapsedRealtime)
+            }.getOrNull()
+            // Do not perform diagnostic disk I/O on Android's main thread.
+        }
+        start()
+    }
     override fun onStart() {
+        startupTrace?.record(ServerLabStartupTrace.Stage.ON_START)
         val command=args.getString("command") ?: "smoke"
         val rawId=args.getString("cycle_id") ?: UUID.randomUUID().toString()
         // Reject arbitrary paths before creating a file.
@@ -69,7 +91,7 @@ class ServerLabInstrumentation : Instrumentation() {
         var status="FAILED"
         var end="RUNTIME_FAILED"
         var elapsed=0L
-        stage="GUARD"
+        enterStage(ServerLabStartupTrace.Stage.GUARD)
         var startupWait:ServerLabStartupWait?=null
         val connection=object:ServiceConnection {
             override fun onServiceConnected(name:ComponentName,binder:IBinder) { service=(binder as BrainService.LocalBinder).service; ready.countDown() }
@@ -79,19 +101,21 @@ class ServerLabInstrumentation : Instrumentation() {
             check(BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB)
             check(targetContext.packageName=="com.aibrowser.universal.serverlab")
             faultId=id; faultStartedAt=SystemClock.elapsedRealtime(); faultRecorded.set(false)
+            startupTrace?.record(ServerLabStartupTrace.Stage.RUNTIME_INSTALL)
             ServerLabRuntime.install(targetContext, ServerLabRuntime.ReportIdentityGate { r -> report.set(r); complete.countDown() })
             // Explicitly disable transports; this never reads a planner key.
+            startupTrace?.record(ServerLabStartupTrace.Stage.SETTINGS)
             PhoneSharing(targetContext).setEnabled(false)
             PlannerKeyStore.setTeacherEnabled(targetContext,false)
             if (command=="fault_probe") {
                 // An expected failing maintenance probe, never a learning cycle or completion.
-                stage="BIND_SERVICE"
+                enterStage(ServerLabStartupTrace.Stage.BIND_SERVICE)
                 ServerLabControlledFaultService.arm(id)
                 runOnMainSync { targetContext.startService(Intent(targetContext,ServerLabControlledFaultService::class.java)) }
                 SystemClock.sleep(10_000)
                 error("CONTROLLED_SERVICE_FAILURE_DID_NOT_PROPAGATE")
             }
-            val startup=ServerLabStartupWait(SystemClock::elapsedRealtime, SystemClock::sleep) { stage=it.name }
+            val startup=ServerLabStartupWait(SystemClock::elapsedRealtime, SystemClock::sleep) { enterStage(ServerLabStartupTrace.Stage.valueOf(it.name)) }
             startupWait=startup
             check(startup.awaitBinding(requestBind={
                 runOnMainSync {
@@ -100,26 +124,26 @@ class ServerLabInstrumentation : Instrumentation() {
                 }
                 bound
             }, awaitBound={ timeout -> ready.await(timeout,TimeUnit.MILLISECONDS) }))
-            val s=service ?: run { stage="SERVICE_UNAVAILABLE"; error("SERVICE_UNAVAILABLE") }
+            val s=service ?: run { enterStage(ServerLabStartupTrace.Stage.SERVICE_UNAVAILABLE); error("SERVICE_UNAVAILABLE") }
             check(startup.awaitEngineReady { s.state.engineReady })
             engineReady=true
             waitForIdleSync()
-            stage="MEMORY_BEFORE"
+            enterStage(ServerLabStartupTrace.Stage.MEMORY_BEFORE)
             s.serverLabBarrier().get(30,TimeUnit.SECONDS)
             before=ServerLabRuntime.project(s.memory)
             if(command=="probe") {
                 after=before; before=null; status="PROBE"; end="INTERRUPTED"
             } else {
-                stage="LEARNING"
+                enterStage(ServerLabStartupTrace.Stage.LEARNING)
                 runOnMainSync { s.startLearning(30) }
                 if(command=="smoke") {
                     SystemClock.sleep(60_000)
                     runOnMainSync { s.stopWork() }
                 }
-                stage="STRICT_SNAPSHOT"
+                enterStage(ServerLabStartupTrace.Stage.STRICT_SNAPSHOT)
                 check(complete.await(if(command=="cycle") 32 else 1,TimeUnit.MINUTES))
                 // Future.isDone is insufficient after cancel: this executor barrier waits for the actual job.
-                stage="MEMORY_AFTER"
+                enterStage(ServerLabStartupTrace.Stage.MEMORY_AFTER)
                 s.serverLabBarrier().get(60,TimeUnit.SECONDS)
                 waitForIdleSync()
                 after=ServerLabRuntime.project(s.memory)
@@ -127,7 +151,7 @@ class ServerLabInstrumentation : Instrumentation() {
                 elapsed=r.optLong("elapsed_ms")
                 val summary=r.optObject("summary") ?: error("NO_SUMMARY")
                 val interrupted=r.optObject("flags")?.optBoolean("interrupted",true) ?: true
-                stage="VERIFY_OUTCOME"
+                enterStage(ServerLabStartupTrace.Stage.VERIFY_OUTCOME)
                 if(command=="smoke") {
                     check(summary.optInt("verified")>0)
                     status="SMOKE"; end="INTERRUPTED"
@@ -158,6 +182,7 @@ class ServerLabInstrumentation : Instrumentation() {
         val temp=File(dir,"$name.tmp")
         FileOutputStream(temp).use { out -> out.write(bytes); out.fd.sync() }
         check(temp.renameTo(File(dir,name)))
+        startupTrace?.record(ServerLabStartupTrace.Stage.FINISHED)
         finish(if(status=="FAILED") Activity.RESULT_CANCELED else Activity.RESULT_OK,
             Bundle().apply {
                 putString("result",status); putString("stage",stage); putString("output","files/serverlab/$name")
