@@ -139,6 +139,8 @@ snippets; instruction-like sentences neutralised in anything that goes to a mode
   Failed requests consume allowance. Explicit persistent unrestricted regular/smarter options bypass both app request caps, while preserving accounting and the master off switch. Smarter takes priority when both are checked. This is a request cap, not a dollar cap. Provider usage
   is recorded when returned; missing usage is distinguished from zero usage.
 
+Named choice/numeric facet prerequisites inspect at most eight distinct safe facet keys per probe. A persisted failed first accordion does not hide another usable workspace in the same lesson family; opening it alone never completes the parent facet lesson.
+
 Detail-learning prerequisites inspect at most eight distinct safe visible result keys per probe. A persisted failed first-item procedure does not hide another usable item; eligibility and execution share live target selection. All-held candidates keep the existing bounded repair path and retain every failure. This is bounded exploration, not proof every listing was tried.
 
 ## 6. Safety model
