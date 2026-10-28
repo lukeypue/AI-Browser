@@ -70,3 +70,12 @@ tasks.register('frontierScreen', JavaExec) {
         args providers.gradleProperty('frontierMemory').get()
     }
 }
+
+// Acquisition and failure-memory gate is additional to the unchanged frozen exams.
+tasks.register('facetClinic', JavaExec) {
+    group = 'verification'
+    description = 'Actual synthetic direct-facet acquisition, durable reload and failure-memory ablation.'
+    classpath = sourceSets.lab.runtimeClasspath
+    mainClass = 'com.appgate.brain.lab.FacetLearningClinicMainKt'
+    args layout.buildDirectory.file('reports/brain/facet-clinic.json').get().asFile.absolutePath
+}

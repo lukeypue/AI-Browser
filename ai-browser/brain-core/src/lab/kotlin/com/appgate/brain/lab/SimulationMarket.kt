@@ -52,6 +52,7 @@ class SimulationMarket(val scenario: Scenario) : Renderer {
         appliedFilters.entries.joinToString("") { "&${it.key}=${encode(it.value)}" }
     private fun results(): List<SimListing> = catalog.filter { l ->
         (appliedQuery.isBlank() || appliedQuery.lowercase().split(' ').all { it in l.vehicle.lowercase() }) &&
+            (appliedFilters["make"]?.let { l.vehicle.substringBefore(' ').equals(it, ignoreCase = true) } != false) &&
             (appliedFilters["price_max"]?.toIntOrNull()?.let { l.price <= it } != false) &&
             (appliedFilters["mileage_max"]?.toIntOrNull()?.let { l.mileage <= it } != false)
     }
@@ -70,7 +71,7 @@ class SimulationMarket(val scenario: Scenario) : Renderer {
             }
             appliedQuery = query["q"].orEmpty(); draftQuery = appliedQuery
             appliedFilters.clear()
-            listOf("price_max", "mileage_max").forEach { key -> query[key]?.let { appliedFilters[key] = it } }
+            listOf("price_max", "mileage_max", "make").forEach { key -> query[key]?.let { appliedFilters[key] = it } }
             page = query["page"]?.toIntOrNull() ?: 1
         } else if (URI(url).path == "/") {
             appliedQuery = ""; draftQuery = ""; appliedFilters.clear(); draftFilters.clear(); page = 1

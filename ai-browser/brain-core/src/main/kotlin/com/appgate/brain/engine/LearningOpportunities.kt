@@ -110,13 +110,14 @@ object LearningOpportunities {
      * Keep values task-local, deduplicate stable item keys, and bound each probe. */
     fun targets(page: SemanticPageState, lesson: String): List<LearningTarget> {
         val first = target(page, lesson) ?: return emptyList()
-        if (first.skillId == "open_facet" && lesson in setOf("select_facet", "constrain_numeric")) {
-            // A failed named accordion does not hold every other facet workspace.
-            // Reuse target() so choice/numeric families and safety stay identical.
-            return controls(page).asSequence().filter { it.role == Role.FACET_OPEN }
+        if (lesson in setOf("select_facet", "constrain_numeric") && first.skillId in setOf("open_facet", lesson)) {
+            // A held facet does not hold every other workspace in its lesson family.
+            // Reuse target() so direct values, prerequisite order and safety stay identical.
+            val role = if (first.skillId == lesson) Role.FACET else Role.FACET_OPEN
+            return controls(page).asSequence().filter { it.role == role }
                 .mapNotNull { opener -> target(page.copy(affordances =
                     listOf(opener) + page.affordances.filter { it.id != opener.id }), lesson) }
-                .filter { it.skillId == "open_facet" }
+                .filter { it.skillId == first.skillId }
                 .distinctBy { it.params["key"] }.take(8).toList()
         }
         if (first.skillId != "open_item") return listOf(first)

@@ -248,7 +248,7 @@ def main(argv=None):
             # Dependency preparation happens at installation. Hourly runs have no network need.
             remaining = max(0.01, options.timeout_seconds - (time.monotonic() - clock))
             run_command(['gradle', '-p', str(core), '--offline', '--no-daemon', '--console=plain',
-                         'test', 'dialogClinic', 'simulationExperiment', f'-PbrainTrainingEpisodes={options.episodes}'],
+                         'test', 'facetClinic', 'dialogClinic', 'simulationExperiment', f'-PbrainTrainingEpisodes={options.episodes}'],
                         project, remaining)
             report = json.loads(target.read_text())
             report['dialog_clinic']=json.loads(clinic_target.read_text())
