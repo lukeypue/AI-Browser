@@ -87,7 +87,9 @@ data class TaskLedger(
     val programVerifiedSteps: MutableSet<Int> = linkedSetOf(),
     var programCompleted: Boolean = false,
     var lesson: String = "",
-    var repairReason: String = ""
+    var repairReason: String = "",
+    // null: no observation; false: a non-neutral scroll occurred; true: only neutral scrolls.
+    var neutralScrollOnly: Boolean? = null
 ) {
     /** One late-discovered practice target. Values are task-local and never serialized. */
     var learningConstraints: List<Constraint> = emptyList()
@@ -151,6 +153,7 @@ data class TaskLedger(
         .put("program_post", JsonArray(programPost.map { it.toJson() }))
         .putStrings("program_verified", programVerifiedSteps.map { it.toString() }).put("program_completed", programCompleted).put("lesson", lesson)
         .put("repair_reason", repairReason)
+        .also { json -> neutralScrollOnly?.let { json.put("neutral_scroll_only", it) } }
 
     companion object {
         private val learningNumeric = setOf("price", "mileage", "year", "distance", "bedrooms", "bathrooms")
@@ -228,6 +231,7 @@ data class TaskLedger(
             ledger.programCompleted = o.optBoolean("program_completed")
             ledger.lesson = o.optString("lesson")
             ledger.repairReason = o.optString("repair_reason")
+            ledger.neutralScrollOnly = o["neutral_scroll_only"]?.asBooleanOrNull()
             return ledger
         }
 

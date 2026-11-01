@@ -21,6 +21,7 @@ import com.appgate.brain.util.Hashing
 object Curriculum {
     const val RETRY_MS = 30_000L
     const val REHEARSAL_INTERVAL_MS = 5 * 60_000L
+    private fun readyAt(item: CurriculumItem): Long = maxOf(item.retryAt, item.noProgressRetryAt)
     private val items = listOf(
         "search" to "Search verifies (query typed, results change)",
         "constrain_numeric" to "A numeric facet (price/mileage/year) applies and verifies",
@@ -42,7 +43,7 @@ object Curriculum {
 
     fun markSkillVerified(site: SiteModel, skillId: String, now: Long) {
         ensure(site)
-        site.curriculum.firstOrNull { it.id == skillId }?.let { it.completedAt = now }
+        site.curriculum.firstOrNull { it.id == skillId }?.let { it.completedAt = now; it.noProgressRetries = 0; it.noProgressRetryAt = 0L }
     }
 
     fun isComplete(site: SiteModel): Boolean {
@@ -76,7 +77,7 @@ object Curriculum {
                 "dismiss_dialog" -> true
                 else -> false
             }
-            it.retryAt <= now && (it.opportunity == "AVAILABLE" ||
+            readyAt(it) <= now && (it.opportunity == "AVAILABLE" ||
                 (site.learningObservedAt == 0L && it.opportunity == "UNKNOWN") || prerequisite) &&
                 (page == null || live != null) &&
                 (live?.skillId != "seek_pagination" || site.paginationDiscoveryRetryAt <= now) && canAttempt(it.id)
@@ -105,11 +106,11 @@ object Curriculum {
         // Only runnable unfinished work takes priority: a persisted procedure hold
         // must not starve a different due, verified capability.
         if (site.curriculum.any { item ->
-                if (item.done || item.retryAt > now) return@any false
+                if (item.done || readyAt(item) > now) return@any false
                 val live = LearningOpportunities.target(page, item.id) ?: return@any false
                 (live.skillId != "seek_pagination" || site.paginationDiscoveryRetryAt <= now) && canAttempt(item.id)
             }) return ""
-        return site.curriculum.filter { it.done && it.retryAt <= now && now >= it.completedAt &&
+        return site.curriculum.filter { it.done && readyAt(it) <= now && now >= it.completedAt &&
             now - it.completedAt >= REHEARSAL_INTERVAL_MS &&
             LearningOpportunities.target(page, it.id)?.skillId == it.id && it.id != "search" && canAttempt(it.id) }
             .minByOrNull { it.completedAt }?.id.orEmpty()
@@ -117,6 +118,9 @@ object Curriculum {
 
     /** Ordinary saved failure delays adopt the user's new retry interval. */
     fun migrateRetries(site: SiteModel, now: Long) {
+        // Clock rollback or damaged scheduling data cannot turn a bounded delay into a long hold.
+        site.curriculum.filter { it.noProgressRetryAt > now + REHEARSAL_INTERVAL_MS }
+            .forEach { it.noProgressRetryAt = now + REHEARSAL_INTERVAL_MS }
         if (site.learningNeedsHuman || site.challengesToday >= 3 || allLessonsComplete(site)) return
         site.curriculum.filter { !it.done && it.retryAt > now + RETRY_MS }.forEach { it.retryAt = now + RETRY_MS }
         if (site.learningBlockedUntil > now + RETRY_MS) site.learningBlockedUntil = now + RETRY_MS
@@ -134,13 +138,17 @@ object Curriculum {
         if (page.settle != com.appgate.brain.model.Settle.IDLE) return "page_busy"
         val pending = site.curriculum.filter { !it.done }
         if (pending.isEmpty()) return "all_lessons_complete"
-        val cooling = pending.filter { it.retryAt > now }
-        if (cooling.size == pending.size) return "cooldown:" + ((cooling.minOf { it.retryAt } - now + 999L) / 1_000L) + "s"
-        val liveTargets = pending.filter { it.retryAt <= now }.mapNotNull { LearningOpportunities.target(page, it.id) }
+        val cooling = pending.filter { readyAt(it) > now }
+        if (cooling.size == pending.size) return "cooldown:" + ((cooling.minOf { readyAt(it) } - now + 999L) / 1_000L) + "s"
+        val liveTargets = pending.filter { readyAt(it) <= now }.mapNotNull { LearningOpportunities.target(page, it.id) }
         if (liveTargets.isNotEmpty() && liveTargets.all { it.skillId == "seek_pagination" } && site.paginationDiscoveryRetryAt > now)
             return "pagination_discovery_cooldown"
-        val absent = pending.filter { it.retryAt <= now && LearningOpportunities.target(page, it.id) == null }
-        if (absent.size == pending.count { it.retryAt <= now }) return "no_target_on_${page.pageType.name.lowercase()}"
+        if (liveTargets.isEmpty()) {
+            val liveCooling = pending.filter { it.noProgressRetryAt > now && LearningOpportunities.target(page, it.id) != null }
+            if (liveCooling.isNotEmpty()) return "cooldown:" + ((liveCooling.minOf { readyAt(it) } - now + 999L) / 1_000L) + "s"
+        }
+        val absent = pending.filter { readyAt(it) <= now && LearningOpportunities.target(page, it.id) == null }
+        if (absent.size == pending.count { readyAt(it) <= now }) return "no_target_on_${page.pageType.name.lowercase()}"
         return "not_observed_available"
     }
 
@@ -148,8 +156,8 @@ object Curriculum {
     fun earliestRetryAt(site: SiteModel, now: Long): Long {
         ensure(site)
         val pending = site.curriculum.filter { !it.done }
-        if (pending.isEmpty() || pending.any { it.retryAt <= now }) return 0L
-        return pending.minOf { it.retryAt }
+        if (pending.isEmpty() || pending.any { readyAt(it) <= now }) return 0L
+        return pending.minOf { readyAt(it) }
     }
 
     fun nextReviewAt(site: SiteModel): Long = if (!allLessonsComplete(site)) 0L else
@@ -201,6 +209,14 @@ object Curriculum {
 
     fun recordAttempt(site: SiteModel, ledger: TaskLedger, now: Long = System.currentTimeMillis()) {
         ensure(site)
+        if (ledger.status == com.appgate.brain.model.TaskStatus.PARTIAL && ledger.lesson == "scroll_results" &&
+            ledger.neutralScrollOnly == true && ledger.lesson in ledger.attemptedSkills && ledger.lesson !in ledger.successfulSkills) {
+            site.curriculum.firstOrNull { it.id == ledger.lesson && !it.done }?.let { item ->
+                item.noProgressRetries = (item.noProgressRetries + 1).coerceAtMost(5)
+                val delay = (RETRY_MS * (1L shl (item.noProgressRetries - 1))).coerceAtMost(REHEARSAL_INTERVAL_MS)
+                item.noProgressRetryAt = now + delay
+            }
+        }
         val verifiedSkills = ledger.successfulSkills
         if (ledger.done && ledger.lesson.isNotBlank() && ledger.lesson !in ledger.attemptedSkills) {
             site.curriculum.firstOrNull { it.id == ledger.lesson && !it.done }?.let { it.unavailable++; it.retryAt = now + RETRY_MS }

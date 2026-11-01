@@ -466,6 +466,10 @@ class BrainEngine(
     }
 
     private fun finish(ledger: TaskLedger, site: SiteModel): TaskLedger {
+        val settledResults = latestPage?.let { it.pageType == PageType.RESULTS && !it.dialogOpen && !it.isHumanOnly && it.settle == com.appgate.brain.model.Settle.IDLE } == true
+        if (ledger.neutralScrollOnly == true && (!settledResults || "scroll_results" in ledger.successfulSkills ||
+            ledger.timeouts > 0 || ledger.plannerFailures > 0 || ledger.llmCalls > 0 || ledger.repairReason.isNotBlank() ||
+            ledger.steps.any { it.status != null && it.status != VerifyStatus.VERIFIED })) ledger.neutralScrollOnly = false
         if (ledger.blocked) { memory.saveLedger(ledger); memory.saveSite(site); return ledger }
         if (!ledger.done) ledger.status = if (ledger.verdicts.isNotEmpty()) TaskStatus.PARTIAL else TaskStatus.FAILED
         memory.saveLedger(ledger)
@@ -864,6 +868,13 @@ class BrainEngine(
             before.resultKeys.isNotEmpty() && before.resultKeys == sps.resultKeys &&
             committedQueryMatches(ledger.goal, before) && committedQueryMatches(ledger.goal, sps)
         val neutral = unchangedSearch || terminalEnd || !verified && (!rememberFailure || advancingScroll)
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.lesson == "scroll_results" &&
+            ledger.programCapability == "scroll_results" && !verified && !ledger.blocked &&
+            site.curriculum.none { it.id == "scroll_results" && it.done }) {
+            // Transport uncertainty and real failures are not evidence of useful movement.
+            // A later neutral step cannot erase an earlier non-neutral failure in this task.
+            ledger.neutralScrollOnly = ledger.neutralScrollOnly != false && success && (advancingScroll || terminalEnd)
+        }
         ledger.programCompleted = verified
         val source = ledger.programSource
         if (before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked && !neutral &&
@@ -1135,6 +1146,7 @@ class BrainEngine(
 
     private fun acceptPage(ledger: TaskLedger, sps: SemanticPageState, profile: SiteProfile): Boolean {
         if (allowedUrl(ledger, sps.url, profile) && UrlPatterns.host(sps.url).removePrefix("www.") == sps.host.removePrefix("www.")) return true
+        if (ledger.neutralScrollOnly != null) ledger.neutralScrollOnly = false
         // An incidental click or Back during training can leave the task site. There is
         // nothing for the user to solve there; stop this lesson without exploring it.
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && (ledger.actions > 0 || !sps.isHumanOnly)) {
@@ -1237,6 +1249,7 @@ class BrainEngine(
             } catch (t: RendererGone) {
                 handleRendererFailure(ledger, "renderer gone", true)
             } catch (t: Exception) {
+                if (ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.lesson == "scroll_results") ledger.neutralScrollOnly = false
                 ledger.note("observe error: ${t.message?.take(100)}")
                 events.log("warn", "observe error: $t")
                 Thread.sleep(800)

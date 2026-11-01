@@ -63,16 +63,20 @@ data class CurriculumItem(
     var opportunityShape: String = "",
     var observedAt: Long = 0L,
     var retryAt: Long = 0L,
-    var observedPage: String = ""
+    var observedPage: String = "",
+    var noProgressRetries: Int = 0,
+    var noProgressRetryAt: Long = 0L
 ) {
     val done: Boolean get() = completedAt > 0L
     fun toJson(): JsonObject = JsonObject().put("id", id).put("desc", description).put("done", completedAt).put("attempts", attempts).put("blocked", blocked).put("unavailable", unavailable)
         .put("opportunity", opportunity).put("shape", opportunityShape).put("observed_at", observedAt).put("retry_at", retryAt).put("observed_page", observedPage)
+        .also { if (noProgressRetries > 0 || noProgressRetryAt > 0L) it.put("no_progress_retries", noProgressRetries).put("no_progress_retry_at", noProgressRetryAt) }
     companion object {
         fun fromJson(o: JsonObject) = CurriculumItem(o.optString("id"), o.optString("desc"), o.optLong("done"), o.optInt("attempts"), o.optInt("blocked"), o.optInt("unavailable"),
             o.optString("opportunity").takeIf { it in setOf("AVAILABLE", "ABSENT") } ?: "UNKNOWN",
             o.optString("shape").takeIf { it.matches(Regex("[a-f0-9]{8,64}")) }.orEmpty(), o.optLong("observed_at"), o.optLong("retry_at"),
-            o.optString("observed_page").takeIf { p -> PageType.values().any { it.name == p } }.orEmpty())
+            o.optString("observed_page").takeIf { p -> PageType.values().any { it.name == p } }.orEmpty(),
+            o.optInt("no_progress_retries").coerceIn(0, 5), o.optLong("no_progress_retry_at").coerceAtLeast(0L))
     }
 }
 
