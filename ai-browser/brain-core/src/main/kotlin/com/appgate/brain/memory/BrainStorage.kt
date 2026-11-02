@@ -38,8 +38,13 @@ class FileBrainStorage(private val dir: File) : BrainStorage {
 
     @Synchronized override fun readResult(key: String): StorageRead {
         val f = file(key)
-        if (!f.exists()) return StorageRead(null)
-        return runCatching { StorageRead(f.readText(Charsets.UTF_8)) }.getOrElse { StorageRead(null, failed = true) }
+        return try {
+            StorageRead(java.nio.file.Files.readAllBytes(f.toPath()).toString(Charsets.UTF_8))
+        } catch (_: java.nio.file.NoSuchFileException) {
+            StorageRead(null)
+        } catch (_: Exception) {
+            StorageRead(null, failed = true)
+        }
     }
 
     @Synchronized override fun write(key: String, value: String) {
