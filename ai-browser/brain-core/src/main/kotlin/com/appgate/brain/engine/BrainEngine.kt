@@ -291,6 +291,7 @@ class BrainEngine(
         val profile = SiteProfiles.forHost(ledger.host) ?: SiteProfiles.generic(ledger.host)
         val site = memory.site(ledger.host)
         lessonsBefore = site.curriculum.filter { it.done }.map { it.id }.toSet()
+        if (memoryDiagnosticSites.add(ledger.host)) memoryCheckpoint(ledger, "MEMORY_SNAPSHOT")
         val parserFactory = { SpsParser(site.facetVocabulary + profile.facetVocabulary) }
         val executor = Executor(renderer, parserFactory)
         val policy = TaskPolicy(profile, site)
@@ -400,6 +401,12 @@ class BrainEngine(
                             FailedStrategies.allowed(site, FailedStrategies.key(sps, decision.skillId, it.body, params), clock())
                         }
                         if (skill == null) {
+                            val failures = listOfNotNull(learned, memory.skills.get(decision.skillId)).maxOfOrNull {
+                                site.strategyFailures[FailedStrategies.key(sps, decision.skillId, it.body, params)]?.count ?: 0
+                            } ?: 0
+                            if (listOfNotNull(learned, memory.skills.get(decision.skillId)).isNotEmpty())
+                                memoryCheckpoint(ledger, "STRATEGY_HELD", decision.skillId, sps,
+                                    JsonObject().put("strategy_prior_failures", failures))
                             ledger.attemptedSkills += decision.skillId
                             if (!askPlanner(ledger, sps, site, profile, "recently failed procedure; try another approach", decision.skillId)) {
                                 ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
@@ -502,8 +509,13 @@ class BrainEngine(
                 bound.copy(expect = listOf(Postcondition.ValueIs("query", bound.arg))) else bound
         }
         val page = latestPage
-        if (page != null &&
-            !FailedStrategies.allowed(memory.site(ledger.host), FailedStrategies.key(page, capability, ledger.currentProgram, skillParams(ledger)), clock())) {
+        val strategyKey = page?.let { FailedStrategies.key(it, capability, ledger.currentProgram, skillParams(ledger)) }
+        val held = strategyKey != null && !FailedStrategies.allowed(memory.site(ledger.host), strategyKey, clock())
+        val priorFailures = strategyKey?.let { memory.site(ledger.host).strategyFailures[it]?.count } ?: 0
+        // Successful admissions already have an outcome checkpoint; avoid duplicate rows.
+        if (held) {
+            memoryCheckpoint(ledger, "STRATEGY_HELD", capability, page,
+                JsonObject().put("strategy_prior_failures", priorFailures))
             ledger.currentProgram = emptyList()
             ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
             ledger.terminalReason = "known failed procedure; use a different approach or changed controls"
@@ -877,9 +889,16 @@ class BrainEngine(
         }
         ledger.programCompleted = verified
         val source = ledger.programSource
+        val savedCapability = ledger.programCapability
+        val strategyKey = before?.let { FailedStrategies.key(it, savedCapability, ledger.currentProgram, skillParams(ledger)) }
+        val priorFailures = strategyKey?.let { site.strategyFailures[it]?.count } ?: 0
+        var memoryCode = "STRATEGY_NOT_RECORDED"
+        val programPresent = ledger.currentProgram.isNotEmpty()
+        val sourceEligible = source.startsWith("skill:") || source in setOf("planner", "local")
         if (before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked && !neutral &&
             (verified || rememberFailure) && (source.startsWith("skill:") || source in setOf("planner", "local"))) {
-            FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability, ledger.currentProgram, skillParams(ledger)), verified, clock())
+            FailedStrategies.record(site, strategyKey!!, verified, clock())
+            memoryCode = if (verified) "STRATEGY_SUCCESS_SAVED" else "STRATEGY_FAILURE_SAVED"
             if (verified) FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability), true, clock())
         }
         if (source.startsWith("skill:")) {
@@ -917,6 +936,18 @@ class BrainEngine(
         programBefore = null
         memory.saveLedger(ledger)
         memory.saveSite(site)
+        memoryCheckpoint(ledger, memoryCode, savedCapability, before, JsonObject()
+            .put("before_present", if (before != null) 1 else 0).put("program_present", if (programPresent) 1 else 0)
+            .put("source_eligible", if (sourceEligible) 1 else 0).put("outcome_blocked", if (ledger.blocked) 1 else 0)
+            .put("strategy_prior_failures", priorFailures)
+            .put("strategy_current_failures", strategyKey?.let { site.strategyFailures[it]?.count } ?: 0)
+            .put("outcome_verified", if (verified) 1 else 0).put("outcome_neutral", if (neutral) 1 else 0)
+            .put("outcome_rememberable", if (rememberFailure) 1 else 0)
+            .put("before_results", if (before?.pageType == PageType.RESULTS) 1 else 0)
+            .put("after_dialog", if (sps.dialogOpen) 1 else 0)
+            .put("dialog_detail_controls", sps.affordances.count { it.visible &&
+                (it.regionRole == com.appgate.brain.model.RegionRole.DIALOG || it.features["in_dialog"] > 0) &&
+                it.role in setOf(Role.DETAIL_TITLE, Role.EXPAND_TEXT) }.coerceAtMost(1_000_000)))
     }
 
 
@@ -1119,6 +1150,17 @@ class BrainEngine(
 
     private fun progress(ledger: TaskLedger, key: String, reason: String) {
         if (ProgressSupervisor.evidence(ledger, key)) events.progress(ledger, reason)
+    }
+
+    private val memoryDiagnosticSites = mutableSetOf<String>()
+
+    private fun memoryCheckpoint(ledger: TaskLedger, code: String, capability: String = ledger.programCapability,
+                                 page: SemanticPageState? = null, extra: JsonObject = JsonObject()) {
+        val data = memory.diagnosticSnapshot(ledger.host).put("code", code)
+            .put("capability", SemanticDiagnostics.capability(capability))
+            .put("lesson", SemanticDiagnostics.capability(ledger.lesson)).put("page_type", page?.pageType?.name)
+        extra.keys.forEach { data.put(it, extra[it]) }
+        events.diagnostic(ledger.host, "memory_checkpoint", data)
     }
 
     private fun diagnostic(ledger: TaskLedger, before: SemanticPageState, after: SemanticPageState?, step: Step?, status: VerifyStatus?, code: DiagnosticCode) {

@@ -6,8 +6,11 @@ import java.io.File
  * Minimal durable key/value storage. Values are JSON strings. Implementations must be
  * atomic per write (temp file + rename) so a process death mid-write never corrupts memory.
  */
+data class StorageRead(val value: String?, val failed: Boolean = false)
+
 interface BrainStorage {
     fun read(key: String): String?
+    fun readResult(key: String): StorageRead = StorageRead(read(key))
     fun write(key: String, value: String)
     fun delete(key: String)
     fun keys(prefix: String): List<String>
@@ -31,10 +34,12 @@ class FileBrainStorage(private val dir: File) : BrainStorage {
 
     private fun file(key: String): File = File(dir, encode(key) + ".json")
 
-    @Synchronized override fun read(key: String): String? {
+    @Synchronized override fun read(key: String): String? = readResult(key).value
+
+    @Synchronized override fun readResult(key: String): StorageRead {
         val f = file(key)
-        if (!f.exists()) return null
-        return runCatching { f.readText(Charsets.UTF_8) }.getOrNull()
+        if (!f.exists()) return StorageRead(null)
+        return runCatching { StorageRead(f.readText(Charsets.UTF_8)) }.getOrElse { StorageRead(null, failed = true) }
     }
 
     @Synchronized override fun write(key: String, value: String) {

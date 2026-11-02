@@ -51,6 +51,9 @@ data class Episode(
  */
 class Memory(private val storage: BrainStorage, private val clock: () -> Long = { System.currentTimeMillis() }) {
     private val siteCache = HashMap<String, SiteModel>()
+    // Process-local evidence only; never written into website memory.
+    private val siteLoads = HashMap<String, JsonObject>()
+    private val siteSaveAcks = HashMap<String, Int>()
     private var skillCache: MutableMap<String, Skill>? = null
     val skills: SkillLibrary by lazy { SkillLibrary(this) }
     val teacherBudget: TeacherBudget by lazy { TeacherBudget(storage, clock) }
@@ -59,8 +62,17 @@ class Memory(private val storage: BrainStorage, private val clock: () -> Long = 
     fun site(host: String): SiteModel {
         val key = normalizeHost(host)
         siteCache[key]?.let { return it }
-        val raw = storage.read("site/$key")
-        val model = Json.parseObjectOrNull(raw)?.let { runCatching { SiteModel.fromJson(it) }.getOrNull() } ?: SiteModel(key)
+        val read = storage.readResult("site/$key")
+        val raw = read.value
+        val restored = Json.parseObjectOrNull(raw)?.let { runCatching { SiteModel.fromJson(it) }.getOrNull() }
+        val model = restored ?: SiteModel(key)
+        siteLoads[key] = JsonObject().put("memory_loaded", if (restored != null) 1 else 0)
+            .put("memory_missing", if (raw == null && !read.failed) 1 else 0)
+            .put("memory_read_failed", if (read.failed) 1 else 0)
+            .put("memory_invalid", if (raw != null && restored == null) 1 else 0)
+            .put("memory_loaded_failures", model.strategyFailures.keys.count { !FailedStrategies.allowed(model, it, clock()) }.coerceAtMost(1_000_000))
+            .put("memory_loaded_lessons", model.curriculum.count { it.done }.coerceAtMost(1_000_000))
+            .put("memory_loaded_bindings", model.bindings.size.coerceAtMost(1_000_000))
         val hadListingText = model.bindings.values.any { it != structuralBinding(it) }
         model.bindings.replaceAll { _, binding -> structuralBinding(binding) }
         if (hadListingText) storage.write("site/$key", model.toJson().toString())
@@ -73,6 +85,22 @@ class Memory(private val storage: BrainStorage, private val clock: () -> Long = 
         model.bindings.replaceAll { _, binding -> structuralBinding(binding) }
         siteCache[model.host] = model
         storage.write("site/${model.host}", model.toJson().toString())
+        val key = normalizeHost(model.host)
+        siteSaveAcks[key] = ((siteSaveAcks[key] ?: 0) + 1).coerceAtMost(1_000_000)
+    }
+
+    /** Counts and load provenance only. A save ack is not an fsync/durability proof. */
+    @Synchronized
+    fun diagnosticSnapshot(host: String): JsonObject {
+        val key = normalizeHost(host)
+        val model = siteCache[key] ?: return JsonObject()
+        return JsonObject().apply {
+            siteLoads[key]?.let { origin -> origin.keys.forEach { put(it, origin[it]) } }
+            put("memory_save_acks", siteSaveAcks[key] ?: 0)
+            put("memory_strategy_holds", model.strategyFailures.keys.count { !FailedStrategies.allowed(model, it, clock()) }.coerceAtMost(1_000_000))
+            put("memory_lessons_done", model.curriculum.count { it.done }.coerceAtMost(1_000_000))
+            put("memory_bindings", model.bindings.size.coerceAtMost(1_000_000))
+        }
     }
 
     @Synchronized
@@ -173,6 +201,8 @@ class Memory(private val storage: BrainStorage, private val clock: () -> Long = 
     fun wipeAll() {
         storage.keys("").forEach { storage.delete(it) }
         siteCache.clear()
+        siteLoads.clear()
+        siteSaveAcks.clear()
         skillCache = null
     }
 

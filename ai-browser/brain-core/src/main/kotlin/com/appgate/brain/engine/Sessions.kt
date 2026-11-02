@@ -167,14 +167,14 @@ class LearningSession(
                 if (lesson.isBlank()) {
                     site.learningBlockedUntil = maxOf(clock() + lessonRetryMs, Curriculum.earliestRetryAt(site, clock()))
                     if (!site.learningNeedsHuman) site.lastLearningStatus = "Waiting for an observed lesson opportunity"
-                    events.diagnostic(site.host, "learning_recheck", SemanticDiagnostics.learningRecheck(site, page, clock()).also { if (heldProcedure) it.put("available", false).put("reason", "procedure_cooldown") })
+                    events.diagnostic(site.host, "learning_recheck", SemanticDiagnostics.learningRecheck(site, page, clock()).apply { memory.diagnosticSnapshot(site.host).let { snapshot -> snapshot.keys.forEach { put(it, snapshot[it]) } } }.also { if (heldProcedure) it.put("available", false).put("reason", "procedure_cooldown") })
                     memory.saveSite(site)
                     break
                 }
                 val rehearsing = (completedLabRehearsal || !Curriculum.allLessonsComplete(site)) &&
                     site.curriculum.any { it.id == lesson && it.done }
                 if (rehearsing) events.diagnostic(site.host, "learning_recheck",
-                    SemanticDiagnostics.learningRecheck(site, page, clock()).put("rehearsal", SemanticDiagnostics.capability(lesson)))
+                    SemanticDiagnostics.learningRecheck(site, page, clock()).apply { memory.diagnosticSnapshot(site.host).let { snapshot -> snapshot.keys.forEach { put(it, snapshot[it]) } } }.put("rehearsal", SemanticDiagnostics.capability(lesson)))
                 val goal = Curriculum.nextGoal(site, profile, site.lessonOrdinal++, page, lesson).let {
                     if (completedLabRehearsal) it.copy(budget = it.budget.copy(llmCalls = 0)) else it
                 }

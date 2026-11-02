@@ -20,7 +20,10 @@ REASONS={'deadline','stopped','browser','search','replaced','interrupted','servi
 
 CAPABILITIES={'sort_results', 'UNKNOWN', 'open_facet', 'dismiss_dialog', 'commit_send', 'open_item', 'navigate', 'scroll_results', 'search', 'go_back', 'prepare_message', 'apply_filters', 'custom', 'load_more', 'select_facet', 'next_page', 'constrain_numeric', 'open_category', 'open_filters', 'seek_pagination', 'expand_description'}
 RECHECK_REASONS={'NO_TARGET_ON_PROFILE', 'UNKNOWN', 'NO_TARGET_ON_RESULTS', 'PAGE_BUSY', 'NO_TARGET_ON_ERROR', 'NO_TARGET_ON_CHALLENGE', 'PROCEDURE_COOLDOWN', 'NO_TARGET_ON_MESSAGES', 'NO_TARGET_ON_HOME', 'NO_TARGET_ON_UNKNOWN', 'ALL_LESSONS_COMPLETE', 'HUMAN_HOLD', 'NO_TARGET_ON_DETAIL', 'NO_TARGET_ON_FACET_PANEL', 'NO_TARGET_ON_AUTH_WALL', 'NO_TARGET_ON_SEARCH', 'PAGINATION_DISCOVERY_COOLDOWN', 'COOLDOWN', 'NOT_OBSERVED_AVAILABLE', 'NO_TARGET_ON_DIALOG', 'PROBE_UNAVAILABLE'}
-COUNTERS_V2=COUNTERS|{'teacher_attempts'}|{'pending', 'lessons_complete', 'inspected', 'lessons_total', 'new_lessons', 'facet_openers', 'closers'}
+MEMORY_CODES={'MEMORY_SNAPSHOT', 'STRATEGY_FAILURE_SAVED', 'STRATEGY_NOT_RECORDED', 'STRATEGY_HELD', 'STRATEGY_SUCCESS_SAVED'}
+CODES_V2=CODES|{'memory_checkpoint'}
+DIAGNOSTICS_V2=DIAGNOSTICS|MEMORY_CODES
+COUNTERS_V2=COUNTERS|{'before_present','program_present','source_eligible','outcome_blocked'}|{'outcome_rememberable', 'memory_invalid', 'memory_missing', 'strategy_prior_failures', 'dialog_detail_controls', 'strategy_current_failures', 'before_results', 'memory_bindings', 'memory_loaded', 'after_dialog', 'memory_lessons_done', 'memory_save_acks', 'memory_strategy_holds', 'memory_loaded_bindings', 'memory_read_failed', 'outcome_neutral', 'memory_loaded_lessons', 'memory_loaded_failures', 'outcome_verified'}|{'teacher_attempts'}|{'pending', 'lessons_complete', 'inspected', 'lessons_total', 'new_lessons', 'facet_openers', 'closers'}
 STATUSES_V2=STATUSES|{'PENDING','RUNNING','NEED_HUMAN','NEED_GRANT','DONE','ABANDONED','PAUSED','PARTIAL','BUDGET_EXHAUSTED'}
 
 class Failure(Exception):
@@ -53,7 +56,7 @@ def validate(r):
   exact(event,{'code','site','page_type','status','phase','diagnostic_code','elapsed_ms','counters'} | ({'lesson','capability','recheck_reason'} if version==2 else set()))
   if version==2:
    for key,allowed in [('lesson',CAPABILITIES),('capability',CAPABILITIES),('recheck_reason',RECHECK_REASONS)]:check(type(event[key]) is str and event[key] in allowed)
-  for key,allowed in [('code',CODES),('site',SITES),('page_type',PAGES),('status',STATUSES_V2 if version==2 else STATUSES),('phase',PHASES),('diagnostic_code',DIAGNOSTICS)]:check(type(event[key]) is str and event[key] in allowed)
+  for key,allowed in [('code',CODES_V2 if version==2 else CODES),('site',SITES),('page_type',PAGES),('status',STATUSES_V2 if version==2 else STATUSES),('phase',PHASES),('diagnostic_code',DIAGNOSTICS_V2 if version==2 else DIAGNOSTICS)]:check(type(event[key]) is str and event[key] in allowed)
   integer(event['elapsed_ms'],r['elapsed_ms']);check(event['elapsed_ms']>=previous);previous=event['elapsed_ms']
   check(type(event['counters']) is dict and set(event['counters'])<=(COUNTERS_V2 if version==2 else COUNTERS))
   for value in event['counters'].values():integer(value)
