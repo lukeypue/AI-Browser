@@ -187,6 +187,13 @@ class LearningSession(
                 val masteredBefore = site.curriculum.filter { it.done }.map { it.id }.toSet()
                 val out = engine.runTask(ledger, EngineMode.TRAIN)
                 Curriculum.recordAttempt(site, out, clock())
+                site.curriculum.firstOrNull{it.id==lesson}?.let{item->
+                    events.diagnostic(site.host,"learning_schedule",SemanticDiagnostics.journey(out)
+                        .put("lesson",SemanticDiagnostics.capability(lesson)).put("status",out.status.name)
+                        .put("prerequisite_only",if(out.attemptedSkills.isNotEmpty() && lesson !in out.attemptedSkills)1 else 0)
+                        .put("lesson_attempted",if(lesson in out.attemptedSkills)1 else 0).put("lesson_done",if(item.done)1 else 0)
+                        .put("no_progress_retries",item.noProgressRetries).put("cooldown_remaining_ms",(maxOf(item.retryAt,item.noProgressRetryAt)-clock()).coerceIn(0,1_000_000)))
+                }
                 site.lastLearningStatus = "${out.status}: ${out.terminalReason.ifBlank { out.humanReason }}"
                 memory.saveSite(site)
                 if (out.done) memory.deleteLedger(out.id)

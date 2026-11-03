@@ -10,6 +10,16 @@ enum class DiagnosticCode { VERIFIED, NO_TARGET, REPEAT_STATE_LIMIT, OUTSIDE_TAS
 object SemanticDiagnostics {
     private val capabilities = setOf("search", "constrain_numeric", "select_facet", "scroll_results", "seek_pagination", "next_page", "load_more", "sort_results", "open_item", "expand_description", "go_back", "dismiss_dialog", "open_filters", "open_facet", "apply_filters", "open_category", "prepare_message", "commit_send", "navigate", "custom")
     fun capability(value: String): String = value.takeIf { it in capabilities } ?: "other"
+    fun programSource(source:String):String=when {
+        source.startsWith("skill:compiled_")->"COMPILED"
+        source.startsWith("skill:")->"SKILL"
+        source=="planner"->"PLANNER";source=="local"->"LOCAL";source=="navigate"->"NAVIGATE";source.isBlank()->"NONE";else->"UNKNOWN"
+    }
+    fun journey(ledger:TaskLedger):JsonObject=JsonObject()
+        .put("task_sequence",ledger.diagnosticTaskSequence).put("program_sequence",ledger.diagnosticProgramSequence)
+        .put("action_sequence",ledger.actions.coerceIn(0,1_000_000)).put("program_source",programSource(ledger.programSource))
+        .put("rehearsal",if(ledger.diagnosticRehearsal)1 else 0)
+        .also { data->ledger.neutralScrollOnly?.let{data.put("neutral_scroll_only",if(it)1 else 0)} }
     fun host(url: String): String = runCatching { java.net.URI(url).host?.lowercase()?.take(253).orEmpty() }.getOrDefault("")
 
     private fun page(sps: SemanticPageState): JsonObject = JsonObject()
@@ -30,6 +40,8 @@ object SemanticDiagnostics {
         .put("dialog_roles", JsonObject().apply { sps.affordances.filter { it.visible && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) }.groupingBy { it.role.name }.eachCount().forEach { (role, count) -> put(role, count) } })
         .put("dialog_controls", sps.affordances.count { it.visible && (it.regionRole == RegionRole.DIALOG || it.features["in_dialog"] > 0) })
         .put("next_controls", sps.byRole(Role.PAGE_NEXT).size).put("load_more_controls", sps.byRole(Role.LOAD_MORE).size)
+        .put("detail_controls",sps.affordances.count{it.visible && it.role in setOf(Role.DETAIL_TITLE,Role.EXPAND_TEXT)})
+        .put("dialog_open",if(sps.dialogOpen)1 else 0)
         .put("scroll_y", sps.scrollY).put("scroll_height", sps.scrollHeight).put("viewport_height", sps.viewportHeight)
         .put("closers", sps.byRole(Role.CLOSE).size).put("dialog", sps.dialogOpen)
         .put("auth_wall", sps.authWall).put("challenge", sps.challenge).put("settle", sps.settle.name)
@@ -43,7 +55,7 @@ object SemanticDiagnostics {
         .put("pending_states", com.appgate.brain.json.Json.arr(site.curriculum.filter { !it.done }.map { item ->
             JsonObject().put("lesson", capability(item.id))
                 .put("opportunity", item.opportunity.takeIf { it in setOf("UNKNOWN", "AVAILABLE", "ABSENT") } ?: "UNKNOWN")
-                .put("cooling", item.retryAt > now || sps?.let { LearningOpportunities.target(it, item.id)?.skillId == "seek_pagination" && site.paginationDiscoveryRetryAt > now } == true)
+                .put("cooling", item.retryAt > now || item.noProgressRetryAt > now || sps?.let { LearningOpportunities.target(it, item.id)?.skillId == "seek_pagination" && site.paginationDiscoveryRetryAt > now } == true)
                 .put("live_target", sps?.let { LearningOpportunities.target(it, item.id) }?.skillId?.let { capability(it) })
         }))
 
@@ -55,4 +67,7 @@ object SemanticDiagnostics {
         .put("expected_host", host("https://${ledger.host}/"))
         .put("before", page(before)).put("after", after?.let { page(it) })
         .put("new_items", after?.resultKeys?.count { it !in before.resultKeys })
+        .put("before_page_type",before.pageType.name).put("after_page_type",after?.pageType?.name?:"NOT_OBSERVED")
+        .put("before_settle",before.settle.name).put("after_settle",after?.settle?.name?:"NOT_OBSERVED")
+        .also{data->journey(ledger).let{j->j.keys.forEach{data.put(it,j[it])}}}
 }

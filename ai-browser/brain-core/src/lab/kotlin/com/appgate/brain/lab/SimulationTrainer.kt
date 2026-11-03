@@ -9,12 +9,13 @@ import com.appgate.brain.util.Hashing
 import java.security.MessageDigest
 
 data class SimulationRun(val scenario: Scenario, val market: SimulationMarket, val task: TaskLedger,
-    val score: EpisodeScore, val actualTeacherRequests: Int = 0, val teacherDemonstrations: Int = 0) {
+    val score: EpisodeScore, val actualTeacherRequests: Int = 0, val teacherDemonstrations: Int = 0, val diagnostics:JsonObject?=null) {
     fun toJson(): JsonObject = score.toJson().put("scenario", scenario.id).put("level", scenario.level)
         .put("status", task.status.name).put("terminal_reason", task.terminalReason)
         .put("teacher_requests", actualTeacherRequests).put("teacher_demonstrations", teacherDemonstrations)
         .put("external_api_cost_usd", 0).put("external_input_tokens", 0).put("external_output_tokens", 0)
         .put("compiled_procedure_used", task.steps.any { it.source.startsWith("skill:compiled_") && it.status == VerifyStatus.VERIFIED })
+        .also{out->diagnostics?.let{out.put("diagnostics",it)}}
 }
 
 class SimulationTrainer {
@@ -80,9 +81,10 @@ class SimulationTrainer {
                 demos = 1
             }
         }
-        val engine = BrainEngine(market, memory, { null }, object : EngineEvents {}, config) { NOW }
+        val diagnostics=CityDiagnostics()
+        val engine = BrainEngine(market, memory, { null }, diagnostics, config) { NOW }
         val out = engine.runTask(task)
-        return SimulationRun(scenario, market, out, EpisodeScorer.score(scenario, market, out), teacherDemonstrations = demos)
+        return SimulationRun(scenario, market, out, EpisodeScorer.score(scenario, market, out), teacherDemonstrations = demos,diagnostics=diagnostics.toJson())
     }
 
     fun experiment(trainingEpisodes: Int = 1200, includeChallenge: Boolean = false): JsonObject {
@@ -102,6 +104,8 @@ class SimulationTrainer {
         val after = evaluate(fixed, snapshot)
         val transfer = evaluate(unseen, snapshot)
         val cityAfter = evaluate(city, snapshot)
+        val diagnosticStages=linkedMapOf("baseline" to baseline,"after_training" to after,"unseen_baseline" to unseenBaseline,
+            "unseen_after_training" to transfer,"city_baseline" to cityBaseline,"city_after_training" to cityAfter)
         fun manifest(cases: List<Scenario>) = MessageDigest.getInstance("SHA-256")
             .digest(cases.joinToString("\n") { it.id }.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
@@ -128,6 +132,8 @@ class SimulationTrainer {
             .put("unseen_pairs", JsonArray(unseenBaseline.zip(transfer).map { (a,b) -> JsonObject().put("before", a.toJson()).put("after", b.toJson()) }))
         if (includeChallenge) {
             val challengeAfter = evaluate(challenge, snapshot)
+            diagnosticStages["challenge_baseline"]=challengeBaseline
+            diagnosticStages["challenge_after_training"]=challengeAfter
             report.put("challenge_manifest", JsonObject().put("sha256", manifest(challenge)).put("districts", 24)
                 .put("episodes", challenge.size).put("max_catalog_size", 128).put("min_page_size", 1).put("max_page_size", 8)
                 .put("pagination_modes", "next_page,load_more").put("training_hosts_disjoint", true))
@@ -138,7 +144,7 @@ class SimulationTrainer {
                         .put("after_training", summary(challengeAfter.filter { it.scenario.host == host }))
                 }))
         }
-        return report
+        return report.put("diagnostics",CityDiagnostics.report(diagnosticStages).put("learning_clinic",LearningDiagnosticClinic.run()))
     }
 
     companion object {

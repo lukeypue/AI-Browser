@@ -399,10 +399,11 @@ class BrainService : Service() {
         main.removeCallbacks(testDeadline)
         main.removeCallbacks(liveHeartbeat)
         val result = run.finish(android.os.SystemClock.elapsedRealtime(), reason)
-        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses. Repeated uses are not new lessons. Save diagnostics for review."
+        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses, ${result.newLessons} new lessons. Repeated uses are not new lessons. Save diagnostics for review."
         getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", false).putString("test_summary", summary).apply()
         diagnostics.event("learning_test_end", extra = JsonObject().put("reason", reason).put("elapsed_ms", result.elapsedMs)
-            .put("tasks", result.tasks).put("verified_actions", result.verified).put("failed_actions", result.failed).put("verified_procedure_uses", result.verifiedSkills))
+            .put("tasks", result.tasks).put("verified_actions", result.verified).put("failed_actions", result.failed).put("verified_procedure_uses", result.verifiedSkills).put("new_lessons",result.newLessons)
+            .put("neutral_programs",result.neutralPrograms).put("held_programs",result.heldPrograms).put("planner_errors",result.plannerErrors).put("diagnostic_events",result.diagnosticEvents))
         diagnostics.completePhoneTest(interrupted = reason == "service ended")
         releaseWakeLock()
         if (stop) {
@@ -593,11 +594,16 @@ class BrainService : Service() {
     }
 
     private val engineEvents = object : EngineEvents {
-        override fun diagnostic(host: String, kind: String, data: JsonObject) { if (!staleTestEvent()) diagnostics.event(kind, host, extra = data) }
+        override fun diagnostic(host: String, kind: String, data: JsonObject) {
+            if(staleTestEvent())return
+            val owner=executingTest.get()
+            if(owner!=null && timedTest===owner)owner.diagnostic(kind,data)
+            diagnostics.event(kind,host,extra=data)
+        }
         override fun progress(ledger: TaskLedger, reason: String) {
             if (staleTestEvent()) return
             lastProgressAt = System.currentTimeMillis()
-            diagnostics.event("verified_progress", ledger.host, reason)
+            diagnostics.event("verified_progress", ledger.host, reason,com.appgate.brain.engine.SemanticDiagnostics.journey(ledger))
         }
         override fun guide(explanation: LearningGuide) {
             val owner = executingTest.get()
@@ -615,7 +621,7 @@ class BrainService : Service() {
         override fun step(ledger: TaskLedger, description: String, status: VerifyStatus?) {
             if (staleTestEvent()) return
             // Descriptions may contain the user's query; diagnostics keep typed coordinates only.
-            diagnostics.event("step", ledger.host, extra = JsonObject().put("status", status?.name).put("phase", ledger.phase.name).put("source", ledger.programSource))
+            diagnostics.event("step", ledger.host, extra = com.appgate.brain.engine.SemanticDiagnostics.journey(ledger).put("status", status?.name).put("phase", ledger.phase.name))
             val testOwner = executingTest.get()
             val explanation = if (ledger.goal.intent == com.appgate.brain.model.GoalIntent.LEARN_SITE) LearningGuide.snapshot(ledger, ledger.currentProgram.getOrNull(ledger.cursor), status, ledger.steps.lastOrNull()?.evidence.orEmpty()) else null
             main.post {
@@ -656,7 +662,7 @@ class BrainService : Service() {
                 main.post { if (testOwner != null && timedTest !== testOwner) return@post; state.learningGuide?.takeIf { it.ledgerId == id }?.let { publish(state.copy(learningGuide = it.copy(outcome = "$outcome Last step: ${it.outcome}"))) } }
             }
             diagnostics.event("task_finished", ledger.host, "${ledger.status} actions=${ledger.actions} llm=${ledger.llmCalls} items=${ledger.verdicts.size}",
-                JsonObject().put("reason", ledger.terminalReason).put("elapsed_ms", ledger.elapsedMs).put("decisions", ledger.decisions).put("verified_skills", ledger.successfulSkills.size))
+                com.appgate.brain.engine.SemanticDiagnostics.journey(ledger).put("status",ledger.status.name).put("lesson",com.appgate.brain.engine.SemanticDiagnostics.capability(ledger.lesson)).put("reason", ledger.terminalReason).put("elapsed_ms", ledger.elapsedMs).put("decisions", ledger.decisions).put("verified_skills", ledger.successfulSkills.size))
         }
         override fun log(level: String, message: String) {
             if (level != "debug") diagnostics.event("log_$level", detail = message)

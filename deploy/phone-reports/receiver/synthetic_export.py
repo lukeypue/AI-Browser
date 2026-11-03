@@ -105,6 +105,8 @@ def sanitize_dialog_clinic(c):
     for k,v in totals.items():check(type(c[k]) is int and c[k]==v);out[k]=v
     return out
 
+from city_diagnostics import sanitize_city_diagnostics
+
 def sanitize(r):
     require(r.get('real_world_validated') is False and r.get('synthetic_memory_imported_to_android') is False,'synthetic isolation')
     s=r['source']; a=r['automation']; m=r['manifest']; c=r['city_manifest']
@@ -174,6 +176,9 @@ def sanitize(r):
     if 'dialog_clinic' in r:
         p['dialog_clinic']=sanitize_dialog_clinic(r['dialog_clinic'])
         p['export_schema_version']=3
+    if 'diagnostics' in r:
+        p['diagnostics']=sanitize_city_diagnostics(r)
+        p['export_schema_version']=4
     p['automation']={'started_at_utc':started.isoformat(),'finished_at_utc':(started+timedelta(seconds=elapsed)).isoformat(),'elapsed_seconds':elapsed,'validation_errors':[],'memory_scope':'fresh synthetic memory; no phone import','releases':False}
     return p
 

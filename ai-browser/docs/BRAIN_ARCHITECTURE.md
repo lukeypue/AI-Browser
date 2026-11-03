@@ -249,3 +249,7 @@ Counts can show missing/invalid memory or a nonmatching failure key; they cannot
 ### Neutral scrolling during completed-skill rehearsal
 
 The existing durable 30-to-300-second no-progress schedule also applies when a previously completed scroll lesson is rehearsed without revealing new results. Earlier versions excluded completed items, leaving overdue neutral rehearsals eligible every 30-second site visit. Prior mastery and failure holds remain unchanged; real new-result verification clears the schedule. Pending runnable lessons still take priority. Real-engine scheduler and file-reload regressions cover the completed-item path; this reduces synthetic wasted retries and does not establish that physical-site dialogs or missing controls are repaired.
+
+### Correlated diagnostic journeys
+
+See [DIAGNOSTIC_REPORTS.md](DIAGNOSTIC_REPORTS.md) for the optional strict schema2 event coordinates, whole-test totals, typed planner/scheduling outcomes and bounded City traces. These additions observe existing execution and do not change classifier, verifier, reward, pacing policy, permissions or signing.

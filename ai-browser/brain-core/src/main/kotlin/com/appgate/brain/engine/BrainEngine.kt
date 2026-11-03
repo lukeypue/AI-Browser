@@ -38,6 +38,12 @@ import com.appgate.brain.util.Hashing
 import com.appgate.brain.verify.Verifier
 import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+
+private object DiagnosticTaskIds {
+    private val next=AtomicInteger()
+    fun allocate():Int=next.updateAndGet{if(it<1_000_000)it+1 else 1_000_001}.takeIf{it<=1_000_000}?:0
+}
 
 interface EngineEvents {
     fun diagnostic(host: String, kind: String, data: JsonObject) {}
@@ -279,6 +285,10 @@ class BrainEngine(
         if (ledger.done) return ledger
         stopRequested.set(false)
         currentLedger = ledger
+        ledger.diagnosticTaskSequence=DiagnosticTaskIds.allocate()
+        ledger.diagnosticProgramSequence=if(ledger.currentProgram.isEmpty())0 else 1
+        ledger.diagnosticEnded=false
+        ledger.diagnosticOutcomeReported=false
         latestPage = null
         programBefore = null
         // A partial program cannot carry verification credit across a process/task resume.
@@ -291,6 +301,7 @@ class BrainEngine(
         val profile = SiteProfiles.forHost(ledger.host) ?: SiteProfiles.generic(ledger.host)
         val site = memory.site(ledger.host)
         lessonsBefore = site.curriculum.filter { it.done }.map { it.id }.toSet()
+        ledger.diagnosticRehearsal=ledger.lesson in lessonsBefore
         if (memoryDiagnosticSites.add(ledger.host)) memoryCheckpoint(ledger, "MEMORY_SNAPSHOT")
         val parserFactory = { SpsParser(site.facetVocabulary + profile.facetVocabulary) }
         val executor = Executor(renderer, parserFactory)
@@ -304,6 +315,7 @@ class BrainEngine(
         memory.saveLedger(ledger)
         if (ledger.goal.intent == GoalIntent.LEARN_SITE) events.guide(LearningGuide.snapshot(ledger))
         events.status("Starting on ${profile.name}: ${ledger.goal.describe()}")
+        events.diagnostic(ledger.host,"task_lifecycle",SemanticDiagnostics.journey(ledger).put("status","RUNNING").put("lesson",SemanticDiagnostics.capability(ledger.lesson)))
 
         try {
             // Land on the site (or on the last checkpoint after a resume).
@@ -468,6 +480,7 @@ class BrainEngine(
         } finally {
             ledger.elapsedMs = elapsedBefore + (System.nanoTime() - runStarted) / 1_000_000L
             memory.saveLedger(ledger)
+            if(ledger.blocked) { diagnosticLearningOutcome(ledger,site);diagnosticTaskEnd(ledger) }
         }
         return finish(ledger, site)
     }
@@ -482,10 +495,8 @@ class BrainEngine(
         memory.saveLedger(ledger)
         memory.saveSite(site)
         val result = if (ledger.goal.intent == GoalIntent.FIND_LISTINGS || ledger.goal.intent == GoalIntent.LEARN_SITE) resultFor(ledger) else null
-        events.diagnostic(ledger.host, "learning_outcome", JsonObject().put("status", ledger.status.name)
-            .put("lesson", SemanticDiagnostics.capability(ledger.lesson)).put("items", ledger.verdicts.size).put("inspected", ledger.itemsInspected)
-            .put("teacher_attempts", ledger.llmCalls).put("verified_skills", ledger.successfulSkills.size).put("new_lessons", site.curriculum.count { it.done && it.id !in lessonsBefore })
-            .put("lessons_complete", site.curriculum.count { it.done }).put("lessons_total", site.curriculum.size))
+        diagnosticLearningOutcome(ledger,site)
+        diagnosticTaskEnd(ledger)
         events.finished(ledger, result)
         currentLedger = null
         return ledger
@@ -498,6 +509,7 @@ class BrainEngine(
 
     private fun startProgram(ledger: TaskLedger, steps: List<Step>, params: Map<String, String>, source: String, reason: String,
                              capability: String = source.removePrefix("skill:"), post: List<Postcondition> = emptyList()) {
+        ledger.diagnosticProgramSequence=(ledger.diagnosticProgramSequence+1).coerceAtMost(1_000_000)
         // Bind parameters now so the persisted program is self-contained.
         ledger.currentProgram = steps.map { s ->
             val bound = s.copy(facetKey = s.facetKey?.let { StepGrounder.substitute(it, params) }, arg = s.arg?.let { StepGrounder.substitute(it, params) },
@@ -515,7 +527,7 @@ class BrainEngine(
         // Successful admissions already have an outcome checkpoint; avoid duplicate rows.
         if (held) {
             memoryCheckpoint(ledger, "STRATEGY_HELD", capability, page,
-                JsonObject().put("strategy_prior_failures", priorFailures))
+                JsonObject().put("strategy_prior_failures", priorFailures).put("program_source",SemanticDiagnostics.programSource(source)).also{data->strategyComparison(ledger,capability,strategyKey).let{j->j.keys.forEach{data.put(it,j[it])}}})
             ledger.currentProgram = emptyList()
             ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
             ledger.terminalReason = "known failed procedure; use a different approach or changed controls"
@@ -900,6 +912,7 @@ class BrainEngine(
             memoryCode = if (verified) "STRATEGY_SUCCESS_SAVED" else "STRATEGY_FAILURE_SAVED"
             if (verified) FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability), true, clock())
         }
+        val completedBeforeProgram=site.curriculum.filter{it.done}.map{it.id}.toSet()
         if (source.startsWith("skill:")) {
             val id = source.removePrefix("skill:")
             if (!neutral) memory.skills.recordOutcome(id, ledger.host, verified)
@@ -935,7 +948,9 @@ class BrainEngine(
         programBefore = null
         memory.saveLedger(ledger)
         memory.saveSite(site)
-        memoryCheckpoint(ledger, memoryCode, savedCapability, before, JsonObject()
+        memoryCheckpoint(ledger, memoryCode, savedCapability, before, strategyComparison(ledger,savedCapability,strategyKey)
+            .put("program_source",SemanticDiagnostics.programSource(source))
+            .put("new_lessons",site.curriculum.count{it.done && it.id !in completedBeforeProgram})
             .put("before_present", if (before != null) 1 else 0).put("program_present", if (programPresent) 1 else 0)
             .put("source_eligible", if (sourceEligible) 1 else 0).put("outcome_blocked", if (ledger.blocked) 1 else 0)
             .put("strategy_prior_failures", priorFailures)
@@ -1074,12 +1089,13 @@ class BrainEngine(
             // A resumed drawer discovery can arrive here before the next lesson decision.
             ledger.learningConstraints = LearningOpportunities.target(sps, ledger.lesson)?.constraints.orEmpty()
         }
-        if (tryLocalRepair(ledger, sps, site, capability)) return true
-        val planner = plannerFactory() ?: run { events.log("info", "planner unavailable: $reason"); return false }
-        if (ledger.llmCalls >= ledger.goal.budget.llmCalls) { ledger.note("planner budget exhausted"); return false }
-        if (ledger.lastPlannerStateHash == sps.hash && ledger.plannerCallsOnSameState >= config.maxPlannerCallsSameState) { ledger.note("planner already tried this state twice"); return false }
+        if (tryLocalRepair(ledger, sps, site, capability)) { plannerOutcome(ledger,capability,"LOCAL_REPAIR");return true }
+        val planner = plannerFactory() ?: run { plannerOutcome(ledger,capability,"UNAVAILABLE");events.log("info", "planner unavailable: $reason"); return false }
+        if (ledger.llmCalls >= ledger.goal.budget.llmCalls) { plannerOutcome(ledger,capability,"TASK_BUDGET");ledger.note("planner budget exhausted"); return false }
+        if (ledger.lastPlannerStateHash == sps.hash && ledger.plannerCallsOnSameState >= config.maxPlannerCallsSameState) { plannerOutcome(ledger,capability,"STATE_LIMIT");ledger.note("planner already tried this state twice"); return false }
         val plannerKey = FailedStrategies.key(sps, capability)
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && !FailedStrategies.repairAllowed(site, plannerKey, clock())) {
+            plannerOutcome(ledger,capability,"REPAIR_COOLDOWN")
             ledger.note("recent AI repairs failed on this page; waiting for a changed page or cooldown")
             return false
         }
@@ -1096,16 +1112,18 @@ class BrainEngine(
         ledger.lastPlannerStateHash = sps.hash
         events.status("Thinking about this page…")
         val failuresHere = site.failures.values.filter { it.pageType == sps.pageType }.sortedByDescending { it.lastAt }.take(3).map { "${it.role}${it.facetKey?.let { k -> "[$k]" } ?: ""}: ${it.reason}" }
+        plannerOutcome(ledger,capability,"PROPOSAL_STARTED")
         val program = try {
             planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability)
         } catch (e: PlannerRefused) {
-            events.log("warn", "planner refused: ${e.message}"); return false
+            plannerOutcome(ledger,capability,"REFUSED");events.log("warn", "planner refused: ${e.message}"); return false
         } catch (e: Exception) {
-            events.log("warn", "planner error: ${e.javaClass.simpleName}: ${e.message?.take(120)}"); ledger.plannerFailures++; return false
+            plannerOutcome(ledger,capability,"ERROR");events.log("warn", "planner error: ${e.javaClass.simpleName}: ${e.message?.take(120)}"); ledger.plannerFailures++; return false
         }
         if (program.vocabulary.isNotEmpty()) { site.facetVocabulary.putAll(program.vocabulary); memory.saveSite(site) }
         memory.recordPlannerLabel(site.host, JsonObject().put("page", sps.pageType.name).put("reason", reason.take(80)).put("steps", program.steps.size).put("conf", program.confidence).put("at", clock()))
         if (program.needsHuman != null) {
+            plannerOutcome(ledger,capability,"NEEDS_HUMAN")
             diagnostic(ledger, sps, null, null, null, DiagnosticCode.MODEL_UNCERTAIN)
             // Human-only pages are stopped before the planner is called. Its uncertainty
             // on an ordinary page is not proof of a sign-in wall and must not create an
@@ -1116,7 +1134,7 @@ class BrainEngine(
             memory.saveLedger(ledger)
             return true
         }
-        if (program.giveUp || program.steps.isEmpty() || program.confidence < config.plannerConfidenceFloor) { ledger.note("planner: ${program.rationale}"); return false }
+        if (program.giveUp || program.steps.isEmpty() || program.confidence < config.plannerConfidenceFloor) { plannerOutcome(ledger,capability,if(program.giveUp)"GIVE_UP" else if(program.steps.isEmpty())"EMPTY" else "LOW_CONFIDENCE");ledger.note("planner: ${program.rationale}"); return false }
         // Execution accepts the requested query either literally or as a reusable parameter.
         // Other literal queries must not satisfy this task's search contract.
         val contractSteps = program.steps.map { step ->
@@ -1125,10 +1143,11 @@ class BrainEngine(
         }
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && !com.appgate.brain.skills.PortableSkills.compatible(capability,
                 contractSteps, program.steps.lastOrNull { !it.optional }?.expect.orEmpty())) {
-            ledger.note("teacher program rejected: incompatible capability"); return false
+            plannerOutcome(ledger,capability,"INCOMPATIBLE");ledger.note("teacher program rejected: incompatible capability"); return false
         }
         ledger.attemptedSkills += capability
         startProgram(ledger, program.steps, skillParams(ledger), "planner", program.rationale.ifBlank { "planner program" }, capability)
+        plannerOutcome(ledger,capability,if(ledger.currentProgram.isEmpty() && ledger.done)"ACCEPTED_HELD" else "ACCEPTED_STARTED")
         return true
     }
 
@@ -1151,11 +1170,37 @@ class BrainEngine(
         if (ProgressSupervisor.evidence(ledger, key)) events.progress(ledger, reason)
     }
 
+    private val priorDiagnosticKeys=linkedMapOf<String,String>()
+    private fun strategyComparison(ledger:TaskLedger,capability:String,key:String?):JsonObject {
+        val out=JsonObject();if(key==null)return out
+        val coordinate=ledger.host+"|"+SemanticDiagnostics.capability(capability)
+        priorDiagnosticKeys[coordinate]?.let{out.put("strategy_key_same",if(it==key)1 else 0)}
+        priorDiagnosticKeys[coordinate]=key
+        while(priorDiagnosticKeys.size>64)priorDiagnosticKeys.remove(priorDiagnosticKeys.keys.first())
+        return out
+    }
+    private fun diagnosticLearningOutcome(ledger:TaskLedger,site:SiteModel) {
+        if(ledger.diagnosticOutcomeReported)return
+        ledger.diagnosticOutcomeReported=true
+        events.diagnostic(ledger.host, "learning_outcome", SemanticDiagnostics.journey(ledger).put("status", ledger.status.name)
+            .put("lesson", SemanticDiagnostics.capability(ledger.lesson)).put("items", ledger.verdicts.size).put("inspected", ledger.itemsInspected)
+            .put("teacher_attempts", ledger.llmCalls).put("verified_skills", ledger.successfulSkills.size).put("new_lessons", site.curriculum.count { it.done && it.id !in lessonsBefore })
+            .put("lessons_complete", site.curriculum.count { it.done }).put("lessons_total", site.curriculum.size))
+    }
+    private fun diagnosticTaskEnd(ledger:TaskLedger) {
+        if(ledger.diagnosticEnded)return
+        ledger.diagnosticEnded=true
+        events.diagnostic(ledger.host,"task_lifecycle",SemanticDiagnostics.journey(ledger).put("status",ledger.status.name).put("lesson",SemanticDiagnostics.capability(ledger.lesson)))
+    }
+    private fun plannerOutcome(ledger:TaskLedger,capability:String,outcome:String) {
+        events.diagnostic(ledger.host,"planner_outcome",SemanticDiagnostics.journey(ledger).put("planner_outcome",outcome)
+            .put("capability",SemanticDiagnostics.capability(capability)).put("lesson",SemanticDiagnostics.capability(ledger.lesson)))
+    }
     private val memoryDiagnosticSites = mutableSetOf<String>()
 
     private fun memoryCheckpoint(ledger: TaskLedger, code: String, capability: String = ledger.programCapability,
                                  page: SemanticPageState? = null, extra: JsonObject = JsonObject()) {
-        val data = memory.diagnosticSnapshot(ledger.host).put("code", code)
+        val data = memory.diagnosticSnapshot(ledger.host).also{data->SemanticDiagnostics.journey(ledger).let{j->j.keys.forEach{data.put(it,j[it])}}}.put("code", code)
             .put("capability", SemanticDiagnostics.capability(capability))
             .put("lesson", SemanticDiagnostics.capability(ledger.lesson)).put("page_type", page?.pageType?.name)
         extra.keys.forEach { data.put(it, extra[it]) }

@@ -91,6 +91,12 @@ data class TaskLedger(
     // null: no observation; false: a non-neutral scroll occurred; true: only neutral scrolls.
     var neutralScrollOnly: Boolean? = null
 ) {
+    // Process-local diagnostic coordinates; deliberately absent from stored ledger JSON.
+    var diagnosticTaskSequence=0
+    var diagnosticProgramSequence=0
+    var diagnosticRehearsal=false
+    var diagnosticOutcomeReported=false
+    var diagnosticEnded=false
     /** One late-discovered practice target. Values are task-local and never serialized. */
     var learningConstraints: List<Constraint> = emptyList()
         set(value) {

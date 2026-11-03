@@ -21,10 +21,18 @@ REASONS={'deadline','stopped','browser','search','replaced','interrupted','servi
 CAPABILITIES={'sort_results', 'UNKNOWN', 'open_facet', 'dismiss_dialog', 'commit_send', 'open_item', 'navigate', 'scroll_results', 'search', 'go_back', 'prepare_message', 'apply_filters', 'custom', 'load_more', 'select_facet', 'next_page', 'constrain_numeric', 'open_category', 'open_filters', 'seek_pagination', 'expand_description'}
 RECHECK_REASONS={'NO_TARGET_ON_PROFILE', 'UNKNOWN', 'NO_TARGET_ON_RESULTS', 'PAGE_BUSY', 'NO_TARGET_ON_ERROR', 'NO_TARGET_ON_CHALLENGE', 'PROCEDURE_COOLDOWN', 'NO_TARGET_ON_MESSAGES', 'NO_TARGET_ON_HOME', 'NO_TARGET_ON_UNKNOWN', 'ALL_LESSONS_COMPLETE', 'HUMAN_HOLD', 'NO_TARGET_ON_DETAIL', 'NO_TARGET_ON_FACET_PANEL', 'NO_TARGET_ON_AUTH_WALL', 'NO_TARGET_ON_SEARCH', 'PAGINATION_DISCOVERY_COOLDOWN', 'COOLDOWN', 'NOT_OBSERVED_AVAILABLE', 'NO_TARGET_ON_DIALOG', 'PROBE_UNAVAILABLE'}
 MEMORY_CODES={'MEMORY_SNAPSHOT', 'STRATEGY_FAILURE_SAVED', 'STRATEGY_NOT_RECORDED', 'STRATEGY_HELD', 'STRATEGY_SUCCESS_SAVED'}
-CODES_V2=CODES|{'memory_checkpoint'}
+CODES_V2=CODES|{'memory_checkpoint','planner_outcome','learning_schedule','task_lifecycle'}
 DIAGNOSTICS_V2=DIAGNOSTICS|MEMORY_CODES
 COUNTERS_V2=COUNTERS|{'before_present','program_present','source_eligible','outcome_blocked'}|{'outcome_rememberable', 'memory_invalid', 'memory_missing', 'strategy_prior_failures', 'dialog_detail_controls', 'strategy_current_failures', 'before_results', 'memory_bindings', 'memory_loaded', 'after_dialog', 'memory_lessons_done', 'memory_save_acks', 'memory_strategy_holds', 'memory_loaded_bindings', 'memory_read_failed', 'outcome_neutral', 'memory_loaded_lessons', 'memory_loaded_failures', 'outcome_verified'}|{'teacher_attempts'}|{'pending', 'lessons_complete', 'inspected', 'lessons_total', 'new_lessons', 'facet_openers', 'closers'}
 STATUSES_V2=STATUSES|{'PENDING','RUNNING','NEED_HUMAN','NEED_GRANT','DONE','ABANDONED','PAUSED','PARTIAL','BUDGET_EXHAUSTED'}
+
+JOURNEY_ENUMS={
+ 'before_page_type':PAGES|{'NOT_OBSERVED'},'after_page_type':PAGES|{'NOT_OBSERVED'},
+ 'before_settle':{'IDLE','BUSY','UNKNOWN','NOT_OBSERVED'},'after_settle':{'IDLE','BUSY','UNKNOWN','NOT_OBSERVED'},
+ 'program_source':{'SKILL','COMPILED','PLANNER','LOCAL','NAVIGATE','NONE','UNKNOWN'},
+ 'planner_outcome':{'LOCAL_REPAIR','UNAVAILABLE','TASK_BUDGET','STATE_LIMIT','REPAIR_COOLDOWN','PROPOSAL_STARTED','PROPOSAL_RETURNED','REFUSED','ERROR','NEEDS_HUMAN','GIVE_UP','EMPTY','LOW_CONFIDENCE','INCOMPATIBLE','ACCEPTED_STARTED','ACCEPTED_HELD','UNKNOWN'}}
+SUMMARY_V2={'new_lessons','neutral_programs','held_programs','planner_errors','diagnostic_events'}
+COUNTERS_V2|={'task_sequence','program_sequence','action_sequence','rehearsal','neutral_scroll_only','prerequisite_only','lesson_attempted','lesson_done','no_progress_retries','cooldown_remaining_ms','strategy_key_same','detail_controls','dialog_open','scroll_y','scroll_height','viewport_height'}
 
 class Failure(Exception):
  def __init__(self,status=400):self.status=status
@@ -37,31 +45,43 @@ def integer(value,maximum=1000000):check(type(value) is int and 0<=value<=maximu
 def canonical(report):return json.dumps(report,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode()
 
 def validate(r):
- exact(r,{'schema_version','report_id','app_revision','version_code','started_at_utc','elapsed_ms','flags','summary','events'})
- check(type(r['schema_version']) is int and r['schema_version'] in (1,2))
- version=r['schema_version']
- check(type(r['report_id']) is str and str(uuid.UUID(r['report_id']))==r['report_id'])
- check(type(r['app_revision']) is str and re.fullmatch('[0-9a-f]{40}',r['app_revision']))
- integer(r['version_code'],2147483647); integer(r['elapsed_ms'],86400000)
- check(type(r['started_at_utc']) is str and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|\+00:00)',r['started_at_utc']))
- datetime.fromisoformat(r['started_at_utc'].replace('Z','+00:00'))
- exact(r['flags'],{'trimmed','clock_changed','interrupted'})
- check(all(type(v) is bool for v in r['flags'].values()))
- exact(r['summary'],{'verified','failed','tasks','verified_skills','end_reason'})
- for k in ('verified','failed','tasks','verified_skills'):integer(r['summary'][k])
- check(r['summary']['end_reason'] in REASONS)
- check(type(r['events']) is list and len(r['events'])<=8000)
- previous=0
- for event in r['events']:
-  exact(event,{'code','site','page_type','status','phase','diagnostic_code','elapsed_ms','counters'} | ({'lesson','capability','recheck_reason'} if version==2 else set()))
-  if version==2:
-   for key,allowed in [('lesson',CAPABILITIES),('capability',CAPABILITIES),('recheck_reason',RECHECK_REASONS)]:check(type(event[key]) is str and event[key] in allowed)
-  for key,allowed in [('code',CODES_V2 if version==2 else CODES),('site',SITES),('page_type',PAGES),('status',STATUSES_V2 if version==2 else STATUSES),('phase',PHASES),('diagnostic_code',DIAGNOSTICS_V2 if version==2 else DIAGNOSTICS)]:check(type(event[key]) is str and event[key] in allowed)
-  integer(event['elapsed_ms'],r['elapsed_ms']);check(event['elapsed_ms']>=previous);previous=event['elapsed_ms']
-  check(type(event['counters']) is dict and set(event['counters'])<=(COUNTERS_V2 if version==2 else COUNTERS))
-  for value in event['counters'].values():integer(value)
- check(len(canonical(r))<=LIMIT,413)
- return r
+    exact(r,{'schema_version','report_id','app_revision','version_code','started_at_utc','elapsed_ms','flags','summary','events'})
+    check(type(r['schema_version']) is int and r['schema_version'] in (1,2))
+    version=r['schema_version']
+    check(type(r['report_id']) is str and str(uuid.UUID(r['report_id']))==r['report_id'])
+    check(type(r['app_revision']) is str and re.fullmatch('[0-9a-f]{40}',r['app_revision']))
+    integer(r['version_code'],2147483647);integer(r['elapsed_ms'],86400000)
+    check(type(r['started_at_utc']) is str and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|\+00:00)',r['started_at_utc']))
+    datetime.fromisoformat(r['started_at_utc'].replace('Z','+00:00'))
+    exact(r['flags'],{'trimmed','clock_changed','interrupted'})
+    check(all(type(v) is bool for v in r['flags'].values()))
+    summary=r['summary'];check(type(summary) is dict)
+    exact(summary,{'verified','failed','tasks','verified_skills','end_reason'} | (set(summary)&SUMMARY_V2 if version==2 else set()))
+    for k in ('verified','failed','tasks','verified_skills'):integer(summary[k])
+    for k in SUMMARY_V2 & set(summary):integer(summary[k])
+    check(summary['end_reason'] in REASONS)
+    check(type(r['events']) is list and len(r['events'])<=8000)
+    previous=0
+    for event in r['events']:
+        check(type(event) is dict)
+        optional=set(event)&(set(JOURNEY_ENUMS)|{'pending_lessons'}) if version==2 else set()
+        exact(event,{'code','site','page_type','status','phase','diagnostic_code','elapsed_ms','counters'} | ({'lesson','capability','recheck_reason'}|optional if version==2 else set()))
+        if version==2:
+            for key,allowed in [('lesson',CAPABILITIES),('capability',CAPABILITIES),('recheck_reason',RECHECK_REASONS)]:check(type(event[key]) is str and event[key] in allowed)
+            for key,allowed in JOURNEY_ENUMS.items():
+                if key in event:check(type(event[key]) is str and event[key] in allowed)
+            if 'pending_lessons' in event:
+                states=event['pending_lessons'];check(type(states) is list and len(states)<=11);seen=set()
+                for state in states:
+                    exact(state,{'lesson','opportunity','cooling','live_target'})
+                    check(type(state['lesson']) is str and state['lesson'] in CAPABILITIES and state['lesson']!='UNKNOWN' and state['lesson'] not in seen);seen.add(state['lesson'])
+                    check(type(state['opportunity']) is str and state['opportunity'] in {'AVAILABLE','ABSENT','UNKNOWN'} and type(state['cooling']) is bool and type(state['live_target']) is str and state['live_target'] in CAPABILITIES)
+        for key,allowed in [('code',CODES_V2 if version==2 else CODES),('site',SITES),('page_type',PAGES),('status',STATUSES_V2 if version==2 else STATUSES),('phase',PHASES),('diagnostic_code',DIAGNOSTICS_V2 if version==2 else DIAGNOSTICS)]:check(type(event[key]) is str and event[key] in allowed)
+        integer(event['elapsed_ms'],r['elapsed_ms']);check(event['elapsed_ms']>=previous);previous=event['elapsed_ms']
+        check(type(event['counters']) is dict and set(event['counters'])<=(COUNTERS_V2 if version==2 else COUNTERS))
+        for key,value in event['counters'].items():integer(value,1 if key in {'rehearsal','neutral_scroll_only','prerequisite_only','lesson_attempted','lesson_done','strategy_key_same','dialog_open'} else 1000000)
+    check(len(canonical(r))<=LIMIT,413)
+    return r
 
 def digest(value):return hashlib.sha256(value.encode()).hexdigest()
 def utc(now):return datetime.fromtimestamp(now,timezone.utc).isoformat()
