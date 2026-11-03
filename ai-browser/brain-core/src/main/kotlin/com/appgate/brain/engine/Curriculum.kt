@@ -211,7 +211,9 @@ object Curriculum {
         ensure(site)
         if (ledger.status == com.appgate.brain.model.TaskStatus.PARTIAL && ledger.lesson == "scroll_results" &&
             ledger.neutralScrollOnly == true && ledger.lesson in ledger.attemptedSkills && ledger.lesson !in ledger.successfulSkills) {
-            site.curriculum.firstOrNull { it.id == ledger.lesson && !it.done }?.let { item ->
+            // Completed rehearsals also need spacing when movement reveals no new results.
+            // Keep completion evidence intact; only a verified program clears this schedule.
+            site.curriculum.firstOrNull { it.id == ledger.lesson }?.let { item ->
                 item.noProgressRetries = (item.noProgressRetries + 1).coerceAtMost(5)
                 val delay = (RETRY_MS * (1L shl (item.noProgressRetries - 1))).coerceAtMost(REHEARSAL_INTERVAL_MS)
                 item.noProgressRetryAt = now + delay

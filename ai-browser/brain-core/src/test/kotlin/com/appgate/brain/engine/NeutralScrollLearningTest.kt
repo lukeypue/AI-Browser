@@ -241,4 +241,71 @@ class NeutralScrollLearningTest {
             println("SYNTHETIC_CITY_SCROLL_CADENCE retained_tasks=${selections[0]} ablated_tasks=${selections[1]} retained_actions=${actions[0]} ablated_actions=${actions[1]} new_lessons=0 failure_holds=0 teacher_calls=0 storage=FILE_RELOAD_SAME_JVM")
         } finally { root.deleteRecursively() }
     }
+    @Test fun completedNeutralRehearsalBacksOffAcrossDurableReloadsWithoutErasingMastery() {
+        val root=Files.createTempDirectory("synthetic-rehearsal-cadence-").toFile()
+        try {
+            val store=FileBrainStorage(root)
+            val memory=Memory(store){initial};seed(memory,initial)
+            val site=memory.site("fake.market")
+            site.curriculum.single { it.id=="scroll_results" }.completedAt=initial-600000
+            site.curriculum.single { it.id=="sort_results" }.completedAt=0
+            memory.saveSite(site)
+            val admitted=mutableListOf<Int>()
+            for(seconds in listOf(0,30,60,90)) {
+                val now=initial+seconds*1000L;val restored=Memory(store){now};val saved=restored.site("fake.market")
+                val renderer=ScrollSite()
+                val page=SpsParser().parse(renderer.observe(1000),now).let { it.copy(affordances=it.affordances.filterNot { a->a.role==Role.SORT }) }
+                Curriculum.observe(saved,page,now);Curriculum.migrateRetries(saved,now)
+                if(Curriculum.practiceLesson(saved,now,page)=="scroll_results") {
+                    admitted+=seconds
+                    val out=attempt(restored,renderer,now)
+                    assertEquals(TaskStatus.PARTIAL,out.status)
+                    assertTrue(out.successfulSkills.isEmpty())
+                }
+                assertEquals("neutral rehearsal retains prior mastery",initial-600000,saved.curriculum.single { it.id=="scroll_results" }.completedAt)
+                assertFalse(saved.curriculum.single { it.id=="sort_results" }.done)
+                assertTrue(saved.strategyFailures.isEmpty())
+                restored.saveSite(saved)
+            }
+            assertEquals("completed neutral rehearsals must obey the same persisted backoff",listOf(0,30,90),admitted)
+            val restored=Memory(store){initial+210000};val saved=restored.site("fake.market")
+            val out=attempt(restored,ScrollSite(loads=true),initial+210000)
+            assertEquals(TaskStatus.DONE,out.status)
+            assertTrue("scroll_results" in out.successfulSkills)
+            assertEquals(0L,saved.curriculum.single { it.id=="scroll_results" }.noProgressRetryAt)
+            assertEquals(0,saved.curriculum.single { it.id=="scroll_results" }.noProgressRetries)
+        } finally { root.deleteRecursively() }
+    }
+    @Test fun sessionDoesNotKeepRehearsingCompletedNeutralScrollAtEveryVisit() {
+        val root=Files.createTempDirectory("synthetic-session-rehearsal-").toFile()
+        try {
+            val store=FileBrainStorage(root);val seeded=Memory(store){initial};seed(seeded,initial)
+            val site=seeded.site("fake.market")
+            site.curriculum.single { it.id=="scroll_results" }.completedAt=initial-600000
+            site.curriculum.single { it.id=="sort_results" }.completedAt=0
+            seeded.saveSite(site)
+            val admitted=mutableListOf<Int>()
+            for(seconds in listOf(0,30,60,90)) {
+                val now=initial+seconds*1000L;val memory=Memory(store){now};val scrolling=ScrollSite()
+                val renderer=object:Renderer by scrolling {
+                    override fun observe(timeoutMs:Long):String {
+                        val raw=Json.parseObject(scrolling.observe(timeoutMs))
+                        raw.put("elements",JsonArray(raw.optArray("elements")!!.objects().filterNot { it.optString("name")=="Sort by" }))
+                        return raw.toString()
+                    }
+                }
+                val events=object:EngineEvents {
+                    override fun finished(ledger:TaskLedger,result:TaskResult?) {
+                        assertEquals("scroll_results",ledger.lesson)
+                        assertTrue(ledger.successfulSkills.isEmpty())
+                        admitted+=seconds
+                    }
+                }
+                val engine=BrainEngine(renderer,memory,{null},events,config){now}
+                val profile=com.appgate.brain.profile.SiteProfile("fake","Fake",listOf("fake.market"),scrolling.currentUrl(),trainingQueries=listOf("Ford"))
+                LearningSession(engine,memory,events,listOf(profile),clock={now}).run(1)
+            }
+            assertEquals(listOf(0,30,90),admitted)
+        } finally { root.deleteRecursively() }
+    }
 }

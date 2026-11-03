@@ -881,8 +881,7 @@ class BrainEngine(
             committedQueryMatches(ledger.goal, before) && committedQueryMatches(ledger.goal, sps)
         val neutral = unchangedSearch || terminalEnd || !verified && (!rememberFailure || advancingScroll)
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.lesson == "scroll_results" &&
-            ledger.programCapability == "scroll_results" && !verified && !ledger.blocked &&
-            site.curriculum.none { it.id == "scroll_results" && it.done }) {
+            ledger.programCapability == "scroll_results" && !verified && !ledger.blocked) {
             // Transport uncertainty and real failures are not evidence of useful movement.
             // A later neutral step cannot erase an earlier non-neutral failure in this task.
             ledger.neutralScrollOnly = ledger.neutralScrollOnly != false && success && (advancingScroll || terminalEnd)
