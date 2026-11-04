@@ -12,8 +12,8 @@ import java.nio.file.Files
 class HeldTargetRepairTest {
  private val now=1_800_000_000_000L
  private val config=EngineConfig(pacingOverrideMs=0,plannerCooldownMs=0,ambiguousRecheckMs=0,idleSleepMs=0)
- private val repair="""{"steps":[{"kind":"WAIT","arg":"1","optional":true},{"kind":"CLICK","role":"RESULT_ITEM","arg":"${'$'}item","expect":["PAGE_IS_DETAIL"]}],"confidence":0.99}"""
- private fun scenario(answer:String, extraFirst:Boolean=false, onlyFirstHeld:Boolean=false, pageChange:String="", plannerBudget:Int=1, noHolds:Boolean=false, requireItemInstruction:Boolean=false, check:(TaskLedger,FakeSite,JsonObject,SiteModel,Map<String,StrategyFailure>)->Unit) {
+ private val repair="""{"steps":[{"kind":"WAIT","optional":true},{"kind":"CLICK","role":"RESULT_ITEM","arg":"${'$'}item","expect":["PAGE_IS_DETAIL"]}],"confidence":0.99}"""
+ private fun scenario(answer:String, extraFirst:Boolean=false, onlyFirstHeld:Boolean=false, pageChange:String="", plannerBudget:Int=1, noHolds:Boolean=false, requireItemInstruction:Boolean=false, requireCompiled:Boolean=false, check:(TaskLedger,FakeSite,JsonObject,SiteModel,Map<String,StrategyFailure>)->Unit) {
   val dir=Files.createTempDirectory("held-target-repair-").toFile()
   try {
    val fake=FakeSite().apply{dialogShown=false;navigate("https://fake.market/search?q=Ford",1000)}
@@ -60,8 +60,17 @@ class HeldTargetRepairTest {
     override fun diagnostic(host:String,kind:String,data:JsonObject){if(kind=="planner_outcome")fake.log += "planner-outcome:"+data.optString("planner_outcome")}
    },config){now}.runTask(TaskLedger("repair",goal,fake.host,fake.url).apply{lesson="open_item"})
    if(pageChange=="no-effect" && !noHolds) {
-    val failure=restored.site(fake.host).strategyFailures.values.single{row->row.feedback?.steps?.firstOrNull()?.motion==1}
+    val failure=restored.site(fake.host).strategyFailures.values.single{row->row.feedback?.steps?.firstOrNull()?.motion==1500}
     assertTrue(failure.count>0);assertEquals(failure,Memory(store){now}.site(fake.host).strategyFailures[failure.key])
+   }
+   if(requireCompiled) {
+    val compiled=Memory(store){now}.skills.all().filter{it.origin==SkillOrigin.COMPILED && "capability:open_item" in it.tags}
+    assertTrue("verified repair must save a reusable skill",compiled.isNotEmpty())
+    assertTrue(compiled.all{!it.toJson().toString().contains("k1") && !it.toJson().toString().contains("Ford")})
+    val warm=FakeSite().apply{dialogShown=false;navigate("https://fake.market/search?q=Ford",1000)}
+    val replay=BrainEngine(warm,Memory(store){now},{null},object:EngineEvents{},config){now}.runTask(TaskLedger("warm",goal,warm.host,warm.url).apply{lesson="open_item"})
+    assertEquals(replay.notes.joinToString(),TaskStatus.DONE,replay.status);assertEquals(0,replay.llmCalls)
+    assertEquals("https://fake.market/item/1",warm.url)
    }
    check(out,fake,capturedInput,restored.site(fake.host),before)
   } finally {dir.deleteRecursively()}
@@ -79,7 +88,7 @@ class HeldTargetRepairTest {
   }
  }
  @Test fun distinctTeacherRepairBindsSelectedItemAndVerifiesRealDetailTransition(){
-  scenario(repair){out,fake,_,site,before->
+  scenario(repair,requireCompiled=true){out,fake,_,site,before->
    assertEquals(out.notes.joinToString()+out.steps.toString(),TaskStatus.DONE,out.status)
    assertEquals("https://fake.market/item/1",fake.url);assertTrue("open_item" in out.successfulSkills);assertNull(out.currentItem)
    before.forEach{(key,value)->assertEquals(value,site.strategyFailures[key])}
@@ -95,7 +104,7 @@ class HeldTargetRepairTest {
  }
  @Test fun teacherCannotSwitchTheSelectedItemOrOmitItsBinding(){
   for(arg in listOf("\"k2\"","null")) {
-   val answer="""{"steps":[{"kind":"WAIT","arg":"1","optional":true},{"kind":"CLICK","role":"RESULT_ITEM","arg":$arg,"expect":["PAGE_IS_DETAIL"]}],"confidence":0.99}"""
+   val answer="""{"steps":[{"kind":"WAIT","optional":true},{"kind":"CLICK","role":"RESULT_ITEM","arg":$arg,"expect":["PAGE_IS_DETAIL"]}],"confidence":0.99}"""
    scenario(answer){out,fake,_,_,_->assertTrue("target-changing teacher must not click: $arg",fake.url.contains("/search"));assertTrue("planner-outcome:INCOMPATIBLE" in fake.log);assertFalse("open_item" in out.successfulSkills)}
   }
  }
@@ -137,6 +146,17 @@ class HeldTargetRepairTest {
   scenario(repair,pageChange="no-effect",plannerBudget=2,noHolds=true){out,fake,_,_,_->
    assertEquals(TaskStatus.DONE,out.status);assertEquals("https://fake.market/item/2",fake.url)
    assertEquals("the repair request must bind the newly selected live target",1,out.llmCalls)
+  }
+ }
+
+ @Test fun itemRepairRejectsNoncompilableWaitsAndGenericCloseActions(){
+  val prefixes=listOf(
+   """{"kind":"WAIT","optional":false},""",
+   """{"kind":"WAIT","arg":"5","optional":true},""",
+   """{"kind":"CLICK","role":"CLOSE","optional":true},"""
+  )
+  for(prefix in prefixes)scenario("""{"steps":[$prefix{"kind":"CLICK","role":"RESULT_ITEM","arg":"${'$'}item","expect":["PAGE_IS_DETAIL"]}],"confidence":0.99}"""){out,fake,_,_,_->
+   assertTrue(fake.url.contains("/search"));assertFalse("open_item" in out.successfulSkills);assertTrue("planner-outcome:INCOMPATIBLE" in fake.log)
   }
  }
 

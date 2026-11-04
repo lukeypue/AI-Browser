@@ -394,7 +394,7 @@ class BrainEngine(
                     ledger.repairReason = "" // One bounded opportunity per failed procedure; quotas still apply.
                     // A finished learning program no longer owns its bound steps. Resolve
                     // a live target again instead of sending an unbound repair request.
-                    val repairBindings = if (ledger.goal.intent == GoalIntent.LEARN_SITE)
+                    val repairBindings = if (ledger.goal.intent == GoalIntent.LEARN_SITE && capability == "open_item")
                         learningTarget(ledger, sps, site)?.takeIf { it.skillId == capability }?.params.orEmpty()
                         else emptyMap()
                     if (askPlanner(ledger, sps, site, profile, repairReason, capability, repairBindings)) continue
@@ -1169,9 +1169,8 @@ class BrainEngine(
         val unrelatedItemAction = capability == "open_item" && params["item"] != null &&
             (contractSteps.none { !it.optional && it.kind == StepKind.CLICK && it.role == Role.RESULT_ITEM } ||
                 contractSteps.any { step -> when (step.kind) {
-                    StepKind.WAIT -> step.role != null
-                    StepKind.CLICK -> step.role !in setOf(Role.RESULT_ITEM, Role.CLOSE)
-                    StepKind.DISMISS -> step.role != Role.CLOSE
+                    StepKind.WAIT -> step.role != null || !step.optional || step.arg != null
+                    StepKind.CLICK -> step.role != Role.RESULT_ITEM
                     else -> true
                 } })
         if ((selectedItem != null && wrongItem) || unrelatedItemAction) {
