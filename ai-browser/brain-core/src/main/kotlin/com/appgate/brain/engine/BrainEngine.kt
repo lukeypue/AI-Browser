@@ -392,7 +392,12 @@ class BrainEngine(
                     val repairReason = ledger.repairReason
                     val capability = ledger.programCapability
                     ledger.repairReason = "" // One bounded opportunity per failed procedure; quotas still apply.
-                    if (askPlanner(ledger, sps, site, profile, repairReason, capability)) continue
+                    // A finished learning program no longer owns its bound steps. Resolve
+                    // a live target again instead of sending an unbound repair request.
+                    val repairBindings = if (ledger.goal.intent == GoalIntent.LEARN_SITE)
+                        learningTarget(ledger, sps, site)?.takeIf { it.skillId == capability }?.params.orEmpty()
+                        else emptyMap()
+                    if (askPlanner(ledger, sps, site, profile, repairReason, capability, repairBindings)) continue
                 }
 
                 // Continue an in-flight program before asking the policy again.
@@ -420,7 +425,7 @@ class BrainEngine(
                                 memoryCheckpoint(ledger, "STRATEGY_HELD", decision.skillId, sps,
                                     JsonObject().put("strategy_prior_failures", failures))
                             ledger.attemptedSkills += decision.skillId
-                            if (!askPlanner(ledger, sps, site, profile, "recently failed procedure; try another approach", decision.skillId)) {
+                            if (!askPlanner(ledger, sps, site, profile, "recently failed procedure; try another approach", decision.skillId, params)) {
                                 ledger.status = if (ledger.verdicts.isEmpty()) TaskStatus.FAILED else TaskStatus.PARTIAL
                                 ledger.terminalReason = "known failed procedure; use a different approach or changed controls"
                             }
@@ -1087,13 +1092,20 @@ class BrainEngine(
 
     // ------------------------------------------------------------------ planner
 
-    private fun askPlanner(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, profile: SiteProfile, reason: String, repairCapability: String? = null): Boolean {
+    private fun askPlanner(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, profile: SiteProfile, reason: String, repairCapability: String? = null, repairBindings: Map<String, String> = emptyMap()): Boolean {
         val capability = repairCapability ?: capabilityFor(ledger)
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.effectiveGoal.filterable.isEmpty()) {
             // A resumed drawer discovery can arrive here before the next lesson decision.
             ledger.learningConstraints = LearningOpportunities.target(sps, ledger.lesson)?.constraints.orEmpty()
         }
         if (tryLocalRepair(ledger, sps, site, capability)) { plannerOutcome(ledger,capability,"LOCAL_REPAIR");return true }
+        val params = skillParams(ledger) + repairBindings
+        if (capability == "open_item" && (params["item"].isNullOrBlank() ||
+                params["item"]!!.startsWith("$") || params["item"] !in sps.resultKeys)) {
+            // Failed learning programs can lose their bound steps on completion. Return
+            // to live policy selection before requesting a target-scoped repair.
+            plannerOutcome(ledger,capability,"UNAVAILABLE");ledger.note("repair requires a selected live item"); return false
+        }
         val planner = plannerFactory() ?: run { plannerOutcome(ledger,capability,"UNAVAILABLE");events.log("info", "planner unavailable: $reason"); return false }
         if (ledger.llmCalls >= ledger.goal.budget.llmCalls) { plannerOutcome(ledger,capability,"TASK_BUDGET");ledger.note("planner budget exhausted"); return false }
         if (ledger.lastPlannerStateHash == sps.hash && ledger.plannerCallsOnSameState >= config.maxPlannerCallsSameState) { plannerOutcome(ledger,capability,"STATE_LIMIT");ledger.note("planner already tried this state twice"); return false }
@@ -1118,7 +1130,7 @@ class BrainEngine(
         val failuresHere = site.failures.values.filter { it.pageType == sps.pageType }.sortedByDescending { it.lastAt }.take(3).map { "${it.role}${it.facetKey?.let { k -> "[$k]" } ?: ""}: ${it.reason}" }
         plannerOutcome(ledger,capability,"PROPOSAL_STARTED")
         val program = try {
-            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability, FailedStrategies.feedback(site, sps, capability, skillParams(ledger)))
+            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability, FailedStrategies.feedback(site, sps, capability, params))
         } catch (e: PlannerRefused) {
             plannerOutcome(ledger,capability,"REFUSED");events.log("warn", "planner refused: ${e.message}"); return false
         } catch (e: Exception) {
@@ -1149,8 +1161,24 @@ class BrainEngine(
                 contractSteps, program.steps.lastOrNull { !it.optional }?.expect.orEmpty())) {
             plannerOutcome(ledger,capability,"INCOMPATIBLE");ledger.note("teacher program rejected: incompatible capability"); return false
         }
+        // The selected live target scopes both negative feedback and execution. A teacher
+        // cannot silently replace it or fall back to a generic listing click.
+        val selectedItem = params["item"]
+        val wrongItem = contractSteps.any { it.role == Role.RESULT_ITEM &&
+            it.arg?.let { arg -> StepGrounder.substitute(arg, params) } != params["item"] }
+        val unrelatedItemAction = capability == "open_item" && params["item"] != null &&
+            (contractSteps.none { !it.optional && it.kind == StepKind.CLICK && it.role == Role.RESULT_ITEM } ||
+                contractSteps.any { step -> when (step.kind) {
+                    StepKind.WAIT -> step.role != null
+                    StepKind.CLICK -> step.role !in setOf(Role.RESULT_ITEM, Role.CLOSE)
+                    StepKind.DISMISS -> step.role != Role.CLOSE
+                    else -> true
+                } })
+        if ((selectedItem != null && wrongItem) || unrelatedItemAction) {
+            plannerOutcome(ledger,capability,"INCOMPATIBLE");ledger.note("teacher program rejected: selected target mismatch"); return false
+        }
         ledger.attemptedSkills += capability
-        startProgram(ledger, program.steps, skillParams(ledger), "planner", program.rationale.ifBlank { "planner program" }, capability)
+        startProgram(ledger, program.steps, params, "planner", program.rationale.ifBlank { "planner program" }, capability)
         plannerOutcome(ledger,capability,if(ledger.currentProgram.isEmpty() && ledger.done)"ACCEPTED_HELD" else "ACCEPTED_STARTED")
         return true
     }

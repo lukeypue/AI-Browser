@@ -155,7 +155,7 @@ class Planner(private val client: PlannerClient) {
 
         const val PROGRAM_INSTRUCTIONS = """You are the planning module of an on-device web agent that helps a person find marketplace listings. You never see HTML; you see a typed summary of the current page: affordances with roles, facets with canonical keys, collections and active constraints.
 Return a short program (1-6 steps) of typed steps over affordance ROLES that advances the goal from this page state. Rules:
-- task.requested_capability is the exact operation being repaired. For open_item, use RESULT_ITEM and verify PAGE_IS_DETAIL; do not substitute search or filters. Repair only that operation, or give_up.
+- task.requested_capability is the exact operation being repaired. For open_item use arg "${'$'}item" on RESULT_ITEM to keep the engine-selected listing, and verify PAGE_IS_DETAIL; do not substitute a different listing, navigation, search or filters. Repair only that operation, or give_up.
 - Ground the first action in the current page. Later steps may use controls revealed by earlier steps; each target will be checked on its live page.
 - page is the current observation. task.recent_steps describes past actions, possibly before navigation or a reset; a past VERIFIED action does not prove its effect is still present. Recheck prerequisites against the current page.
 - For TAB controls, selected:true is a positive selection signal; selected:false means no positive selection signal was observed, not proof that clicking is necessary. Use the goal and visible controls to resolve prerequisites; never infer current selection from action history alone.
