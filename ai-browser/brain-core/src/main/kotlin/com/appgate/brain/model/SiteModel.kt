@@ -85,8 +85,8 @@ data class CurriculumItem(
  * DOM: page types seen, the affordance graph, facet vocabulary, endpoint effect classes,
  * bindings, failures, curriculum progress. Contains no page content and no user data.
  */
-data class StrategyFailure(val key: String, val count: Int, val at: Long) {
-    fun toJson() = JsonObject().put("key", key).put("count", count).put("at", at)
+data class StrategyFailure(val key: String, val count: Int, val at: Long, val feedback: FailedApproach? = null) {
+    fun toJson() = JsonObject().put("key", key).put("count", count).put("at", at).also { o -> feedback?.let { o.put("feedback", it.toJson()) } }
 }
 
 class SiteModel(val host: String) {
@@ -213,7 +213,7 @@ class SiteModel(val host: String) {
             o.optArray("failures")?.objects()?.forEach { f -> FailureRecord.fromJson(f).let { m.failures[it.key] = it } }
             o.optArray("strategy_failures")?.objects()?.takeLast(64)?.forEach { f ->
                 val key = f.optString("key")
-                if (key.matches(Regex("[a-f0-9]{8,64}"))) m.strategyFailures[key] = StrategyFailure(key, f.optInt("count").coerceIn(0, 64), f.optLong("at"))
+                if (key.matches(Regex("[a-f0-9]{8,64}"))) m.strategyFailures[key] = StrategyFailure(key, f.optInt("count").coerceIn(0, 64), f.optLong("at"), FailedApproach.fromJson(f.optObject("feedback")))
             }
             o.optArray("curriculum")?.objects()?.forEach { c -> m.curriculum += CurriculumItem.fromJson(c) }
             m.learningFacetKeys += o.optStrings("learning_facets").filter { it in LEARNING_FACET_KEYS }

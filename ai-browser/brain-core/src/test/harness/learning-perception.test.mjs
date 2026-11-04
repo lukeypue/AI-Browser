@@ -12,7 +12,8 @@ after(async () => { await browser?.close(); });
 
 async function fixture(html, url = 'https://fixtures.test/search') {
   const page = await browser.newPage({viewport: {width: 412, height: 915}});
-  await page.route('**/*', route => route.fulfill({contentType: 'text/html', body: html}));
+  // Context routing also covers a popup's first request; page routing does not.
+  await page.context().route('**/*', route => route.fulfill({contentType: 'text/html', body: html}));
   await page.goto(url);
   await page.evaluate(source);
   return page;
@@ -150,6 +151,9 @@ test('manual browsing retains listing link popup behavior', async () => {
     const popupPromise = page.waitForEvent('popup');
     await page.evaluate(({obs}) => window.__brainExecute({cmd: 'click', id: obs.items[0].aff, expectedDocumentId: obs.documentId, expectedUrl: obs.url}), {obs});
     const popup = await popupPromise;
+    await popup.waitForLoadState('domcontentloaded', {timeout: 3000});
+    assert.equal(await popup.locator('a.card').count(), 3, 'popup must load the routed synthetic fixture, never the network');
+    assert.equal(popup.url(), 'https://fixtures.test/item/100001');
     assert.equal(page.url(), obs.url);
     await popup.close();
   } finally { await page.close(); }

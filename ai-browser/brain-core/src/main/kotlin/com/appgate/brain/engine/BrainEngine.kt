@@ -526,6 +526,9 @@ class BrainEngine(
         val priorFailures = strategyKey?.let { memory.site(ledger.host).strategyFailures[it]?.count } ?: 0
         // Successful admissions already have an outcome checkpoint; avoid duplicate rows.
         if (held) {
+            FailedStrategies.explainHeld(memory.site(ledger.host), strategyKey!!,
+                page?.let { FailedStrategies.approach(it, capability, ledger.currentProgram, skillParams(ledger)) })
+            memory.saveSite(memory.site(ledger.host))
             memoryCheckpoint(ledger, "STRATEGY_HELD", capability, page,
                 JsonObject().put("strategy_prior_failures", priorFailures).put("program_source",SemanticDiagnostics.programSource(source)).also{data->strategyComparison(ledger,capability,strategyKey).let{j->j.keys.forEach{data.put(it,j[it])}}})
             ledger.currentProgram = emptyList()
@@ -908,7 +911,8 @@ class BrainEngine(
         val sourceEligible = source.startsWith("skill:") || source in setOf("planner", "local")
         if (before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked && !neutral &&
             (verified || rememberFailure) && (source.startsWith("skill:") || source in setOf("planner", "local"))) {
-            FailedStrategies.record(site, strategyKey!!, verified, clock())
+            FailedStrategies.record(site, strategyKey!!, verified, clock(),
+                if(!verified) FailedStrategies.approach(before, savedCapability, ledger.currentProgram, skillParams(ledger)) else null)
             memoryCode = if (verified) "STRATEGY_SUCCESS_SAVED" else "STRATEGY_FAILURE_SAVED"
             if (verified) FailedStrategies.record(site, FailedStrategies.key(before, ledger.programCapability), true, clock())
         }
@@ -1114,7 +1118,7 @@ class BrainEngine(
         val failuresHere = site.failures.values.filter { it.pageType == sps.pageType }.sortedByDescending { it.lastAt }.take(3).map { "${it.role}${it.facetKey?.let { k -> "[$k]" } ?: ""}: ${it.reason}" }
         plannerOutcome(ledger,capability,"PROPOSAL_STARTED")
         val program = try {
-            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability)
+            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability, FailedStrategies.feedback(site, sps, capability, skillParams(ledger)))
         } catch (e: PlannerRefused) {
             plannerOutcome(ledger,capability,"REFUSED");events.log("warn", "planner refused: ${e.message}"); return false
         } catch (e: Exception) {

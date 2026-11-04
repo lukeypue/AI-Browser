@@ -253,3 +253,14 @@ The existing durable 30-to-300-second no-progress schedule also applies when a p
 ### Correlated diagnostic journeys
 
 See [DIAGNOSTIC_REPORTS.md](DIAGNOSTIC_REPORTS.md) for the optional strict schema2 event coordinates, whole-test totals, typed planner/scheduling outcomes and bounded City traces. These additions observe existing execution and do not change classifier, verifier, reward, pacing policy, permissions or signing.
+
+
+## Durable negative evidence for the teacher
+
+Concrete procedure holds now optionally carry a closed description of the ordered failed steps. The descriptor contains only step/role enums, canonical facets, submit/optional flags, bounded scroll/wait amounts and the existing sort-order contract bit. It contains no arguments, labels, queries, URLs, item identifiers, free-text reasons or postcondition values. The opaque context digest remains local; it is not sent to a provider.
+
+Only definite remembered whole-program failures populate this feedback. Neutral outcomes and planner request reservations do not. A verified success removes the existing hold and descriptor together. Legacy records still load; an exact held candidate can explain its old hold without increasing its count or changing its timestamp. Invalid optional feedback is discarded while the execution hold remains. The planner receives a bounded, deduplicated set for the current capability and relevant controls. Listing-related feedback requires the same exact target; missing or contradictory target evidence is withheld. DETAIL context uses the existing local URL identity hash.
+
+The teacher is told to avoid the rejected whole procedure while allowing shared steps in a materially different procedure. Existing execution holds, verifier/compiler evidence, pacing and request budgets remain authoritative. The change adds no provider, credential, network endpoint, retry loop or background automation. Unknown dialogs remain unverified. This is a repair-feedback improvement, not evidence of marketplace mastery or foundation-model training.
+
+The synthetic FrontierScreen regression exercises the actual engine request and a fresh file-backed memory instance. Scope regressions cover distinct items, changed controls, conflicting literal/parameter targets, malformed optional metadata, well-formed unsafe roles, verified clearing and legacy counter preservation. The normal City/core verification suite includes these controls; synthetic results remain separate from consented physical-phone evidence.

@@ -101,11 +101,61 @@ object FailedStrategies {
         return now - failure.at >= delay
     }
 
-    fun record(site: SiteModel, key: String, success: Boolean, now: Long) {
+    fun record(site: SiteModel, key: String, success: Boolean, now: Long, feedback: FailedApproach? = null) {
         if (success) site.strategyFailures.remove(key)
-        else site.strategyFailures[key] = StrategyFailure(key, ((site.strategyFailures[key]?.count ?: 0) + 1).coerceAtMost(64), now)
+        else site.strategyFailures[key] = StrategyFailure(key, ((site.strategyFailures[key]?.count ?: 0) + 1).coerceAtMost(64), now, feedback ?: site.strategyFailures[key]?.feedback)
         if (site.strategyFailures.size > MAX_RECORDS) {
             site.strategyFailures.values.sortedBy { it.at }.take(site.strategyFailures.size - MAX_RECORDS).forEach { site.strategyFailures.remove(it.key) }
+        }
+    }
+
+    private fun feedbackContext(sps:SemanticPageState,capability:String,steps:List<Step>,params:Map<String,String>):String? {
+        if(capability !in setOf("open_item","expand_description","go_back"))return key(sps,capability,emptyList(),params)
+        val stepTarget=steps.firstOrNull{it.role==Role.RESULT_ITEM}?.arg?.let {
+            if(it.startsWith("$"))params[it.drop(1)] else it
+        }
+        val taskTarget=params["item"]
+        // Execution holds keep their existing identity rules. Conflicting target
+        // evidence cannot safely explain either item to the teacher.
+        if(stepTarget!=null && taskTarget!=null && stepTarget!=taskTarget)return null
+        val explicit=stepTarget?:taskTarget
+        // A collection is not a selected target. Do not teach a broad negative when
+        // execution chose a bound item but the next repair has no exact target yet.
+        if(explicit==null && sps.pageType!=PageType.DETAIL)return null
+        return key(sps,capability,emptyList(),if(explicit==null)params else params+("item" to explicit))
+    }
+
+    /** Scope includes the concrete target, unlike the generic planner quota key. */
+    fun approach(sps: SemanticPageState, capability: String, steps: List<Step>, params: Map<String,String>): FailedApproach? {
+        if(steps.size !in 1..8 || sps.isHumanOnly)return null
+        fun ordered(p:Postcondition):Boolean=p==Postcondition.ResultOrderChanged || p is Postcondition.AnyOf && p.alternatives.any(::ordered)
+        val rows=steps.map { step ->
+            val facet=step.facetKey?.let { if(it.startsWith("$")) params[it.drop(1)] else it }
+            FailureStep(step.kind,step.role,facet(facet),step.submit,step.optional,
+                when(step.kind){StepKind.SCROLL->(step.arg?.toIntOrNull()?:900).coerceIn(-10000,10000)
+                    StepKind.WAIT->(step.arg?.toIntOrNull()?:1500).coerceIn(0,10000);else->null},
+                capability=="sort_results" && step.expect.any(::ordered))
+        }
+        val context=feedbackContext(sps,capability,steps,params)?:return null
+        val value=FailedApproach(context,rows)
+        return FailedApproach.fromJson(value.toJson())
+    }
+
+    /** Legacy failure holds remain intact; seeing the exact candidate can explain them lazily. */
+    fun explainHeld(site:SiteModel,key:String,feedback:FailedApproach?) {
+        val held=site.strategyFailures[key]?:return
+        if(held.count>0 && held.feedback==null && feedback!=null)site.strategyFailures[key]=held.copy(feedback=feedback)
+    }
+
+    fun feedback(site:SiteModel,sps:SemanticPageState,capability:String,params:Map<String,String>):List<FailedApproach> {
+        if(sps.isHumanOnly)return emptyList()
+        val context=feedbackContext(sps,capability,emptyList(),params)?:return emptyList()
+        var bytes=0
+        return site.strategyFailures.values.filter{it.count>0}.sortedByDescending{it.at}.mapNotNull{
+            FailedApproach.fromJson(it.feedback?.toJson())?.takeIf{f->f.context==context}
+        }.distinctBy{it.publicJson().toString()}.take(8).takeWhile{
+            bytes+=it.publicJson().toString().toByteArray(Charsets.UTF_8).size
+            bytes<=4096
         }
     }
 
