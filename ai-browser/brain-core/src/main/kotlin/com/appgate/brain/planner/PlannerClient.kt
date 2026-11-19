@@ -12,6 +12,7 @@ import java.util.Locale
 interface PlannerClient {
     fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int = 1200): String
     val describe: String
+    val provider: PlannerProvider? get() = null
 }
 
 /** Provider bodies may contain submitted text or credentials; they must never become an exception. */
@@ -55,6 +56,7 @@ class OpenAiResponsesClient(
     private val http: HttpTransport = HttpTransport(),
     private val observer: PlannerRequestObserver? = null
 ) : PlannerClient {
+    override val provider: PlannerProvider get() = config.provider
     override val describe: String get() = "openai/${config.resolvedModel}"
 
     override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
@@ -76,7 +78,7 @@ class OpenAiResponsesClient(
         }
         val json = request(config, http, observer, body, outputLimit, mapOf("Authorization" to "Bearer ${config.apiKey}"))
         reportUsage(config, observer, json, UsageShape.RESPONSES)
-        if (json.has("error") || json.optString("status") in setOf("incomplete", "failed", "cancelled")) throw IOException("Planner response did not complete")
+        if (json.has("error") || json.optString("status") in setOf("incomplete", "failed", "cancelled")) throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"Planner response did not complete")
         val text = json.optStringOrNull("output_text") ?: json.optArray("output")?.objects()
             ?.flatMap { it.optArray("content")?.objects().orEmpty() }
             ?.filter { it.optString("type") == "output_text" }
@@ -91,6 +93,7 @@ class OpenAiChatCompletionsClient(
     private val http: HttpTransport = HttpTransport(),
     private val observer: PlannerRequestObserver? = null
 ) : PlannerClient {
+    override val provider: PlannerProvider get() = config.provider
     override val describe: String get() = "${config.provider.name.lowercase(Locale.ROOT)}/${config.resolvedModel}"
 
     override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
@@ -112,9 +115,9 @@ class OpenAiChatCompletionsClient(
         // Provider-specific reasoning flags are deliberately omitted from the portable chat contract.
         val json = request(config, http, observer, body, maxOutputTokens, mapOf("Authorization" to "Bearer ${config.apiKey}"))
         reportUsage(config, observer, json, UsageShape.CHAT)
-        val choice = json.optArray("choices")?.objects()?.firstOrNull() ?: throw IOException("Missing planner choice")
-        val message = choice.optObject("message") ?: throw IOException("Missing planner message")
-        if (choice.optString("finish_reason") != "stop" || message.has("refusal")) throw IOException("Planner response did not complete")
+        val choice = json.optArray("choices")?.objects()?.firstOrNull() ?: throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"Missing planner choice")
+        val message = choice.optObject("message") ?: throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"Missing planner message")
+        if (choice.optString("finish_reason") != "stop" || message.has("refusal")) throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"Planner response did not complete")
         return validateJsonObject(message.optString("content"))
     }
 }
@@ -125,6 +128,7 @@ class AnthropicMessagesClient(
     private val http: HttpTransport = HttpTransport(),
     private val observer: PlannerRequestObserver? = null
 ) : PlannerClient {
+    override val provider: PlannerProvider get() = config.provider
     override val describe: String get() = "anthropic/${config.resolvedModel}"
 
     override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
@@ -138,11 +142,11 @@ class AnthropicMessagesClient(
         val json = request(config, http, observer, body, maxOutputTokens,
             mapOf("x-api-key" to config.apiKey, "anthropic-version" to "2023-06-01"))
         reportUsage(config, observer, json, UsageShape.ANTHROPIC)
-        if (json.optString("stop_reason") !in setOf("", "end_turn", "stop_sequence")) throw IOException("Planner response did not complete")
+        if (json.optString("stop_reason") !in setOf("", "end_turn", "stop_sequence")) throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"Planner response did not complete")
         val text = json.optArray("content")?.objects()?.filter { it.optString("type") == "text" }
             ?.joinToString("") { it.optString("text") }.orEmpty()
         val start = text.indexOf('{'); val end = text.lastIndexOf('}')
-        if (start < 0 || end <= start) throw IOException("No JSON object in planner output")
+        if (start < 0 || end <= start) throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"No JSON object in planner output")
         return validateJsonObject(text.substring(start, end + 1))
     }
 }
@@ -158,15 +162,19 @@ private fun request(
         http.postJson(config.resolvedEndpoint, requestBody, headers, config.connectTimeoutMs, config.readTimeoutMs)
     } catch (error: PlannerHttpException) {
         throw PlannerHttpException(error.code)
+    } catch (error: PlannerDiagnosticException) {
+        throw error
+    } catch (_: java.net.SocketTimeoutException) {
+        throw PlannerDiagnosticException(PlannerFailure.TIMEOUT,"Planner transport failed")
     } catch (_: IOException) {
-        throw IOException("Planner transport failed")
+        throw PlannerDiagnosticException(PlannerFailure.TRANSPORT,"Planner transport failed")
     }
-    return try { Json.parseObject(response) } catch (_: RuntimeException) { throw IOException("Invalid planner response") }
+    return try { Json.parseObject(response) } catch (_: RuntimeException) { throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"Invalid planner response") }
 }
 
 private fun validateJsonObject(text: String): String {
-    if (text.isBlank()) throw IOException("Empty planner output")
-    try { Json.parseObject(text) } catch (_: RuntimeException) { throw IOException("Invalid planner JSON output") }
+    if (text.isBlank()) throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"Empty planner output")
+    try { Json.parseObject(text) } catch (_: RuntimeException) { throw PlannerDiagnosticException(PlannerFailure.INVALID_RESPONSE,"Invalid planner JSON output") }
     return text
 }
 
@@ -234,8 +242,10 @@ open class HttpTransport {
             return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         } catch (error: PlannerHttpException) {
             throw error
+        } catch (_: java.net.SocketTimeoutException) {
+            throw PlannerDiagnosticException(PlannerFailure.TIMEOUT,"Planner transport failed")
         } catch (_: IOException) {
-            throw IOException("Planner transport failed")
+            throw PlannerDiagnosticException(PlannerFailure.TRANSPORT,"Planner transport failed")
         } catch (_: IllegalArgumentException) {
             throw IOException("Invalid planner transport configuration")
         } finally {

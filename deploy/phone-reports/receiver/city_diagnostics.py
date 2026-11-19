@@ -29,7 +29,7 @@ def _validate_city_diagnostics(report):
             'new_lessons':sum(e['counters'].get('new_lessons',0) for e in events if e['code']=='learning_outcome')}
         for key,count in observed.items():check(value[key]>=count and (value['events_dropped']!=0 or value[key]==count))
         return {key:value[key] for key in (*DIAGNOSTIC_COUNTS,'trace')}
-    evidence=report['diagnostics'];exact(evidence,{'schema_version','synthetic_only','scope','stage_summaries','samples','samples_truncated'}|({'learning_clinic'} if type(evidence) is dict and 'learning_clinic' in evidence else set()))
+    evidence=report['diagnostics'];exact(evidence,{'schema_version','synthetic_only','scope','stage_summaries','samples','samples_truncated'}| (set(evidence)&{'learning_clinic','planner_clinic'} if type(evidence) is dict else set()))
     check(type(evidence['schema_version']) is int and evidence['schema_version']==1 and evidence['synthetic_only'] is True and evidence['scope']=='FROZEN_EXAM_EPISODES')
     stages={}
     for pairs,before,after in [('fixed_pairs','baseline','after_training'),('unseen_pairs','unseen_baseline','unseen_after_training'),('city_pairs','city_baseline','city_after_training'),('challenge_pairs','challenge_baseline','challenge_after_training')]:
@@ -67,6 +67,24 @@ def _validate_city_diagnostics(report):
             check(type(row['diagnostic_expectation_met']) is bool and row['diagnostic_expectation_met']==observed)
             rows.append({**row,'diagnostics':d})
         result['learning_clinic']={'schema_version':1,'real_world_validated':False,'teacher_requests':0,'cases':rows}
+    if 'planner_clinic' in evidence:
+        c=evidence['planner_clinic'];exact(c,{'schema_version','synthetic_only','external_requests','cases'})
+        check(type(c['schema_version']) is int and c['schema_version']==1 and c['synthetic_only'] is True and type(c['external_requests']) is int and c['external_requests']==0)
+        expected=[('authentication','AUTHENTICATION',401),('permission','PERMISSION',403),('rate_limit','RATE_LIMIT',429),('server','SERVER',503),('timeout','TIMEOUT',0),('invalid_response','INVALID_RESPONSE',0),('unknown','UNKNOWN',0),('returned',None,0)]
+        check(type(c['cases']) is list and len(c['cases'])==len(expected))
+        for row,(case,failure,status) in zip(c['cases'],expected):
+            exact(row,{'case_id','client_calls','diagnostic_expectation_met','planner_result'})
+            check(row['case_id']==case and type(row['client_calls']) is int and 0<=row['client_calls']<=1000)
+            e=row['planner_result']
+            if e is None:
+                check(row['diagnostic_expectation_met'] is False);continue
+            check(type(e) is dict and 'site' not in e)
+            dummy={'schema_version':2,'report_id':'11111111-1111-4111-8111-111111111111','app_revision':'a'*40,'version_code':0,'started_at_utc':'2026-01-01T00:00:00Z','elapsed_ms':86400000,'flags':{'trimmed':False,'clock_changed':False,'interrupted':False},'summary':{'verified':0,'failed':0,'tasks':0,'verified_skills':0,'end_reason':'unknown'},'events':[dict(e,site='UNKNOWN')]}
+            try:validate_phone(dummy)
+            except (Failure,ValueError,TypeError,KeyError):raise ValueError('Rejected report: City planner clinic schema') from None
+            observed=row['client_calls']==1 and e['code']=='planner_outcome' and e.get('planner_outcome')==('ERROR' if failure else 'GIVE_UP') and e.get('planner_failure')==failure and e['counters'].get('http_status',0)==status
+            check(type(row['diagnostic_expectation_met']) is bool and row['diagnostic_expectation_met']==observed)
+        result['planner_clinic']=c
     return result
 
 def sanitize_city_diagnostics(report):

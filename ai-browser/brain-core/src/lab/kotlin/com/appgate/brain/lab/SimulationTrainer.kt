@@ -144,7 +144,7 @@ class SimulationTrainer {
                         .put("after_training", summary(challengeAfter.filter { it.scenario.host == host }))
                 }))
         }
-        return report.put("diagnostics",CityDiagnostics.report(diagnosticStages).put("learning_clinic",LearningDiagnosticClinic.run()))
+        return report.put("diagnostics",CityDiagnostics.report(diagnosticStages).put("learning_clinic",LearningDiagnosticClinic.run()).put("planner_clinic",PlannerDiagnosticClinic.run()))
     }
 
     companion object {

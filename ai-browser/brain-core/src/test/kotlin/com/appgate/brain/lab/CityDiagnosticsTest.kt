@@ -38,6 +38,24 @@ class CityDiagnosticsTest {
   assertEquals(10,out.optInt("events_seen"));assertEquals(4,out.optInt("events_dropped"))
  }
 
+ @Test fun equalEventBodiesAreNotMistakenForDuplicateCallbacks() {
+  val d=CityDiagnostics();repeat(100){d.diagnostic("private","task_lifecycle",com.appgate.brain.json.JsonObject())}
+  val out=d.toJson();assertEquals(6,out.optArray("trace")!!.size);assertEquals(94,out.optInt("events_dropped"))
+ }
+ @Test fun bothPinsSurviveWhenOneAlreadyOccupiesTheThirdFirstSlot() {
+  for(openingFirst in listOf(true,false)) {
+   val d=CityDiagnostics()
+   fun opening(){d.diagnostic("private","action_outcome",com.appgate.brain.json.JsonObject().put("capability","open_item").put("status","FAILED"))}
+   fun error(){d.diagnostic("private","planner_outcome",com.appgate.brain.json.JsonObject().put("planner_outcome","ERROR").put("planner_failure","AUTHENTICATION"))}
+   repeat(2){d.diagnostic("private","task_lifecycle",com.appgate.brain.json.JsonObject().put("task_sequence",it+1))}
+   if(openingFirst)opening() else error()
+   repeat(5){d.diagnostic("private","task_lifecycle",com.appgate.brain.json.JsonObject().put("task_sequence",it+10))}
+   if(openingFirst)error() else opening()
+   repeat(5){d.diagnostic("private","task_lifecycle",com.appgate.brain.json.JsonObject().put("task_sequence",it+20))}
+   val trace=d.toJson().optArray("trace")!!.objects()
+   assertEquals(6,trace.size);assertTrue(trace.any{it.optString("capability")=="open_item"});assertTrue(trace.any{it.optString("planner_failure")=="AUTHENTICATION"})
+  }
+ }
  @Test fun terminalUnknownDoesNotCollapseDifferentFailedCauses() {
   val base=SimulationTrainer().episode(SimulationTrainer.evaluationCases("practice.sim.invalid",1000).first(),emptyMap())
   val rows=listOf("NO_TARGET","NO_TARGET","UNMET_EXPECTATION").mapIndexed{index,code->

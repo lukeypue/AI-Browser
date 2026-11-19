@@ -6,16 +6,19 @@ import com.appgate.brain.json.*
 /** Actual engine callbacks; bounded first/last samples, exact streaming counts. No extra browser/AI calls. */
 class CityDiagnostics:EngineEvents {
  private val started=System.nanoTime()
- private val first=mutableListOf<JsonObject>()
- private val last=java.util.ArrayDeque<JsonObject>()
- private var opening:JsonObject?=null
+ private val first=mutableListOf<Pair<Int,JsonObject>>()
+ private val last=java.util.ArrayDeque<Pair<Int,JsonObject>>()
+ private var opening:Pair<Int,JsonObject>?=null
+ private var plannerFailure:Pair<Int,JsonObject>?=null
  private val counts=KEYS.associateWith{0}.toMutableMap()
  override fun diagnostic(host:String,kind:String,data:JsonObject) {
   val e=PhoneReportExporter.projectEvent(kind,data)?:return
   e.put("elapsed_ms",((System.nanoTime()-started)/1_000_000L).coerceIn(0,86_400_000L))
   fun inc(key:String,by:Int=1){counts[key]=((counts[key]?:0)+by).coerceAtMost(1_000_000)}
   inc("events_seen")
-  if(kind=="action_outcome" && e.optString("capability")=="open_item" && opening==null)opening=e
+  val row=counts.getValue("events_seen") to e
+  if(kind=="planner_outcome" && e.optString("planner_outcome")=="ERROR" && plannerFailure==null)plannerFailure=row
+  if(kind=="action_outcome" && e.optString("capability")=="open_item" && opening==null)opening=row
   if(kind=="action_outcome")when(e.optString("status")){"VERIFIED"->inc("action_verified");"FAILED"->inc("action_failed")}
   if(kind=="memory_checkpoint") {
    if(e.optObject("counters")?.optInt("outcome_neutral")==1)inc("neutral_programs")
@@ -23,11 +26,12 @@ class CityDiagnostics:EngineEvents {
   }
   if(kind=="planner_outcome" && e.optString("planner_outcome")=="ERROR")inc("planner_errors")
   if(kind=="learning_outcome")inc("new_lessons",e.optObject("counters")?.optInt("new_lessons")?.coerceIn(0,11)?:0)
-  if(first.size<3)first+=e else {last.addLast(e);if(last.size>3)last.removeFirst()}
+  if(first.size<3)first+=row else {last.addLast(row);if(last.size>3)last.removeFirst()}
  }
  fun toJson():JsonObject {
-  val ordinary=first+last.toList()
-  val trace=if(opening!=null && ordinary.none{it===opening}) first.take(2)+listOf(opening!!)+last.toList() else ordinary
+  val protectedRows=(listOfNotNull(opening,plannerFailure)+last.toList()).distinctBy{it.first}
+  val protectedOrdinals=protectedRows.map{it.first}.toSet()
+  val trace=(protectedRows+first.filter{it.first !in protectedOrdinals}.take((6-protectedRows.size).coerceAtLeast(0))).sortedBy{it.first}.map{it.second}
   val out=JsonObject()
   KEYS.forEach{out.put(it,if(it=="events_dropped")counts.getValue("events_seen")-trace.size else counts.getValue(it))}
   return out.put("trace",JsonArray(trace))

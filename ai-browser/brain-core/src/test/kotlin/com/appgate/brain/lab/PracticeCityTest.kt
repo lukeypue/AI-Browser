@@ -9,6 +9,8 @@ import com.appgate.brain.perception.SpsParser
 class PracticeCityTest {
     @Test fun experimentIncludesSeparateExpandedCityExamsWithoutReplacingTheOriginalExam() {
         val report = SimulationTrainer().experiment(10)
+        assertNotNull("City reports must exercise actual engine failure reporting",report.optObject("diagnostics")!!.optObject("planner_clinic"))
+        java.io.File("build/reports/planner-clinic-fixture.json").apply{parentFile.mkdirs();writeText(report.toString())}
         assertNotNull("The larger city needs its own reproducible exam manifest", report.optObject("city_manifest"))
         assertEquals(24, report.optObject("baseline")!!.optInt("episodes"))
         assertEquals(144, report.optObject("city_baseline")!!.optInt("episodes"))

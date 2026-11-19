@@ -38,6 +38,7 @@ class PlannerRefused(message: String) : RuntimeException(message)
  * must exist on the page and the effect class comes from perception, not from the plan.
  */
 class Planner(private val client: PlannerClient) {
+    val diagnosticProvider:String get()=client.provider?.name?:"UNKNOWN"
 
     fun proposeProgram(goal: Goal, sps: SemanticPageState, ledger: TaskLedger, retrievedSkills: List<Skill>, failuresHere: List<String>, siteQuirks: Set<String>, requestedCapability: String = "", heldApproaches: List<com.appgate.brain.model.FailedApproach> = emptyList()): PlannerProgram {
         if (sps.isHumanOnly) throw PlannerRefused("auth or challenge state is never sent to a model")

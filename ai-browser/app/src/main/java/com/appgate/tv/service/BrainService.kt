@@ -399,11 +399,11 @@ class BrainService : Service() {
         main.removeCallbacks(testDeadline)
         main.removeCallbacks(liveHeartbeat)
         val result = run.finish(android.os.SystemClock.elapsedRealtime(), reason)
-        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses, ${result.newLessons} new lessons. Repeated uses are not new lessons. Save diagnostics for review."
+        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses, ${result.newLessons} new lessons. Repeated uses are not new lessons. Save diagnostics for review." + if((result.plannerFailureCounts["planner_auth_errors"]?:0)>0) " AI repair authentication was rejected; check the selected AI planner connection." else ""
         getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", false).putString("test_summary", summary).apply()
         diagnostics.event("learning_test_end", extra = JsonObject().put("reason", reason).put("elapsed_ms", result.elapsedMs)
             .put("tasks", result.tasks).put("verified_actions", result.verified).put("failed_actions", result.failed).put("verified_procedure_uses", result.verifiedSkills).put("new_lessons",result.newLessons)
-            .put("neutral_programs",result.neutralPrograms).put("held_programs",result.heldPrograms).put("planner_errors",result.plannerErrors).put("diagnostic_events",result.diagnosticEvents))
+            .put("neutral_programs",result.neutralPrograms).put("held_programs",result.heldPrograms).put("planner_errors",result.plannerErrors).put("diagnostic_events",result.diagnosticEvents).also{data->result.plannerFailureCounts.forEach{(key,value)->data.put(key,value)}})
         diagnostics.completePhoneTest(interrupted = reason == "service ended")
         releaseWakeLock()
         if (stop) {

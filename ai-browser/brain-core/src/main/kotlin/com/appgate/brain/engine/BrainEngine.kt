@@ -1129,12 +1129,14 @@ class BrainEngine(
         events.status("Thinking about this page…")
         val failuresHere = site.failures.values.filter { it.pageType == sps.pageType }.sortedByDescending { it.lastAt }.take(3).map { "${it.role}${it.facetKey?.let { k -> "[$k]" } ?: ""}: ${it.reason}" }
         plannerOutcome(ledger,capability,"PROPOSAL_STARTED")
+        val plannerStartedNanos=System.nanoTime()
         val program = try {
             planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability, FailedStrategies.feedback(site, sps, capability, params))
         } catch (e: PlannerRefused) {
-            plannerOutcome(ledger,capability,"REFUSED");events.log("warn", "planner refused: ${e.message}"); return false
+            plannerOutcome(ledger,capability,"REFUSED",com.appgate.brain.planner.PlannerFailureDiagnostics.metadata(e,planner.diagnosticProvider,(System.nanoTime()-plannerStartedNanos)/1_000_000));events.log("warn", "planner refused"); return false
         } catch (e: Exception) {
-            plannerOutcome(ledger,capability,"ERROR");events.log("warn", "planner error: ${e.javaClass.simpleName}: ${e.message?.take(120)}"); ledger.plannerFailures++; return false
+            val failure=com.appgate.brain.planner.PlannerFailureDiagnostics.metadata(e,planner.diagnosticProvider,(System.nanoTime()-plannerStartedNanos)/1_000_000)
+            plannerOutcome(ledger,capability,"ERROR",failure);events.log("warn", "planner error: ${failure.optString("planner_failure")}"); ledger.plannerFailures++; return false
         }
         if (program.vocabulary.isNotEmpty()) { site.facetVocabulary.putAll(program.vocabulary); memory.saveSite(site) }
         memory.recordPlannerLabel(site.host, JsonObject().put("page", sps.pageType.name).put("reason", reason.take(80)).put("steps", program.steps.size).put("conf", program.confidence).put("at", clock()))
@@ -1223,8 +1225,8 @@ class BrainEngine(
         ledger.diagnosticEnded=true
         events.diagnostic(ledger.host,"task_lifecycle",SemanticDiagnostics.journey(ledger).put("status",ledger.status.name).put("lesson",SemanticDiagnostics.capability(ledger.lesson)))
     }
-    private fun plannerOutcome(ledger:TaskLedger,capability:String,outcome:String) {
-        events.diagnostic(ledger.host,"planner_outcome",SemanticDiagnostics.journey(ledger).put("planner_outcome",outcome)
+    private fun plannerOutcome(ledger:TaskLedger,capability:String,outcome:String,details:JsonObject?=null) {
+        events.diagnostic(ledger.host,"planner_outcome",SemanticDiagnostics.journey(ledger).also{data->details?.keys?.forEach{key->data.put(key,details[key])}}.put("planner_outcome",outcome)
             .put("capability",SemanticDiagnostics.capability(capability)).put("lesson",SemanticDiagnostics.capability(ledger.lesson)))
     }
     private val memoryDiagnosticSites = mutableSetOf<String>()

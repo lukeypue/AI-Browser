@@ -30,9 +30,11 @@ JOURNEY_ENUMS={
  'before_page_type':PAGES|{'NOT_OBSERVED'},'after_page_type':PAGES|{'NOT_OBSERVED'},
  'before_settle':{'IDLE','BUSY','UNKNOWN','NOT_OBSERVED'},'after_settle':{'IDLE','BUSY','UNKNOWN','NOT_OBSERVED'},
  'program_source':{'SKILL','COMPILED','PLANNER','LOCAL','NAVIGATE','NONE','UNKNOWN'},
+ 'planner_provider':{'OPENAI','ANTHROPIC','OPENAI_COMPATIBLE','GROQ','GEMINI','UNKNOWN'},
+ 'planner_failure':{'AUTHENTICATION','PERMISSION','RATE_LIMIT','SERVER','HTTP_OTHER','TIMEOUT','TRANSPORT','INVALID_RESPONSE','BUDGET','REFUSED','UNKNOWN'},
  'planner_outcome':{'LOCAL_REPAIR','UNAVAILABLE','TASK_BUDGET','STATE_LIMIT','REPAIR_COOLDOWN','PROPOSAL_STARTED','PROPOSAL_RETURNED','REFUSED','ERROR','NEEDS_HUMAN','GIVE_UP','EMPTY','LOW_CONFIDENCE','INCOMPATIBLE','ACCEPTED_STARTED','ACCEPTED_HELD','UNKNOWN'}}
-SUMMARY_V2={'new_lessons','neutral_programs','held_programs','planner_errors','diagnostic_events'}
-COUNTERS_V2|={'task_sequence','program_sequence','action_sequence','rehearsal','neutral_scroll_only','prerequisite_only','lesson_attempted','lesson_done','no_progress_retries','cooldown_remaining_ms','strategy_key_same','detail_controls','dialog_open','scroll_y','scroll_height','viewport_height'}
+SUMMARY_V2={'planner_auth_errors','planner_permission_errors','planner_rate_errors','planner_server_errors','planner_transport_errors','planner_response_errors','planner_budget_errors','planner_other_errors','new_lessons','neutral_programs','held_programs','planner_errors','diagnostic_events'}
+COUNTERS_V2|={'http_status','planner_elapsed_ms','task_sequence','program_sequence','action_sequence','rehearsal','neutral_scroll_only','prerequisite_only','lesson_attempted','lesson_done','no_progress_retries','cooldown_remaining_ms','strategy_key_same','detail_controls','dialog_open','scroll_y','scroll_height','viewport_height'}
 
 class Failure(Exception):
  def __init__(self,status=400):self.status=status
@@ -79,6 +81,7 @@ def validate(r):
         for key,allowed in [('code',CODES_V2 if version==2 else CODES),('site',SITES),('page_type',PAGES),('status',STATUSES_V2 if version==2 else STATUSES),('phase',PHASES),('diagnostic_code',DIAGNOSTICS_V2 if version==2 else DIAGNOSTICS)]:check(type(event[key]) is str and event[key] in allowed)
         integer(event['elapsed_ms'],r['elapsed_ms']);check(event['elapsed_ms']>=previous);previous=event['elapsed_ms']
         check(type(event['counters']) is dict and set(event['counters'])<=(COUNTERS_V2 if version==2 else COUNTERS))
+        if 'http_status' in event['counters']:check(type(event['counters']['http_status']) is int and 100<=event['counters']['http_status']<=599)
         for key,value in event['counters'].items():integer(value,1 if key in {'rehearsal','neutral_scroll_only','prerequisite_only','lesson_attempted','lesson_done','strategy_key_same','dialog_open'} else 1000000)
     check(len(canonical(r))<=LIMIT,413)
     return r
