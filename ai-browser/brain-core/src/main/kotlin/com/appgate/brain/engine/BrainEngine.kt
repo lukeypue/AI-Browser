@@ -298,6 +298,7 @@ class BrainEngine(
         ledger.cursor = 0
         val runStarted = System.nanoTime()
         val elapsedBefore = ledger.elapsedMs
+        val remainingWallMs = { ledger.goal.budget.wallMs - elapsedBefore - (System.nanoTime() - runStarted) / 1_000_000L }
         val profile = SiteProfiles.forHost(ledger.host) ?: SiteProfiles.generic(ledger.host)
         val site = memory.site(ledger.host)
         lessonsBefore = site.curriculum.filter { it.done }.map { it.id }.toSet()
@@ -403,7 +404,7 @@ class BrainEngine(
                 // Continue an in-flight program before asking the policy again.
                 if (ledger.currentProgram.isNotEmpty() && ledger.cursor < ledger.currentProgram.size) {
                     if (dismissBlockingPrerequisite(ledger, sps, site, profile, executor, effectiveMode)) continue
-                    runProgramStep(ledger, sps, site, profile, executor, effectiveMode)
+                    runProgramStep(ledger, sps, site, profile, executor, effectiveMode, remainingWallMs)
                     consecutiveNoAction = 0
                     continue
                 }
@@ -651,7 +652,7 @@ class BrainEngine(
         return true
     }
 
-    private fun runProgramStep(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode) {
+    private fun runProgramStep(ledger: TaskLedger, sps: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode, remainingWallMs: () -> Long) {
         if (programBefore == null) { programBefore = sps; ledger.programPage = sps.pageType }
         val step = ledger.currentProgram[ledger.cursor]
         if (!ProgressSupervisor.permit(ledger, sps, step)) {
@@ -664,7 +665,7 @@ class BrainEngine(
             is GroundingOutcome.Missing -> {
                 missingStep(ledger, sps, site, step, "no_target")
             }
-            is GroundingOutcome.Ready -> executeGrounded(ledger, sps, site, profile, executor, mode, g.grounded, retriesLeft = 2)
+            is GroundingOutcome.Ready -> executeGrounded(ledger, sps, site, profile, executor, mode, g.grounded, retriesLeft = 2, remainingWallMs = remainingWallMs)
         }
     }
 
@@ -677,7 +678,7 @@ class BrainEngine(
         return skill.origin != com.appgate.brain.model.SkillOrigin.BUILTIN && ("verified_v2" in skill.tags || "demonstrated_candidate_v2" in skill.tags)
     }
 
-    private fun executeGrounded(ledger: TaskLedger, before: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode, grounded: GroundedStep, retriesLeft: Int, excludedIds: Set<String> = emptySet()) {
+    private fun executeGrounded(ledger: TaskLedger, before: SemanticPageState, site: SiteModel, profile: SiteProfile, executor: Executor, mode: EngineMode, grounded: GroundedStep, retriesLeft: Int, excludedIds: Set<String> = emptySet(), remainingWallMs: () -> Long) {
         if (ledger.actions >= ledger.goal.budget.actions || stopRequested.get()) return
         val action = grounded.action
         if (action.url != null && !allowedUrl(ledger, action.url, profile)) {
@@ -730,7 +731,7 @@ class BrainEngine(
                         val fresh = StepGrounder(site).ground(grounded.step, emptyMap(), observed, ledger.visited,
                             excluded, strict = strictGrounding(ledger))
                         if (fresh is GroundingOutcome.Ready && fresh.grounded.chosen != null) {
-                            executeGrounded(ledger, observed, site, profile, executor, mode, fresh.grounded, retriesLeft - 1, excluded)
+                            executeGrounded(ledger, observed, site, profile, executor, mode, fresh.grounded, retriesLeft - 1, excluded, remainingWallMs)
                             return
                         }
                     }
@@ -752,10 +753,50 @@ class BrainEngine(
                 var after = outcome.after
                 if (!acceptPage(ledger, after, profile)) return
                 var result = Verifier.verify(action, before, after, ledger.visited)
-                if (result.status == VerifyStatus.AMBIGUOUS) {
-                    Thread.sleep(config.ambiguousRecheckMs)
-                    runCatching { executor.observe(clock()) }.getOrNull()?.let { again -> after = again; result = Verifier.verify(action, before, after, ledger.visited) }
+                // Listing routes may show a settled loading dialog before the actual
+                // detail. Observe the original click's postconditions before another
+                // action; a dialog alone never earns detail or learning credit.
+                val openingItem = action.kind == ActionKind.CLICK && action.target?.role == Role.RESULT_ITEM
+                fun itemDeadlineExpired(): Boolean {
+                    if (!openingItem || remainingWallMs() > 0L || result.status == VerifyStatus.HUMAN_NEEDED) return false
+                    ledger.status = TaskStatus.BUDGET_EXHAUSTED
+                    ledger.terminalReason = "task wall budget exhausted while observing item outcome"
+                    memory.saveLedger(ledger)
+                    return true
                 }
+                if (itemDeadlineExpired()) return
+                var unreadableRecheck = false
+                var deferredItem = false
+                val rechecks = if (openingItem) 2 else if (result.status == VerifyStatus.AMBIGUOUS) 1 else 0
+                for (attempt in 0 until rechecks) {
+                    if (result.status in setOf(VerifyStatus.VERIFIED, VerifyStatus.HUMAN_NEEDED) ||
+                        stopRequested.get() || ledger.blocked || ledger.done) break
+                    if (itemDeadlineExpired()) return
+                    val delay = if (openingItem) minOf(config.ambiguousRecheckMs.coerceIn(0L, 2_500L), remainingWallMs().coerceAtLeast(0L)) else config.ambiguousRecheckMs
+                    Thread.sleep(delay)
+                    if (stopRequested.get()) break
+                    if (itemDeadlineExpired()) return
+                    val again = try { executor.observe(clock(), if (openingItem) remainingWallMs().coerceAtLeast(1L) else Long.MAX_VALUE) }
+                    catch (interrupted: InterruptedException) { throw interrupted }
+                    catch (_: Exception) {
+                        unreadableRecheck = openingItem
+                        result = result.copy(status = VerifyStatus.AMBIGUOUS)
+                        break
+                    }
+                    if (!acceptPage(ledger, again, profile)) return
+                    after = again
+                    deferredItem = openingItem
+                    result = Verifier.verify(action, before, after, ledger.visited)
+                    if (itemDeadlineExpired()) return
+                    if (deferredItem && result.status == VerifyStatus.VERIFIED && !Verifier.deferredItemMatches(action, before, after)) {
+                        unreadableRecheck = true
+                        result = result.copy(status = VerifyStatus.AMBIGUOUS,
+                            evidence = listOf("deferred item identity not confirmed"))
+                        break
+                    }
+                }
+                if (stopRequested.get() && result.status != VerifyStatus.HUMAN_NEEDED) return
+                if (itemDeadlineExpired()) return
                 if (!acceptPage(ledger, after, profile)) return
                 latestPage = after
                 diagnostic(ledger, before, after, grounded.step, result.status, when (result.status) {
@@ -766,16 +807,26 @@ class BrainEngine(
                 })
                 if (result.status == VerifyStatus.HUMAN_NEEDED) {
                     ledger.record(LedgerStep(clock(), ledger.phase, before.hash, stepDesc, VerifyStatus.HUMAN_NEEDED, result.evidence.joinToString("; "), ledger.programSource))
+                    if (after.challenge) site.recordChallenge(clock())
+                    ledger.status = TaskStatus.NEED_HUMAN
+                    ledger.humanReason = if (after.challenge) "This site is asking for a human verification step." else "This site needs you to sign in."
                     ledger.currentProgram = emptyList(); ledger.cursor = 0
-                    memory.saveLedger(ledger)
+                    memory.saveSite(site); memory.saveLedger(ledger)
+                    events.needHuman(ledger, ledger.humanReason, after.url)
                     return
                 }
                 val verified = result.status == VerifyStatus.VERIFIED
                 ledger.record(LedgerStep(clock(), ledger.phase, before.hash, stepDesc, result.status, result.evidence.joinToString("; ").take(300), ledger.programSource))
                 events.step(ledger, stepDesc, result.status)
                 recordEpisode(site, before, grounded, result.status, after.pageType, outcome.ms)
-                learnFromOutcome(ledger, site, before, after, grounded, verified)
-                if (verified) {
+                if (!unreadableRecheck) learnFromOutcome(ledger, site, before, after, grounded, verified)
+                if (unreadableRecheck) {
+                    // The last readable page is stale. Do not re-ground another click
+                    // or teach a negative binding/edge from this unknown outcome.
+                    finishProgram(ledger, after, site, success = false, rememberFailure = false)
+                    ledger.status = TaskStatus.PARTIAL
+                    ledger.terminalReason = "item outcome unconfirmed; waiting for a fresh opportunity"
+                } else if (verified) {
                     ledger.consecutiveFailures = 0
                     programSatisfiedSteps += ledger.cursor
                     if (grounded.action.kind != ActionKind.WAIT && verifiedChange(grounded.action, before, after))
@@ -792,7 +843,7 @@ class BrainEngine(
                     val fresh = if (retriesLeft > 0 && grounded.chosen != null && after.pageType == before.pageType && !after.dialogOpen)
                         StepGrounder(site).ground(grounded.step, emptyMap(), after, ledger.visited, excluded, strict = strictGrounding(ledger)) else null
                     if (fresh is GroundingOutcome.Ready && fresh.grounded.chosen != null) {
-                        executeGrounded(ledger, after, site, profile, executor, mode, fresh.grounded, retriesLeft - 1, excluded)
+                        executeGrounded(ledger, after, site, profile, executor, mode, fresh.grounded, retriesLeft - 1, excluded, remainingWallMs)
                         return
                     }
                     if (grounded.action.kind == ActionKind.SCROLL) ledger.scrollRoundsWithoutNew++   // exploration, not a failure

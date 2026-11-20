@@ -150,6 +150,31 @@ object Verifier {
         }
     }
 
+    /** Extra identity proof for an item whose outcome required deferred reads.
+     * A page type alone, or an unrelated blank-title detail, is not its target.
+     * Compare only local redacted observations; no identity is added to diagnostics.
+     */
+    fun deferredItemMatches(action: Action, before: SemanticPageState, after: SemanticPageState): Boolean {
+        if (after.pageType != PageType.DETAIL || before.host.removePrefix("www.") != after.host.removePrefix("www.")) return false
+        val key = action.target?.itemKey ?: return false
+        val item = before.results?.items?.singleOrNull { it.key == key } ?: return false
+        fun normalized(text: String) = Text.clean(text).lowercase(java.util.Locale.ROOT)
+            .replace(Regex("(?<=\\S)(?=[$€£])"), " ").replace(Regex("\\s+"), " ").trim()
+        val expected = normalized(item.title).takeIf { it.length >= 4 } ?: return false
+        fun namesTarget(text: String) = (" " + normalized(text) + " ").contains(" $expected ")
+        if (!namesTarget(after.title) && !namesTarget(after.detailText.take(600))) return false
+        fun path(url: String?) = url?.let { runCatching { java.net.URI(it).path.trimEnd('/') }.getOrNull() }
+        val observedPath = path(after.url)
+        val requestedPath = path(item.hrefPath)
+        val items = before.results?.items.orEmpty()
+        if (items.any { other -> other.key != key && path(other.hrefPath) != requestedPath &&
+                observedPath != null && path(other.hrefPath) == observedPath }) return false
+        val duplicatedTitle = items.count { normalized(it.title) == expected } > 1
+        val uniqueSelectedRoute = observedPath != null && observedPath != path(before.url) &&
+            observedPath == requestedPath && items.count { path(it.hrefPath) == requestedPath } == 1
+        return !duplicatedTitle || uniqueSelectedRoute
+    }
+
     private fun jaccard(a: Set<String>, b: Set<String>): Double {
         if (a.isEmpty() && b.isEmpty()) return 1.0
         val inter = a.count { it in b }

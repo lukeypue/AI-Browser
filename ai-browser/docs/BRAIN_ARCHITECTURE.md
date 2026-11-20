@@ -267,3 +267,16 @@ Only definite remembered whole-program failures populate this feedback. Neutral 
 The teacher is told to avoid the rejected whole procedure while allowing shared steps in a materially different procedure. Existing execution holds, verifier/compiler evidence, pacing and request budgets remain authoritative. The change adds no provider, credential, network endpoint, retry loop or background automation. Unknown dialogs remain unverified. This is a repair-feedback improvement, not evidence of marketplace mastery or foundation-model training.
 
 The synthetic FrontierScreen regression exercises the actual engine request and a fresh file-backed memory instance. Scope regressions cover distinct items, changed controls, conflicting literal/parameter targets, malformed optional metadata, well-formed unsafe roles, verified clearing and legacy counter preservation. The normal City/core verification suite includes these controls; synthetic results remain separate from consented physical-phone evidence.
+
+### Deferred listing outcomes
+
+After a result-item click, up to two observation-only rechecks can distinguish a delayed
+loading dialog from a verified detail. Each wait and renderer-read timeout fits within
+the existing monotonic task wall budget. Human/offsite observations remain authoritative.
+A deferred success additionally needs visible identity matching the grounded item's full
+redacted title; currency/whitespace boundaries are normalized. Duplicate visible names
+need a unique selected route. A page type alone is insufficient. Unreadable or unconfirmed
+item outcomes end the attempt neutrally without another click or negative learning.
+Ordinary search/facet verification retains its existing policy. The separate itemOutcomeClinic
+uses Chromium-generated synthetic snapshots, cold acquisition and actual file-storage reload;
+it neither changes frozen City scores nor proves a physical-phone repair.

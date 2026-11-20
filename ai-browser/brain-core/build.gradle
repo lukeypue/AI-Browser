@@ -79,3 +79,14 @@ tasks.register('facetClinic', JavaExec) {
     mainClass = 'com.appgate.brain.lab.FacetLearningClinicMainKt'
     args layout.buildDirectory.file('reports/brain/facet-clinic.json').get().asFile.absolutePath
 }
+
+// Separate delayed-item diagnostic; existing frozen exams and scores are unchanged.
+tasks.register('itemOutcomeClinic', JavaExec) {
+    group = 'verification'
+    description = 'Browser-generated delayed listing outcomes and durable reload, with no teacher.'
+    classpath = sourceSets.lab.runtimeClasspath
+    mainClass = 'com.appgate.brain.lab.ItemOutcomeClinicKt'
+    args file('src/test/fixtures/delayed_item.observation.json').absolutePath,
+        providers.gradleProperty('itemClinicMemory').getOrElse(layout.buildDirectory.dir('item-clinic-memory').get().asFile.absolutePath),
+        providers.gradleProperty('itemClinicOutput').getOrElse(layout.buildDirectory.file('reports/brain/item-outcome-clinic.json').get().asFile.absolutePath)
+}

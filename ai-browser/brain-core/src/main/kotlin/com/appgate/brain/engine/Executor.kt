@@ -79,7 +79,8 @@ class Executor(
         return ExecOutcome.Done(after, result.detail, System.currentTimeMillis() - started)
     }
 
-    fun observe(now: Long): SemanticPageState = parserFactory().parse(renderer.observe(timeouts.observeMs), now)
+    fun observe(now: Long, timeoutMs: Long = Long.MAX_VALUE): SemanticPageState =
+        parserFactory().parse(renderer.observe(minOf(timeouts.observeMs, timeoutMs.coerceAtLeast(1L))), now)
 
     companion object {
         fun command(action: Action): JsonObject {
