@@ -30,6 +30,7 @@ import java.net.URL
 class MainActivity : AppCompatActivity() {
     private lateinit var queryBox: EditText
     private lateinit var sourceSummary: TextView
+    private lateinit var plannerStatus: TextView
     private var automaticUpdateCheckStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,6 +85,8 @@ class MainActivity : AppCompatActivity() {
         keyButton.text = if (!PlannerKeyStore.teacherEnabled(this)) "AI HELP: LOCAL ONLY" else if (PlannerKeyStore.isConfigured(this)) "AI PLANNER KEY: SET" else "SET AI PLANNER KEY"
         keyButton.setOnClickListener { showPlannerDialog(keyButton) }
         column.addView(keyButton)
+        plannerStatus = Ui.text(this, com.appgate.tv.store.PlannerConnectionStore.statusText(this), 12f, Ui.muted)
+        column.addView(plannerStatus)
         column.addView(Ui.text(this, "Optional. Used only when the deterministic brain is stuck or a description needs reading for a rare detail. The key is encrypted with Android Keystore and stays on this phone. Sign-in and verification pages are never sent to the model.", 12f, Ui.muted).apply { setPadding(0, 2, 0, 8) })
 
         column.addView(Ui.text(this, "PRIVACY", 18f, Ui.text, true).apply { setPadding(0, 22, 0, 4) })
@@ -108,12 +111,17 @@ class MainActivity : AppCompatActivity() {
         column.addView(Ui.text(this, "Diagnostics contain only the brain's own semantic events (page types, control roles, verified/failed, timings). No listing text, no searches, no account data.", 12f, Ui.muted).apply { setPadding(0, 2, 0, 8) })
 
         column.addView(Ui.text(this, "What is new in $versionName", 18f, Ui.text, true).apply { setPadding(0, 20, 0, 8) })
-        column.addView(Ui.text(this, "• Repeated unfinished pagination discovery gradually waits longer: 30 seconds up to 5 minutes.\n• Real Next or Load-more controls reopen learning immediately when safely observed.\n• Discovery scrolls no longer count as a new lesson for site rotation.\n• Normal site checks still run every 30 seconds. Saved learning and the newer diagnostics features are retained.", 14f, Ui.muted))
+        column.addView(Ui.text(this, "• AI requests pause after an authentication rejection, including after restart.\n• Local skills continue while the AI connection needs attention.\n• Check AI planner settings and tap SAVE for an explicit retry.\n• Test diagnostics retain the paused reason; City checks repeated-request suppression.", 14f, Ui.muted))
 
         root.addView(column)
         setContentView(root)
 
         if (getSharedPreferences("settings", MODE_PRIVATE).getBoolean("auto_updates", true)) checkForAutomaticUpdate()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::plannerStatus.isInitialized) plannerStatus.text = com.appgate.tv.store.PlannerConnectionStore.statusText(this)
     }
 
     private fun openBrowser(url: String) {
@@ -163,6 +171,12 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 PlannerKeyStore.saveSettings(this, selected, model.text.toString(), url)
+                if (runCatching { com.appgate.tv.store.PlannerConnectionStore.get(this).allowRetry() }.isFailure) {
+                    Toast.makeText(this, "AI connection remains paused: retry state could not be saved.", Toast.LENGTH_LONG).show()
+                    plannerStatus.text = com.appgate.tv.store.PlannerConnectionStore.statusText(this)
+                    return@save
+                }
+                plannerStatus.text = com.appgate.tv.store.PlannerConnectionStore.statusText(this)
                 PlannerKeyStore.setTeacherEnabled(this, enabled.isChecked)
                 button.text = if (!enabled.isChecked) "AI HELP: LOCAL ONLY" else if (PlannerKeyStore.isConfigured(this)) "AI PLANNER KEY: SET" else "SET AI PLANNER KEY"
                 Toast.makeText(this, if (enabled.isChecked) "AI settings saved." else "Local-only mode enabled.", Toast.LENGTH_SHORT).show()

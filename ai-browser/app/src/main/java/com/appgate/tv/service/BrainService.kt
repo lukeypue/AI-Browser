@@ -342,7 +342,7 @@ class BrainService : Service() {
             getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", true).putString("test_summary", "$testMinutes-minute test running. Pauses and human review count toward the time limit.").apply()
             val run = beginTimedLearningTest(testMinutes, startedElapsed, startedWall, diagnostics::beginPhoneTest)
             timedTest = run
-            diagnostics.event("learning_test_start", extra = JsonObject().put("minutes", testMinutes))
+            diagnostics.event("learning_test_start", extra = com.appgate.tv.store.PlannerConnectionStore.get(this).diagnostic().put("minutes", testMinutes))
             main.removeCallbacks(liveHeartbeat)
             main.post(liveHeartbeat)
             main.postDelayed(testDeadline, run.remainingMs(android.os.SystemClock.elapsedRealtime()))
@@ -399,9 +399,9 @@ class BrainService : Service() {
         main.removeCallbacks(testDeadline)
         main.removeCallbacks(liveHeartbeat)
         val result = run.finish(android.os.SystemClock.elapsedRealtime(), reason)
-        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses, ${result.newLessons} new lessons. Repeated uses are not new lessons. Save diagnostics for review." + if((result.plannerFailureCounts["planner_auth_errors"]?:0)>0) " AI repair authentication was rejected; check the selected AI planner connection." else ""
+        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses, ${result.newLessons} new lessons. Repeated uses are not new lessons. Save diagnostics for review." + if((result.plannerFailureCounts["planner_auth_errors"]?:0)>0 || com.appgate.tv.store.PlannerConnectionStore.get(this).status() == com.appgate.brain.planner.PlannerConnectionStatus.AUTHENTICATION_REJECTED) " AI requests are paused after authentication rejection. Local learning continues; check AI planner settings and tap SAVE to retry." else ""
         getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", false).putString("test_summary", summary).apply()
-        diagnostics.event("learning_test_end", extra = JsonObject().put("reason", reason).put("elapsed_ms", result.elapsedMs)
+        diagnostics.event("learning_test_end", extra = com.appgate.tv.store.PlannerConnectionStore.get(this).diagnostic().put("reason", reason).put("elapsed_ms", result.elapsedMs)
             .put("tasks", result.tasks).put("verified_actions", result.verified).put("failed_actions", result.failed).put("verified_procedure_uses", result.verifiedSkills).put("new_lessons",result.newLessons)
             .put("neutral_programs",result.neutralPrograms).put("held_programs",result.heldPrograms).put("planner_errors",result.plannerErrors).put("diagnostic_events",result.diagnosticEvents).also{data->result.plannerFailureCounts.forEach{(key,value)->data.put(key,value)}})
         diagnostics.completePhoneTest(interrupted = reason == "service ended")
@@ -522,6 +522,8 @@ class BrainService : Service() {
 
     private fun plannerOrNull(): Planner? {
         if (com.appgate.tv.serverlab.ServerLabRuntime.active) return null
+        val connection = com.appgate.tv.store.PlannerConnectionStore.get(this)
+        if (connection.status() != com.appgate.brain.planner.PlannerConnectionStatus.READY) return null
         if (!PlannerKeyStore.teacherEnabled(this) || !memory.teacherBudget.snapshot(PlannerKeyStore.unrestricted(this)).allowed) return null
         val config = PlannerKeyStore.config(this) ?: return null
         val observer = com.appgate.brain.planner.BudgetedTeacher(memory.teacherBudget, { PlannerKeyStore.teacherEnabled(this) }, { PlannerKeyStore.unrestricted(this) }) { usage ->
@@ -532,7 +534,7 @@ class BrainService : Service() {
                     .put("unrestricted", PlannerKeyStore.unrestricted(this)))
             main.post { publish(state.copy()) }
         }
-        return Planner(PlannerClients.create(config, observer))
+        return Planner(com.appgate.brain.planner.AuthenticationGuardedClient(PlannerClients.create(config, observer), connection))
     }
 
     private fun runJob(block: () -> Unit) {

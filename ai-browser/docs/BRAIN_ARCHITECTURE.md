@@ -185,6 +185,9 @@ fake HTTP transport and do not consume paid API credits.
 
 ## 9. Optional teachers and local operation
 
+A real HTTP401 pauses that saved planner connection across tasks and restarts. Its content-free state is separate from website learning. The existing AI planner settings SAVE explicitly permits another attempt; test restart, master/unrestricted toggles and clock changes do not. An older in-flight failure cannot hold a newer saved generation. Local skills continue, and test-start/end metadata retains the held cause without inventing another request failure. This suppresses rejected calls; it does not repair the provider credentials.
+
+
 The Android app exposes OpenAI, Anthropic, Groq, Gemini and an HTTPS OpenAI-compatible
 Chat Completions endpoint. A blank model field selects an economical documented default;
 explicit model selections are retained. There are no hidden model fallbacks. Local-only

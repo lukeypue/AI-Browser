@@ -173,6 +173,7 @@ class LearningActivity : ServiceBoundActivity() {
             if (enabled && !com.appgate.tv.store.PlannerKeyStore.isConfigured(this@LearningActivity)) append("\nSet an AI planner key on the home screen to use AI help.")
             if (usage.lastModel.isNotBlank()) append("\nLast model: ${usage.lastModel}")
             if (enabled && !usage.allowed) append("\n${usage.reason}")
+            if (enabled && com.appgate.tv.store.PlannerConnectionStore.get(this@LearningActivity).status() != com.appgate.brain.planner.PlannerConnectionStatus.READY) append("\n" + com.appgate.tv.store.PlannerConnectionStore.statusText(this@LearningActivity))
         }
         progress.removeAllViews()
         SiteProfiles.training.forEach { profile ->
