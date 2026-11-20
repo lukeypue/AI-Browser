@@ -7,10 +7,10 @@ import java.nio.file.Files
 
 class PlannerConnectionStoreTest {
  private fun reject(h:PlannerAuthenticationHold){
-  val c=AuthenticationGuardedClient(object:PlannerClient{
+  val c=AuthenticationGuardedClient.create(h){object:PlannerClient{
    override val describe="fixture"
    override fun complete(instructions:String,input:String,schemaName:String,schema:JsonObject,maxOutputTokens:Int):String=throw PlannerHttpException(401)
-  },h)
+  }}!!
   assertTrue(runCatching{c.complete("","","test",JsonObject())}.isFailure)
  }
  @Test fun uiAndServiceShareAHoldOutsideLearnedMemory(){

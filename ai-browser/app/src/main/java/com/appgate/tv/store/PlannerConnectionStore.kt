@@ -13,9 +13,12 @@ object PlannerConnectionStore {
     @Synchronized internal fun forDirectory(files: File): PlannerAuthenticationHold = stores.getOrPut(files.canonicalPath) {
         PlannerAuthenticationHold(FileBrainStorage(File(files, "planner-connection")))
     }
-    fun statusText(context: Context): String = when (get(context).status()) {
+    fun statusText(context: Context): String {
+        if (!PlannerKeyStore.teacherEnabled(context)) return "Local-only mode. No new AI requests."
+        return when (get(context).status()) {
         PlannerConnectionStatus.READY -> "AI connection ready to try; provider access is checked on the next request."
         PlannerConnectionStatus.AUTHENTICATION_REJECTED -> "AI requests paused after authentication rejection (401). Local learning continues. Check AI planner settings and tap SAVE to retry."
         PlannerConnectionStatus.STORAGE_UNAVAILABLE -> "AI connection state needs repair. Local learning continues. Save AI planner settings to retry."
+    }
     }
 }

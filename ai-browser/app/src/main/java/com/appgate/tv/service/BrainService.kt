@@ -399,7 +399,7 @@ class BrainService : Service() {
         main.removeCallbacks(testDeadline)
         main.removeCallbacks(liveHeartbeat)
         val result = run.finish(android.os.SystemClock.elapsedRealtime(), reason)
-        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses, ${result.newLessons} new lessons. Repeated uses are not new lessons. Save diagnostics for review." + if((result.plannerFailureCounts["planner_auth_errors"]?:0)>0 || com.appgate.tv.store.PlannerConnectionStore.get(this).status() == com.appgate.brain.planner.PlannerConnectionStatus.AUTHENTICATION_REJECTED) " AI requests are paused after authentication rejection. Local learning continues; check AI planner settings and tap SAVE to retry." else ""
+        val summary = "Test ended ($reason) after ${result.elapsedMs / 60_000} minutes: ${result.tasks} completed attempts, ${result.verified} verified actions, ${result.failed} failed actions, ${result.verifiedSkills} verified procedure uses, ${result.newLessons} new lessons. Repeated uses are not new lessons. Save diagnostics for review." + com.appgate.tv.store.PlannerConnectionUi.testSummaryNote(com.appgate.tv.store.PlannerConnectionStore.get(this).status(), result.plannerFailureCounts["planner_auth_errors"] ?: 0, PlannerKeyStore.teacherEnabled(this))
         getSharedPreferences("brain_jobs", MODE_PRIVATE).edit().putBoolean("test_running", false).putString("test_summary", summary).apply()
         diagnostics.event("learning_test_end", extra = com.appgate.tv.store.PlannerConnectionStore.get(this).diagnostic().put("reason", reason).put("elapsed_ms", result.elapsedMs)
             .put("tasks", result.tasks).put("verified_actions", result.verified).put("failed_actions", result.failed).put("verified_procedure_uses", result.verifiedSkills).put("new_lessons",result.newLessons)
@@ -521,20 +521,22 @@ class BrainService : Service() {
     }
 
     private fun plannerOrNull(): Planner? {
-        if (com.appgate.tv.serverlab.ServerLabRuntime.active) return null
+        if (com.appgate.tv.serverlab.ServerLabRuntime.active || !PlannerKeyStore.teacherEnabled(this)) return null
         val connection = com.appgate.tv.store.PlannerConnectionStore.get(this)
-        if (connection.status() != com.appgate.brain.planner.PlannerConnectionStatus.READY) return null
-        if (!PlannerKeyStore.teacherEnabled(this) || !memory.teacherBudget.snapshot(PlannerKeyStore.unrestricted(this)).allowed) return null
-        val config = PlannerKeyStore.config(this) ?: return null
-        val observer = com.appgate.brain.planner.BudgetedTeacher(memory.teacherBudget, { PlannerKeyStore.teacherEnabled(this) }, { PlannerKeyStore.unrestricted(this) }) { usage ->
-            diagnostics.event("teacher_usage", "", "AI requests=${usage.requests24h} reported=${usage.reportedRequests}",
-                JsonObject().put("requests_24h", usage.requests24h).put("requests_hour", usage.requestsHour)
-                    .put("input_tokens", usage.inputTokens).put("output_tokens", usage.outputTokens)
-                    .put("reported_requests", usage.reportedRequests).put("model", usage.lastModel)
-                    .put("unrestricted", PlannerKeyStore.unrestricted(this)))
-            main.post { publish(state.copy()) }
-        }
-        return Planner(com.appgate.brain.planner.AuthenticationGuardedClient(PlannerClients.create(config, observer), connection))
+        if (connection.status() != com.appgate.brain.planner.PlannerConnectionStatus.READY || !memory.teacherBudget.snapshot(PlannerKeyStore.unrestricted(this)).allowed) return null
+        val client = com.appgate.brain.planner.AuthenticationGuardedClient.create(connection) {
+            val config = PlannerKeyStore.config(this) ?: return@create null
+            val observer = com.appgate.brain.planner.BudgetedTeacher(memory.teacherBudget, { PlannerKeyStore.teacherEnabled(this) }, { PlannerKeyStore.unrestricted(this) }) { usage ->
+                diagnostics.event("teacher_usage", "", "AI requests=${usage.requests24h} reported=${usage.reportedRequests}",
+                    JsonObject().put("requests_24h", usage.requests24h).put("requests_hour", usage.requestsHour)
+                        .put("input_tokens", usage.inputTokens).put("output_tokens", usage.outputTokens)
+                        .put("reported_requests", usage.reportedRequests).put("model", usage.lastModel)
+                        .put("unrestricted", PlannerKeyStore.unrestricted(this)))
+                main.post { publish(state.copy()) }
+            }
+            PlannerClients.create(config, observer)
+        } ?: return null
+        return Planner(client)
     }
 
     private fun runJob(block: () -> Unit) {

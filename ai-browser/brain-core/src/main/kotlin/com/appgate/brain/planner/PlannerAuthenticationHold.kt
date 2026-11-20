@@ -79,8 +79,7 @@ class PlannerAuthenticationHold(private val storage: BrainStorage) {
 }
 
 /** Gate before delegate accounting/transport, preserving the actual first error and provider. */
-class AuthenticationGuardedClient(private val delegate: PlannerClient, private val hold: PlannerAuthenticationHold) : PlannerClient {
-    private val ticket = hold.ticket()
+class AuthenticationGuardedClient private constructor(private val delegate: PlannerClient, private val hold: PlannerAuthenticationHold, private val ticket: String?) : PlannerClient {
     override val describe: String get() = delegate.describe
     override val provider: PlannerProvider? get() = delegate.provider
     override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
@@ -91,4 +90,13 @@ class AuthenticationGuardedClient(private val delegate: PlannerClient, private v
             throw error
         }
     }
+    companion object {
+        /** Capture identity before reading settings, not after creating a client with possibly old credentials. */
+        fun create(hold: PlannerAuthenticationHold, factory: () -> PlannerClient?): AuthenticationGuardedClient? {
+            val ticket = hold.ticket()
+            val delegate = factory() ?: return null
+            return AuthenticationGuardedClient(delegate, hold, ticket)
+        }
+    }
+
 }

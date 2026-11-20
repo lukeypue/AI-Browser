@@ -30,7 +30,7 @@ object PlannerDiagnosticClinic {
      return """{"steps":[],"confidence":0.9,"give_up":true,"rationale":"synthetic"}"""
     }
    }
-   val activeClient=if(kind=="authentication")AuthenticationGuardedClient(client,PlannerAuthenticationHold(authenticationState))else client
+   val activeClient=if(kind=="authentication")AuthenticationGuardedClient.create(PlannerAuthenticationHold(authenticationState)){client}!!else client
    val events=object:EngineEvents {
     override fun diagnostic(host:String,kind:String,data:JsonObject) {
      if(kind=="planner_outcome" && data.optString("planner_outcome") in setOf("ERROR","GIVE_UP")) {
@@ -54,7 +54,7 @@ object PlannerDiagnosticClinic {
  /** Fake-client control: a fresh state reader must suppress two repeats after the first rejection. */
  fun authenticationRetryHeld(client:PlannerClient,storage:BrainStorage):Boolean {
   val reloaded=PlannerAuthenticationHold(storage)
-  val guarded=AuthenticationGuardedClient(client,reloaded)
+  val guarded=AuthenticationGuardedClient.create(reloaded){client}!!
   val attempts=List(2){runCatching{guarded.complete("synthetic","{}","test",JsonObject())}.exceptionOrNull() is PlannerRefused}
   return reloaded.status()==PlannerConnectionStatus.AUTHENTICATION_REJECTED && attempts.all{it}
  }

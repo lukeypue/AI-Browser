@@ -156,6 +156,14 @@ class MainActivity : AppCompatActivity() {
             .setMessage("Local skills run first. AI help normally allows ${TeacherBudget.HOURLY_LIMIT} requests per hour and ${TeacherBudget.DAILY_LIMIT} per 24 hours, shared across searches and learning. Overnight Learning has optional unrestricted regular and smarter AI boxes that remove these app caps. Turn help off for zero API calls. Keys are stored encrypted. Each provider has its own billing and data terms.")
             .setView(container)
             .setPositiveButton("SAVE") save@ { _, _ ->
+                val chosenEnabled = enabled.isChecked
+                com.appgate.tv.store.PlannerConnectionUi.applyDisableSelection(chosenEnabled) {
+                    PlannerKeyStore.setTeacherEnabled(this, it)
+                }
+                if (!chosenEnabled) {
+                    button.text = "AI HELP: LOCAL ONLY"
+                    plannerStatus.text = com.appgate.tv.store.PlannerConnectionStore.statusText(this)
+                }
                 val key = input.text?.toString().orEmpty().trim()
                 val selected = providers[provider.selectedItemPosition]
                 val url = endpoint.text.toString().trim()
@@ -165,20 +173,20 @@ class MainActivity : AppCompatActivity() {
                 if (key.isBlank() && PlannerKeyStore.isConfigured(this) && (selected != oldProvider || url != oldEndpoint)) {
                     Toast.makeText(this, "Paste the key for the new provider or endpoint.", Toast.LENGTH_LONG).show(); return@save
                 }
-                if (key.isNotBlank()) {
-                    if (runCatching { PlannerKeyStore.save(this, key) }.isFailure) {
-                        Toast.makeText(this, "Could not save the key.", Toast.LENGTH_LONG).show(); return@save
-                    }
+                val saved = com.appgate.tv.store.PlannerConnectionUi.applySettings(chosenEnabled,
+                    { PlannerKeyStore.setTeacherEnabled(this, it) }) {
+                    if (key.isNotBlank()) PlannerKeyStore.save(this, key)
+                    PlannerKeyStore.saveSettings(this, selected, model.text.toString(), url)
+                    com.appgate.tv.store.PlannerConnectionStore.get(this).allowRetry()
                 }
-                PlannerKeyStore.saveSettings(this, selected, model.text.toString(), url)
-                if (runCatching { com.appgate.tv.store.PlannerConnectionStore.get(this).allowRetry() }.isFailure) {
-                    Toast.makeText(this, "AI connection remains paused: retry state could not be saved.", Toast.LENGTH_LONG).show()
+                if (saved.isFailure) {
+                    button.text = if (!PlannerKeyStore.teacherEnabled(this)) "AI HELP: LOCAL ONLY" else "AI PLANNER KEY: SET"
                     plannerStatus.text = com.appgate.tv.store.PlannerConnectionStore.statusText(this)
+                    Toast.makeText(this, "Could not save AI connection settings.", Toast.LENGTH_LONG).show()
                     return@save
                 }
                 plannerStatus.text = com.appgate.tv.store.PlannerConnectionStore.statusText(this)
-                PlannerKeyStore.setTeacherEnabled(this, enabled.isChecked)
-                button.text = if (!enabled.isChecked) "AI HELP: LOCAL ONLY" else if (PlannerKeyStore.isConfigured(this)) "AI PLANNER KEY: SET" else "SET AI PLANNER KEY"
+                button.text = if (!PlannerKeyStore.teacherEnabled(this)) "AI HELP: LOCAL ONLY" else if (PlannerKeyStore.isConfigured(this)) "AI PLANNER KEY: SET" else "SET AI PLANNER KEY"
                 Toast.makeText(this, if (enabled.isChecked) "AI settings saved." else "Local-only mode enabled.", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("CANCEL", null)

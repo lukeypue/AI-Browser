@@ -11,8 +11,12 @@ import java.nio.file.Files
 
 class PlannerAuthenticationHoldTest {
  private fun call(c:PlannerClient)=runCatching{c.complete("private-instructions","private-input","test",JsonObject())}.exceptionOrNull()
- private fun client(h:PlannerAuthenticationHold,b:TeacherBudget,http:HttpTransport):PlannerClient =
-  AuthenticationGuardedClient(PlannerClients.create(PlannerConfig(apiKey="fixture-placeholder"),BudgetedTeacher(b,{true},{true}),http),h)
+ private fun client(h:PlannerAuthenticationHold,b:TeacherBudget,http:HttpTransport,beforeWrapping:()->Unit={}):PlannerClient =
+  AuthenticationGuardedClient.create(h){
+   val config=PlannerConfig(apiKey="fixture-placeholder")
+   beforeWrapping()
+   PlannerClients.create(config,BudgetedTeacher(b,{true},{true}),http)
+  }!!
  private class Response(var status:Int=401):HttpTransport(){
   var calls=0
   override fun postJson(url:String,body:String,headers:Map<String,String>,connectTimeoutMs:Int,readTimeoutMs:Int):String{
@@ -96,7 +100,7 @@ class PlannerAuthenticationHoldTest {
  }
  @Test fun masterOffStillPreventsTheFirstTransport(){
   val h=PlannerAuthenticationHold(InMemoryStorage());val b=TeacherBudget(InMemoryStorage());val http=Response(200)
-  val c=AuthenticationGuardedClient(PlannerClients.create(PlannerConfig(apiKey="fixture"),BudgetedTeacher(b,{false},{true}),http),h)
+  val c=AuthenticationGuardedClient.create(h){PlannerClients.create(PlannerConfig(apiKey="fixture"),BudgetedTeacher(b,{false},{true}),http)}!!
   assertTrue(call(c) is TeacherBudgetExceeded);assertEquals(0,http.calls);assertEquals(PlannerConnectionStatus.READY,h.status())
  }
  @Test fun heldReasonSurvivesAllowlistedTestBoundaryWithoutInventingARequest(){
@@ -123,6 +127,14 @@ class PlannerAuthenticationHoldTest {
   assertEquals(PlannerConnectionStatus.AUTHENTICATION_REJECTED,hold.status())
   assertEquals(PlannerConnectionStatus.AUTHENTICATION_REJECTED,PlannerAuthenticationHold(storage).status())
   assertNotNull(call(client(hold,budget,http)));assertEquals(1,calls)
+ }
+
+ @Test fun settingsSavedDuringClientConstructionCannotAuthorizeOldConfig(){
+  val hold=PlannerAuthenticationHold(InMemoryStorage());val budget=TeacherBudget(InMemoryStorage());val http=Response()
+  val stale=client(hold,budget,http){hold.allowRetry()}
+  assertNotNull(call(stale));assertEquals(0,http.calls);assertEquals(0,budget.snapshot(true).requests24h)
+  assertEquals(PlannerConnectionStatus.READY,hold.status())
+  http.status=200;assertNull(call(client(hold,budget,http)));assertEquals(1,http.calls)
  }
 
 }
