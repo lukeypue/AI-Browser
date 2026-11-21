@@ -6,3 +6,5 @@ Use generic semantic/geometry evidence to exclude a docked nonmodal landmark ban
 Alternatives: longer waiting cannot repair a permanently wrong scope; treating all dialogs as detail invents success. Repairing the incorrect inferred dialog is the focused choice under the owner's standing authorization.
 
 Validate browser observation through compiled core, regression negatives and City fixture contract. Re-run all existing gates and independent review before unchanged stable pipeline. No new review automation or phone install. Existing memory/holds remain unchanged; real phone improvement remains unproven until delivered evidence.
+
+The existing twelve-case dialog corpus was recaptured with the changed reader to satisfy its freshness gate. Case IDs, splits, expectations, observed semantics and manifest are unchanged; only measured timing/document IDs and extractor provenance differ. Validators accept the new exact fixture/extractor pair plus the two existing historical pairs, rejecting mixed provenance. The existing uploader receives only the reviewed sanitizer-function update so old reports remain uploadable.

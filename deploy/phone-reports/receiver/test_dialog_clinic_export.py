@@ -48,3 +48,17 @@ class DialogClinicProvenanceMigrationTests(unittest.TestCase):
         for sanitize in self.sanitizers():
             mixed=clinic();mixed['extractor_sha256']='adfe635862be7b529604c65a28bb81a0ceb433aca97a2c83ead5db79aaea0be4'
             with self.assertRaises(ValueError):sanitize(mixed)
+
+class NonmodalBannerCorpusMigrationTests(unittest.TestCase):
+    sanitizers=DialogClinicProvenanceMigrationTests.sanitizers
+    def test_new_browser_capture_is_accepted_by_every_independent_sanitizer(self):
+        for sanitize in self.sanitizers():
+            new=clinic();new.update(fixture_sha256='bad789306e28b8b39dd268d1011efa9f2bb6f772a4a1d69ff3030414b57a88b1',extractor_sha256='e65bf1fb6ee2999e9324a6f091071d88a9a0b5fe3f4d40ee2aa6589edf78c55e')
+            try: accepted=sanitize(new)
+            except ValueError: self.fail("new captured fixture/extractor pair is not supported")
+            self.assertEqual(new,accepted)
+    def test_new_capture_rejects_a_historical_extractor_or_manifest(self):
+        for sanitize in self.sanitizers():
+            for field,value in [('extractor_sha256','ee94cc45c607b37c1026fde1fed80053fb6fdaea7027fd826b8ba26a42bec309'),('manifest_sha256','a'*64)]:
+                new=clinic();new.update(fixture_sha256='bad789306e28b8b39dd268d1011efa9f2bb6f772a4a1d69ff3030414b57a88b1',extractor_sha256='e65bf1fb6ee2999e9324a6f091071d88a9a0b5fe3f4d40ee2aa6589edf78c55e');new[field]=value
+                with self.assertRaises(ValueError):sanitize(new)
