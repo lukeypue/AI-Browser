@@ -233,12 +233,44 @@
     // Nonsemantic overlays need visible interactive content. Fixed page chrome and
     // empty decorative layers are not dialogs merely because they have a large box.
     const vh = window.innerHeight || 1, vw = window.innerWidth || 1;
+    function exposedPrimaryReachable(panel) {
+      const primary = document.querySelector("main, [role=main], article");
+      if (!primary || primary.closest('[inert], [aria-hidden=true]')) return false;
+      for (const x of [0.2, 0.5, 0.8]) for (const y of [0.2, 0.5, 0.8]) {
+        const px = x * vw, py = y * vh;
+        if (px >= panel.left && px <= panel.right && py >= panel.top && py <= panel.bottom) continue;
+        const hit = document.elementFromPoint(px, py);
+        if (!hit || !primary.contains(hit) || hit.closest('[inert], [aria-hidden=true]')) continue;
+        // A separately mounted scrim may itself be inside main. Only exposed
+        // ordinary primary content proves this landmark is nonmodal chrome.
+        let node = hit;
+        for (let depth = 0; node && depth < 32; depth++, node = node.parentElement) {
+          const style = window.getComputedStyle(node);
+          // Absolute leaf images are ordinary listing media, not covering layout
+          // layers. All other positioned covering ancestors fail closed.
+          const listingImage = node === hit && node.tagName === "IMG" &&
+            (style.zIndex === "auto" || style.zIndex === "0");
+          if (style.position === "fixed" || style.position === "absolute" && !listingImage) break;
+          if (node === primary) return true;
+        }
+      }
+      return false;
+    }
     document.querySelectorAll("div, section").forEach((d) => {
       if (out.length > 6) return;
       const st = window.getComputedStyle(d);
       if (st.position !== "fixed") return;
       if (d.closest("header, nav, [role=banner], [role=navigation]")) return;
       const r = d.getBoundingClientRect();
+      // A nonmodal landmark docked to an edge is page chrome, even when a
+      // keyboard/short viewport makes its fixed height cover much of the page.
+      // Explicit modal semantics (including descendants) remain authoritative.
+      const dockedLandmark = d.getAttribute("role") === "region" &&
+        d.getAttribute("aria-modal") !== "true" &&
+        !out.some((dialog) => d.contains(dialog) || dialog.contains(d)) &&
+        r.width >= 0.9 * vw && r.height > 0 && r.height <= 0.6 * vh &&
+        (Math.abs(r.top) <= 1 || Math.abs(r.bottom - vh) <= 1);
+      if (dockedLandmark && exposedPrimaryReachable(r)) return;
       const coverage = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) *
         Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
       const interactive = Array.from(d.querySelectorAll("button, input, select, textarea, a[href], [role=button], [role=checkbox], [role=combobox]"))

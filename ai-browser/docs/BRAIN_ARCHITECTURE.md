@@ -96,6 +96,8 @@ signature (hash of visible control roles, facet keys and tags). This signature d
 page shape, not a deployment: a drawer opening or the last page losing its Next button
 must not invalidate unrelated working bindings.
 
+A short viewport can make fixed nonmodal page chrome occupy more than the inferred-dialog coverage threshold. A docked `role=region` landmark stays nonmodal only when ordinary exposed primary content is positively reachable. Explicit dialogs, separately blocking backdrops, inert/hidden main content, untyped overlays and full-screen regions remain authoritative. Hidden/offscreen preloaded dialogs do not own the visible page. The bundled bridge version must increase with content-script changes so retained Gecko profiles receive them through `ensureBuiltIn`; Android app version allocation remains with release automation.
+
 Privacy rules enforced here: no password/hidden/file inputs; on auth walls and challenges no
 names, values, titles or items; emails/phones/VINs/addresses/long digit runs redacted in
 snippets; instruction-like sentences neutralised in anything that goes to a model.
