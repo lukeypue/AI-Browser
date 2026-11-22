@@ -52,6 +52,16 @@ tasks.register('dialogClinic', JavaExec) {
     args layout.buildDirectory.file('reports/brain/dialog-clinic.json').get().asFile.absolutePath
 }
 
+tasks.register('marketLearningDistrict', JavaExec) {
+    group = 'verification'
+    description = 'Separate synthetic marketplace learning/transfer district; no network or live memory.'
+    classpath = sourceSets.lab.runtimeClasspath
+    mainClass = 'com.appgate.brain.lab.MarketLearningDistrictMainKt'
+    workingDir = projectDir
+    args providers.gradleProperty('marketDistrictOutput').getOrElse(layout.buildDirectory.dir('market-learning-district').get().asFile.absolutePath),
+        projectDir.absolutePath
+}
+
 tasks.register('frontierScreen', JavaExec) {
     if (providers.gradleProperty('frontierMemory').isPresent() &&
         (!providers.gradleProperty('frontierInput').isPresent() || providers.gradleProperty('frontierMode').getOrElse('scripted') != 'replay')) {
