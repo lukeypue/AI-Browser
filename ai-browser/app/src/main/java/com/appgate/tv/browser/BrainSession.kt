@@ -49,7 +49,7 @@ class BrainSession(private val context: Context, private val runtime: GeckoRunti
     private var netPort: WebExtension.Port? = null
     private val readyWaiters = ArrayList<CompletableFuture<Boolean>>()
     private val popups = ArrayList<GeckoSession>()
-    private val offscreen = OffscreenDisplay()
+    private val offscreen = OffscreenDisplay(context)
     private var attachedView: GeckoView? = null
     @Volatile var listener: Listener? = null
     @Volatile var activityProvider: () -> Activity? = { null }

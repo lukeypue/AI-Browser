@@ -9,8 +9,8 @@ before(async()=>{browser=await chromium.launch({executablePath:process.env.CHROM
 after(async()=>{await browser?.close();});
 const recommendations='<section><h2>Similar synthetic items</h2>'+[2,3,4].map(i=>'<a class="card" href="/item/'+(910000+i)+'"><span>Synthetic recommendation '+i+'</span><span>$600</span></a>').join('')+'</section>';
 const detail='<main><h1>Synthetic bicycle 1</h1><p>$500</p><p>Description: '+'A synthetic bicycle in good condition with replacement tires. '.repeat(10)+'</p><button aria-expanded="false">See more</button>'+recommendations+'</main>';
-async function observe(layer,height=373){
- const page=await browser.newPage({viewport:{width:393,height}});
+async function observe(layer,height=373,width=393){
+ const page=await browser.newPage({viewport:{width,height}});
  try{
   await page.route('**/*',route=>route.fulfill({contentType:'text/html',body:'<style>body{margin:0}.card{display:block;height:130px;width:300px}.panel{position:fixed;left:0;right:0;bottom:0;height:184px;background:white;z-index:20}</style>'+detail+layer}));
   await page.goto('https://fixtures.test/item/900001');await page.evaluate(source);
@@ -90,4 +90,17 @@ test('absolute backdrop inside primary content keeps the region blocking',async(
 test('ordinary absolute listing image remains reachable beneath a nonmodal banner',async()=>{
  const o=await observe(`<script>const box=document.createElement("div");box.style.cssText="position:relative;height:210px;width:100%";const image=document.createElement("img");image.alt="Synthetic listing photo";image.style.cssText="position:absolute;inset:0;width:100%;height:100%;background:silver";box.append(image);document.querySelector("main").prepend(box)</script><div role="region" class="panel">`+controls+'</div>');
  assert.equal(o.signals.dialog,false);assert.equal(o.signals.detailHint,true);
+});
+
+// A compressed Surface changes the site's responsive layout; modal guards must stay strict.
+test('logical mobile viewport avoids a tiny-layout interstitial without weakening modal safety',async()=>{
+ const layer='<style>@media(max-width:250px){.panel{height:100vh}}</style><div role="region" aria-label="Catalog banner" class="panel">'+controls+'</div>';
+ const compressed=await observe(layer,373,168);
+ assert.equal(compressed.signals.dialog,true);
+ assert.equal(compressed.signals.detailHint,false);
+ const logical=await observe(layer,915,412);
+ assert.equal(logical.signals.dialog,false);
+ assert.equal(logical.signals.detailHint,true);
+ assert.ok(logical.detailText.includes('Synthetic bicycle 1'));
+ assert.ok(!logical.detailText.includes('Explore the synthetic catalog'));
 });

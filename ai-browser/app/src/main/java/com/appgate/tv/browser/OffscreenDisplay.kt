@@ -1,5 +1,6 @@
 package com.appgate.tv.browser
 
+import android.content.Context
 import android.graphics.SurfaceTexture
 import android.view.Surface
 import org.mozilla.geckoview.GeckoDisplay
@@ -12,7 +13,7 @@ import org.mozilla.geckoview.GeckoSession
  * surface keeps the page behaving exactly as it does on screen while the engine works in
  * the background.
  */
-class OffscreenDisplay(private val width: Int = 412, private val height: Int = 915) {
+class OffscreenDisplay(private val context: Context) {
     private var texture: SurfaceTexture? = null
     private var surface: Surface? = null
     private var display: GeckoDisplay? = null
@@ -23,6 +24,8 @@ class OffscreenDisplay(private val width: Int = 412, private val height: Int = 9
     fun attach(target: GeckoSession) {
         if (session === target) return
         detach()
+        // Gecko consumes physical Surface pixels; its mobile viewport uses display density.
+        val (width, height) = OffscreenViewportGeometry.physicalPixels(context.resources.displayMetrics.density)
         val tex = SurfaceTexture(false).apply { setDefaultBufferSize(width, height) }
         val surf = Surface(tex)
         val disp = target.acquireDisplay()
