@@ -123,18 +123,16 @@ class ServerLabInstrumentation : Instrumentation() {
             }
             val startup=ServerLabStartupWait(SystemClock::elapsedRealtime, SystemClock::sleep) { enterStage(ServerLabStartupTrace.Stage.valueOf(it.name)) }
             startupWait=startup
-            check(startup.awaitBinding(requestBind={
-                observedStage.set(ServerLabThreadSampler.Stage.BEFORE_MAIN_DISPATCH)
-                runOnMainSync {
-                    observedStage.set(ServerLabThreadSampler.Stage.MAIN_BIND_ENTERED)
-                    observedStage.set(ServerLabThreadSampler.Stage.BEFORE_SERVICE_START)
-                    BrainService.start(targetContext)
-                    observedStage.set(ServerLabThreadSampler.Stage.AFTER_SERVICE_START)
-                    observedStage.set(ServerLabThreadSampler.Stage.BEFORE_BIND_CALL)
-                    bound=targetContext.bindService(Intent(targetContext,BrainService::class.java),connection,Context.BIND_AUTO_CREATE)
-                    observedStage.set(ServerLabThreadSampler.Stage.AFTER_BIND_CALL)
-                }
-                bound
+            check(startup.awaitService(startService={
+                observedStage.set(ServerLabThreadSampler.Stage.BEFORE_SERVICE_START)
+                BrainService.start(targetContext)
+                observedStage.set(ServerLabThreadSampler.Stage.AFTER_SERVICE_START)
+            }, bindService={
+                observedStage.set(ServerLabThreadSampler.Stage.BEFORE_BIND_CALL)
+                val accepted=targetContext.bindService(Intent(targetContext,BrainService::class.java),connection,Context.BIND_AUTO_CREATE)
+                bound=accepted
+                observedStage.set(ServerLabThreadSampler.Stage.AFTER_BIND_CALL)
+                accepted
             }, awaitBound={ timeout -> ready.await(timeout,TimeUnit.MILLISECONDS) }))
             val s=service ?: run { enterStage(ServerLabStartupTrace.Stage.SERVICE_UNAVAILABLE); error("SERVICE_UNAVAILABLE") }
             check(startup.awaitEngineReady { s.state.engineReady })
@@ -178,13 +176,13 @@ class ServerLabInstrumentation : Instrumentation() {
             }
         } catch(error:Throwable) {
             runCatching { recordStartupFault(this, error) }
-            runCatching { runOnMainSync { service?.stopWork() } }
+            service?.let { owned -> runCatching { runOnMainSync { owned.stopWork() } } }
             // No exception messages, page content, logs or preferences leave this runner.
             status="FAILED"; end="RUNTIME_FAILED"
         } finally {
             threadSampler?.close()
             ServerLabRuntime.detach()
-            if(bound) runCatching { runOnMainSync { targetContext.unbindService(connection) } }
+            if(bound) runCatching { targetContext.unbindService(connection) }
         }
         val local=JsonObject().put("schema_version",1).put("cycle_id",id).put("status",status).put("end_reason",end)
             .put("app_elapsed_ms",elapsed.coerceIn(0,7_200_000)).put("diagnostics",if(command=="probe") null as JsonValue? else report.get())

@@ -24,6 +24,13 @@ class ServerLabStartupWait(
     // Measured await elapsed time; scheduler delay means this is not a callback-arrival claim.
     val legacyBind30sExceeded: Boolean get() = bindWaitMs > 30_000L
 
+    /** Service IPC is issued on the instrumentation caller. Android delivers lifecycle and
+     * connection callbacks on main; no unbounded main-dispatch wrapper is needed here.
+     * Synchronous Binder calls themselves are still outside the latch deadline. */
+    fun awaitService(startService: () -> Unit, bindService: () -> Boolean,
+                     awaitBound: (Long) -> Boolean): Boolean =
+        awaitBinding({ startService(); bindService() }, awaitBound)
+
     fun awaitBinding(requestBind: () -> Boolean, awaitBound: (Long) -> Boolean): Boolean {
         onStage(Stage.BIND_REQUESTED)
         bindAccepted = requestBind()

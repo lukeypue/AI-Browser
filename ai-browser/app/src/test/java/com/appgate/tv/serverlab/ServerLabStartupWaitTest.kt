@@ -103,4 +103,28 @@ class ServerLabStartupWaitTest {
         assertEquals(100_000L, wait.engineWaitMs)
         assertTrue(clock.sleeps.all { it in 1L..100L })
     }
+
+    @Test fun serviceRequestRunsInOrderOnCallerWithoutMainDispatch() {
+        val caller=Thread.currentThread();val calls=mutableListOf<String>()
+        val wait=ServerLabStartupWait({0L},{})
+        assertTrue(wait.awaitService(startService={assertSame(caller,Thread.currentThread());calls+="start"},
+            bindService={assertSame(caller,Thread.currentThread());calls+="bind";true},
+            awaitBound={calls+="await";true}))
+        assertEquals(listOf("start","bind","await"),calls)
+    }
+    @Test fun rejectedBindingNeverWaitsAndSynchronousFailuresReachCaller() {
+        val wait=ServerLabStartupWait({0L},{})
+        assertFalse(wait.awaitService({}, {false}, {fail("rejected binding cannot wait");false}))
+        assertEquals(ServerLabStartupWait.BindOutcome.REJECTED,wait.bindOutcome)
+        val failure=IllegalStateException("synthetic")
+        for(startFails in listOf(true,false)) {
+            var boundCalled=false;var awaited=false
+            try {
+                ServerLabStartupWait({0L},{}).awaitService(
+                    {if(startFails)throw failure}, {boundCalled=true;throw failure}, {awaited=true;true})
+                fail("synchronous failure must propagate")
+            } catch(actual:IllegalStateException) {assertSame(failure,actual)}
+            assertEquals(!startFails,boundCalled);assertFalse(awaited)
+        }
+    }
 }
