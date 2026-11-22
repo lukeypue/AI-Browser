@@ -54,7 +54,7 @@ tasks.register('dialogClinic', JavaExec) {
 
 tasks.register('frontierScreen', JavaExec) {
     if (providers.gradleProperty('frontierMemory').isPresent() &&
-        (!providers.gradleProperty('frontierInput').isPresent() || providers.gradleProperty('frontierMode').getOrElse('scripted') != 'replay')) {
+        (!providers.gradleProperty('frontierInput').isPresent() || !(providers.gradleProperty('frontierMode').getOrElse('scripted') in ['replay','replay-correction']))) {
         throw new GradleException('frontierMemory requires replay mode and frontierInput')
     }
     group = 'verification'

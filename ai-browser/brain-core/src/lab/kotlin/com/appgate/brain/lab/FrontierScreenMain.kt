@@ -13,6 +13,13 @@ fun main(args: Array<String>) {
             require(args.size in 2..3)
             lab.capture(output, if (args.size == 3) loadFrontierMemory(File(args[2])) else emptyMap())
         }
+        "capture-correction" -> { require(args.size==2); lab.captureCorrection(output) }
+        "scripted-correction" -> { require(args.size==2); lab.run(output,FrontierScreen.referenceProgram(),"SCRIPTED_READINESS",correction=true) }
+        "replay-correction" -> {
+            require(args.size in 3..4)
+            val response=File(args[2]); require(response.isFile && response.length()<=65536)
+            lab.run(output,response.readText(),"RECORDED_EXTERNAL_CANDIDATE",if(args.size==4)loadFrontierMemory(File(args[3]))else emptyMap(),correction=true)
+        }
         "scripted" -> lab.run(output)
         "replay" -> {
             require(args.size in 3..4)

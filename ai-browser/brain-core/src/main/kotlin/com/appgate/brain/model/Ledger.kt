@@ -89,7 +89,11 @@ data class TaskLedger(
     var lesson: String = "",
     var repairReason: String = "",
     // null: no observation; false: a non-neutral scroll occurred; true: only neutral scrolls.
-    var neutralScrollOnly: Boolean? = null
+    var neutralScrollOnly: Boolean? = null,
+    // Closed proposal feedback is separate from verifier-owned success/failure memory.
+    val proposalRejections: MutableList<TeacherProposalRejection> = mutableListOf(),
+    var proposalCorrectionPending: Boolean = false,
+    var proposalCorrectionUsed: Boolean = false
 ) {
     // Process-local diagnostic coordinates; deliberately absent from stored ledger JSON.
     var diagnosticTaskSequence=0
@@ -159,6 +163,9 @@ data class TaskLedger(
         .put("program_post", JsonArray(programPost.map { it.toJson() }))
         .putStrings("program_verified", programVerifiedSteps.map { it.toString() }).put("program_completed", programCompleted).put("lesson", lesson)
         .put("repair_reason", repairReason)
+        .put("proposal_rejections", JsonArray(proposalRejections.takeLast(4).map { it.toJson() }))
+        .put("proposal_correction_pending", proposalCorrectionPending)
+        .put("proposal_correction_used", proposalCorrectionUsed)
         .also { json -> neutralScrollOnly?.let { json.put("neutral_scroll_only", it) } }
 
     companion object {
@@ -226,6 +233,12 @@ data class TaskLedger(
             ledger.elapsedMs = o.optLong("elapsed_ms")
             ledger.terminalReason = o.optString("terminal_reason")
             ledger.lastPlannerStateHash = o.optString("planner_state")
+            o.optArray("proposal_rejections")?.takeIf { it.size<=4 }?.objects()?.forEach { row ->
+                TeacherProposalRejection.fromJson(row)?.let { ledger.proposalRejections += it }
+            }
+            ledger.proposalCorrectionPending = o["proposal_correction_pending"]?.asBooleanOrNull()==true && ledger.proposalRejections.isNotEmpty()
+            ledger.proposalCorrectionUsed = o["proposal_correction_used"]?.asBooleanOrNull()==true
+
             ledger.progressKeys += o.optStrings("progress_keys")
             ledger.attemptedSkills += o.optStrings("attempted_skills")
             ledger.successfulSkills += o.optStrings("successful_skills")

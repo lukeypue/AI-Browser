@@ -199,10 +199,9 @@ object Curriculum {
             rawText = "learn: $query",
             query = query,
             constraints = constraints,
-            // One remote repair per lesson is enough. A failed repair is persisted by
-            // FailedStrategies and the learner rotates/re-observes instead of spending
-            // several teacher calls against the same control state.
-            budget = Budget(itemsInspected = 1, llmCalls = 1, actions = 16, wallMs = 3 * 60_000L),
+            // One proposal plus one bounded correction; shared provider budgets and
+            // same-state limits still apply. Rejected replies never earn learning credit.
+            budget = Budget(itemsInspected = 1, llmCalls = 2, actions = 16, wallMs = 3 * 60_000L),
             category = profile.categories.firstOrNull()
         )
     }

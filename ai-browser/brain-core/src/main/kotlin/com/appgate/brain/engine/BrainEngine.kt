@@ -21,6 +21,8 @@ import com.appgate.brain.model.SiteModel
 import com.appgate.brain.model.Skill
 import com.appgate.brain.model.Step
 import com.appgate.brain.model.StepKind
+import com.appgate.brain.model.ProposalRejectionReason
+import com.appgate.brain.model.TeacherProposalRejection
 import com.appgate.brain.model.TaskLedger
 import com.appgate.brain.model.TaskPhase
 import com.appgate.brain.model.TaskResult
@@ -517,15 +519,7 @@ class BrainEngine(
                              capability: String = source.removePrefix("skill:"), post: List<Postcondition> = emptyList()) {
         ledger.diagnosticProgramSequence=(ledger.diagnosticProgramSequence+1).coerceAtMost(1_000_000)
         // Bind parameters now so the persisted program is self-contained.
-        ledger.currentProgram = steps.map { s ->
-            val bound = s.copy(facetKey = s.facetKey?.let { StepGrounder.substitute(it, params) }, arg = s.arg?.let { StepGrounder.substitute(it, params) },
-                expect = s.expect.map { bindExpect(it, params) })
-            // Persist the verifier's exact non-submit search default so a teacher
-            // plan has the same typed prerequisite contract as a local repair.
-            if (bound.kind == StepKind.TYPE && bound.role == Role.SEARCH_BOX && !bound.submit &&
-                bound.expect.isEmpty() && bound.arg != null)
-                bound.copy(expect = listOf(Postcondition.ValueIs("query", bound.arg))) else bound
-        }
+        ledger.currentProgram = steps.map { BoundProgram.step(it,params) }
         val page = latestPage
         val strategyKey = page?.let { FailedStrategies.key(it, capability, ledger.currentProgram, skillParams(ledger)) }
         val held = strategyKey != null && !FailedStrategies.allowed(memory.site(ledger.host), strategyKey, clock())
@@ -560,14 +554,7 @@ class BrainEngine(
         memory.saveLedger(ledger)
     }
 
-    private fun bindExpect(p: Postcondition, params: Map<String, String>): Postcondition = when (p) {
-        is Postcondition.AnyOf -> Postcondition.AnyOf(p.alternatives.map { bindExpect(it, params) })
-        is Postcondition.ConstraintApplied -> Postcondition.ConstraintApplied(StepGrounder.substitute(p.key, params), p.value?.let { StepGrounder.substitute(it, params) })
-        is Postcondition.ValueIs -> Postcondition.ValueIs(StepGrounder.substitute(p.facetKey, params), StepGrounder.substitute(p.value, params))
-        is Postcondition.UrlQueryHas -> Postcondition.UrlQueryHas(StepGrounder.substitute(p.key, params))
-        is Postcondition.RoleAppeared -> p.copy(facetKey = p.facetKey?.let { StepGrounder.substitute(it, params) })
-        else -> p
-    }
+    private fun bindExpect(p: Postcondition, params: Map<String, String>): Postcondition = BoundProgram.expectation(p,params)
 
     /** An ordinary overlay cannot replace the suspended program or borrow its verification credit.
      * The persisted original program also encounters this guard after a process restart. */
@@ -1149,8 +1136,39 @@ class BrainEngine(
             // A resumed drawer discovery can arrive here before the next lesson decision.
             ledger.learningConstraints = LearningOpportunities.target(sps, ledger.lesson)?.constraints.orEmpty()
         }
-        if (tryLocalRepair(ledger, sps, site, capability)) { plannerOutcome(ledger,capability,"LOCAL_REPAIR");return true }
-        val params = skillParams(ledger) + repairBindings
+        var params = skillParams(ledger) + repairBindings
+        val pending = if (ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.proposalCorrectionPending)
+            ledger.proposalRejections.lastOrNull() else null
+        val correcting = pending != null
+        if (correcting) {
+            // Consume the single correction before any provider access. The persisted
+            // quota snapshot authorizes only this task's own immediately prior reservation.
+            ledger.proposalCorrectionPending = false
+            val alreadyUsed = ledger.proposalCorrectionUsed
+            ledger.proposalCorrectionUsed = true
+            if (pending!!.target != null) {
+                val original = LearningOpportunities.targets(sps,ledger.lesson).firstOrNull { target ->
+                    target.skillId==capability && target.params["item"]?.let { com.appgate.brain.util.Hashing.short(it) }==pending.target
+                }
+                if (original != null) params = params + original.params
+            }
+            val quota = site.strategyFailures[pending.quotaKey]
+            val valid = !alreadyUsed && sps.settle==com.appgate.brain.model.Settle.IDLE &&
+                TeacherProposalFeedback.context(sps,capability,params)==pending.context &&
+                (pending.target==null || params["item"]?.let { com.appgate.brain.util.Hashing.short(it) }==pending.target && params["item"] in sps.resultKeys) &&
+                pending.quotaKey==FailedStrategies.key(sps,capability) && quota?.count==pending.quotaCount && quota.at==pending.quotaAt
+            memory.saveLedger(ledger)
+            if (!valid) {
+                plannerOutcome(ledger,capability,"UNAVAILABLE")
+                ledger.status=TaskStatus.PARTIAL
+                ledger.terminalReason="teacher correction context changed; waiting for a fresh lesson"
+                memory.saveLedger(ledger)
+                return true
+            }
+        }
+        // A correction must reach its teacher rather than silently executing another
+        // local recipe or switching the selected target.
+        if (!correcting && tryLocalRepair(ledger, sps, site, capability)) { plannerOutcome(ledger,capability,"LOCAL_REPAIR");return true }
         if (capability == "open_item" && (params["item"].isNullOrBlank() ||
                 params["item"]!!.startsWith("$") || params["item"] !in sps.resultKeys)) {
             // Failed learning programs can lose their bound steps on completion. Return
@@ -1161,7 +1179,7 @@ class BrainEngine(
         if (ledger.llmCalls >= ledger.goal.budget.llmCalls) { plannerOutcome(ledger,capability,"TASK_BUDGET");ledger.note("planner budget exhausted"); return false }
         if (ledger.lastPlannerStateHash == sps.hash && ledger.plannerCallsOnSameState >= config.maxPlannerCallsSameState) { plannerOutcome(ledger,capability,"STATE_LIMIT");ledger.note("planner already tried this state twice"); return false }
         val plannerKey = FailedStrategies.key(sps, capability)
-        if (ledger.goal.intent == GoalIntent.LEARN_SITE && !FailedStrategies.repairAllowed(site, plannerKey, clock())) {
+        if (ledger.goal.intent == GoalIntent.LEARN_SITE && !correcting && !FailedStrategies.repairAllowed(site, plannerKey, clock())) {
             plannerOutcome(ledger,capability,"REPAIR_COOLDOWN")
             ledger.note("recent AI repairs failed on this page; waiting for a changed page or cooldown")
             return false
@@ -1177,12 +1195,17 @@ class BrainEngine(
         }
         ledger.plannerCallsOnSameState = if (ledger.lastPlannerStateHash == sps.hash) ledger.plannerCallsOnSameState + 1 else 1
         ledger.lastPlannerStateHash = sps.hash
+        // An interrupted provider request cannot reset task or same-state accounting.
+        memory.saveLedger(ledger)
+        // Keep this exact reservation, not whichever request last changed shared state
+        // while the provider was running. Only our own reservation may authorize correction.
+        val quotaReservation=if(ledger.goal.intent==GoalIntent.LEARN_SITE) site.strategyFailures[plannerKey]?.copy() else null
         events.status("Thinking about this page…")
         val failuresHere = site.failures.values.filter { it.pageType == sps.pageType }.sortedByDescending { it.lastAt }.take(3).map { "${it.role}${it.facetKey?.let { k -> "[$k]" } ?: ""}: ${it.reason}" }
         plannerOutcome(ledger,capability,"PROPOSAL_STARTED")
         val plannerStartedNanos=System.nanoTime()
         val program = try {
-            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability, FailedStrategies.feedback(site, sps, capability, params))
+            planner.proposeProgram(ledger.effectiveGoal, sps, ledger, memory.skills.retrieve(reason + " " + ledger.goal.intent.name), failuresHere, profile.quirks, capability, FailedStrategies.feedback(site, sps, capability, params), TeacherProposalFeedback.matching(ledger,sps,capability,params))
         } catch (e: PlannerRefused) {
             plannerOutcome(ledger,capability,"REFUSED",com.appgate.brain.planner.PlannerFailureDiagnostics.metadata(e,planner.diagnosticProvider,(System.nanoTime()-plannerStartedNanos)/1_000_000));events.log("warn", "planner refused"); return false
         } catch (e: Exception) {
@@ -1203,7 +1226,16 @@ class BrainEngine(
             memory.saveLedger(ledger)
             return true
         }
-        if (program.giveUp || program.steps.isEmpty() || program.confidence < config.plannerConfidenceFloor) { plannerOutcome(ledger,capability,if(program.giveUp)"GIVE_UP" else if(program.steps.isEmpty())"EMPTY" else "LOW_CONFIDENCE");ledger.note("planner: ${program.rationale}"); return false }
+        val proposalSignature=TeacherProposalFeedback.signature(program.steps,params,program.giveUp)
+        if (TeacherProposalFeedback.matching(ledger,sps,capability,params).any { it.signature==proposalSignature }) {
+            plannerOutcome(ledger,capability,if(program.giveUp)"GIVE_UP" else "ACCEPTED_HELD")
+            return rejectTeacherProposal(ledger,sps,capability,params,program,quotaReservation,ProposalRejectionReason.DUPLICATE)
+        }
+        if (program.giveUp || program.steps.isEmpty() || program.confidence < config.plannerConfidenceFloor) {
+            val rejection=if(program.giveUp)ProposalRejectionReason.GIVE_UP else if(program.steps.isEmpty())ProposalRejectionReason.EMPTY else ProposalRejectionReason.LOW_CONFIDENCE
+            plannerOutcome(ledger,capability,rejection.name)
+            return rejectTeacherProposal(ledger,sps,capability,params,program,quotaReservation,rejection)
+        }
         // Execution accepts the requested query either literally or as a reusable parameter.
         // Other literal queries must not satisfy this task's search contract.
         val contractSteps = program.steps.map { step ->
@@ -1212,7 +1244,8 @@ class BrainEngine(
         }
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && !com.appgate.brain.skills.PortableSkills.compatible(capability,
                 contractSteps, program.steps.lastOrNull { !it.optional }?.expect.orEmpty())) {
-            plannerOutcome(ledger,capability,"INCOMPATIBLE");ledger.note("teacher program rejected: incompatible capability"); return false
+            plannerOutcome(ledger,capability,"INCOMPATIBLE")
+            return rejectTeacherProposal(ledger,sps,capability,params,program,quotaReservation,ProposalRejectionReason.INCOMPATIBLE)
         }
         // The selected live target scopes both negative feedback and execution. A teacher
         // cannot silently replace it or fall back to a generic listing click.
@@ -1227,7 +1260,12 @@ class BrainEngine(
                     else -> true
                 } })
         if ((selectedItem != null && wrongItem) || unrelatedItemAction) {
-            plannerOutcome(ledger,capability,"INCOMPATIBLE");ledger.note("teacher program rejected: selected target mismatch"); return false
+            plannerOutcome(ledger,capability,"INCOMPATIBLE")
+            return rejectTeacherProposal(ledger,sps,capability,params,program,quotaReservation,ProposalRejectionReason.WRONG_TARGET)
+        }
+        if (!FailedStrategies.allowed(site,FailedStrategies.key(sps,capability,program.steps,params),clock())) {
+            plannerOutcome(ledger,capability,"ACCEPTED_HELD")
+            return rejectTeacherProposal(ledger,sps,capability,params,program,quotaReservation,ProposalRejectionReason.HELD_PROCEDURE)
         }
         ledger.attemptedSkills += capability
         startProgram(ledger, program.steps, params, "planner", program.rationale.ifBlank { "planner program" }, capability)
@@ -1339,6 +1377,31 @@ class BrainEngine(
         TaskPhase.COLLECT -> "load_more"
         TaskPhase.INSPECT -> "open_item"
         else -> "custom"
+    }
+
+    private fun rejectTeacherProposal(ledger: TaskLedger, page: SemanticPageState,
+        capability: String, params: Map<String,String>, program: com.appgate.brain.planner.PlannerProgram,
+        reservation: com.appgate.brain.model.StrategyFailure?, reason: ProposalRejectionReason): Boolean {
+        ledger.note("teacher proposal rejected: ${reason.name}")
+        if (ledger.goal.intent != GoalIntent.LEARN_SITE) return false
+        val quotaKey=FailedStrategies.key(page,capability)
+        val quota=reservation ?: return false
+        val row=TeacherProposalRejection(TeacherProposalFeedback.context(page,capability,params),
+            TeacherProposalFeedback.signature(program.steps,params,program.giveUp),reason,
+            FailedStrategies.approach(page,capability,program.steps,params)?.steps.orEmpty(),
+            params["item"]?.let { com.appgate.brain.util.Hashing.short(it) },quotaKey,quota.count,quota.at)
+        val safe=TeacherProposalRejection.fromJson(row.toJson()) ?: return false
+        ledger.proposalRejections += safe
+        while (ledger.proposalRejections.size>4) ledger.proposalRejections.removeAt(0)
+        val retry=!ledger.proposalCorrectionUsed && !ledger.blocked &&
+            ledger.llmCalls<ledger.goal.budget.llmCalls && ledger.plannerCallsOnSameState<config.maxPlannerCallsSameState
+        ledger.proposalCorrectionPending=retry
+        if (retry) {
+            ledger.programCapability=capability
+            ledger.repairReason="revise rejected teacher proposal: ${reason.name}"
+        }
+        memory.saveLedger(ledger)
+        return retry
     }
 
     private fun skillParams(ledger: TaskLedger): Map<String, String> = buildMap {

@@ -35,7 +35,7 @@ class FrontierScreen {
     }
 
     /** The fixture oracle uses committed internal state, never the parser's inferred outcome. */
-    private class SearchGate(val host: String, val variant: Int, val gated: Boolean = true,
+    class SearchGate(val host: String, val variant: Int, val gated: Boolean = true,
         val noOp: Boolean = false, val human: Boolean = false, val submitNoOp: Boolean = false) : Renderer {
         var selected = false; private set
         var draft = ""; private set
@@ -116,12 +116,14 @@ class FrontierScreen {
         fun oracle(query: String) = committed == query && (!gated || selected)
     }
 
-    private class RecordedTeacher(private val response: String?, private val capture: File? = null) : PlannerClient {
+    private class RecordedTeacher(private val response: String?, private val capture: File? = null, private val correction: Boolean = false) : PlannerClient {
         var calls = 0; private set
         var requestSha256: String? = null; private set
         override val describe = if (capture != null) "synthetic-request-capture" else "recorded-synthetic-teacher"
         override fun complete(instructions: String, input: String, schemaName: String, schema: JsonObject, maxOutputTokens: Int): String {
-            check(++calls <= 1) { "one teacher request per trial" }
+            check(++calls <= if(correction)2 else 1) { "bounded teacher requests per trial" }
+            // This is deliberately a scripted negative, never represented as a real AI reply.
+            if(correction && calls==1) return """{"steps":[],"give_up":true,"confidence":0.99}"""
             val request = JsonObject().put("environment", "SYNTHETIC_ONLY")
                 .put("instructions", instructions).put("input", Json.parseObject(input))
                 .put("schema_name", schemaName).put("schema", schema).put("max_output_tokens", maxOutputTokens).toString()
@@ -134,7 +136,7 @@ class FrontierScreen {
     private fun trial(directory: File, saved: Map<String, String>, label: String, variant: Int,
         query: String, response: String? = null, capture: File? = null, removeSkills: Boolean = false,
         gated: Boolean = true, noOp: Boolean = false, human: Boolean = false, host: String = "${label}.sim.invalid",
-        intent: GoalIntent = GoalIntent.LEARN_SITE, submitNoOp: Boolean = false): Trial {
+        intent: GoalIntent = GoalIntent.LEARN_SITE, submitNoOp: Boolean = false, correction: Boolean = false): Trial {
         val store = fork(directory, saved)
         val memory = Memory(store) { now }
         if (removeSkills) memory.skills.all().filter { it.origin != SkillOrigin.BUILTIN }.forEach { memory.skills.remove(it.id) }
@@ -143,9 +145,9 @@ class FrontierScreen {
         val observationGate = if (human) observed.isHumanOnly else observed.affordances.count { it.role == Role.TAB && it.visible && it.enabled && it.sameSite } == 1 &&
             observed.has(Role.SEARCH_BOX) && observed.has(Role.SUBMIT) && !observed.isHumanOnly
         val beforeLearned = memory.skills.all().filter { it.origin == SkillOrigin.COMPILED }.associate { it.id to it.stat(host).successes }
-        val teacher = if (response != null || capture != null) RecordedTeacher(response, capture ?: File(directory.parentFile, "exchanges/" + directory.name + "-request.json").also { it.parentFile.mkdirs() }) else null
+        val teacher = if (response != null || capture != null) RecordedTeacher(response, capture ?: File(directory.parentFile, "exchanges/" + directory.name + "-request.json").also { it.parentFile.mkdirs() }, correction) else null
         val goal = Goal("frontier-${label}", intent, "synthetic search", query, emptyList(),
-            budget = Budget(itemsInspected = 1, actions = 16, llmCalls = if (teacher == null) 0 else 1, wallMs = 8000))
+            budget = Budget(itemsInspected = 1, actions = 16, llmCalls = if (teacher == null) 0 else if(correction)2 else 1, wallMs = 8000))
         val task = TaskLedger(goal.id, goal, host, renderer.currentUrl()).apply { if (intent == GoalIntent.LEARN_SITE) lesson = "search" }
         val result = BrainEngine(renderer, memory, { teacher?.let { Planner(it) } }, object : EngineEvents {}, config) { now }.runTask(task, EngineMode.TRAIN)
         val oracle = renderer.oracle(query)
@@ -177,13 +179,22 @@ class FrontierScreen {
             .put("trial", out.row)
     }
 
+    fun captureCorrection(directory: File): JsonObject {
+        require(!directory.exists() || directory.listFiles().isNullOrEmpty()) { "fresh experiment directory required" }
+        directory.mkdirs()
+        val out=trial(File(directory,"capture-memory"),emptyMap(),"capture-correction",0,TRAIN_QUERY,
+            capture=File(directory,"teacher-request.json"),host=TRAIN_HOST,correction=true)
+        return JsonObject().put("source","REAL_ENGINE_CORRECTION_REQUEST").put("first_reply_kind","SCRIPTED_NEGATIVE_STUB")
+            .put("captured",File(directory,"teacher-request.json").exists()).put("trial",out.row)
+    }
+
     fun run(directory: File): JsonObject = run(directory, referenceProgram(), "SCRIPTED_READINESS")
-    fun run(directory: File, response: String, teacherKind: String, initialSaved: Map<String, String> = emptyMap()): JsonObject {
+    fun run(directory: File, response: String, teacherKind: String, initialSaved: Map<String, String> = emptyMap(), correction: Boolean = false): JsonObject {
         require(teacherKind in setOf("SCRIPTED_READINESS", "RECORDED_EXTERNAL_CANDIDATE"))
         require(!directory.exists() || directory.listFiles().isNullOrEmpty()) { "fresh experiment directory required" }
         directory.mkdirs()
         val cold = trial(File(directory, "cold"), emptyMap(), "cold", 0, TRAIN_QUERY, host = TRAIN_HOST)
-        val training = trial(File(directory, "training"), initialSaved, "training", 0, TRAIN_QUERY, response, host = TRAIN_HOST)
+        val training = trial(File(directory, "training"), initialSaved, "training", 0, TRAIN_QUERY, response, host = TRAIN_HOST, correction=correction)
         val reinforce = trial(File(directory, "reinforce"), training.snapshot, "reinforce", 1, TRAIN_QUERY, host = TRAIN_HOST)
         val frozen = reinforce.snapshot
         val frozenStore = fork(File(directory, "frozen"), frozen)
@@ -193,6 +204,7 @@ class FrontierScreen {
         return evidence.put("schema_version", 1).put("environment", "PURE_JVM_SYNTHETIC_WIRE")
             .put("real_world_validated", false).put("teacher_kind", teacherKind)
             .put("training_teacher_calls", count(training.row, "teacher_calls"))
+            .also { if(correction) it.put("first_reply_kind","SCRIPTED_NEGATIVE_STUB").put("correction_mode",true) }
             .put("teacher_request_sha256", training.row.optStringOrNull("teacher_request_sha256"))
             .put("teacher_request_artifact", "exchanges/training-request.json")
             .put("candidate_program_sha256", training.row.optStringOrNull("candidate_program_sha256"))

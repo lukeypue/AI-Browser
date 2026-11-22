@@ -1,0 +1,10 @@
+{
+  "environment": "SYNTHETIC_ONLY",
+  "response_sha256": "7e7d32d4730ad3d9d78494c05a2926083314345bd5841c7cdc7213b218826dec",
+  "request_sha256": "dc036a944bb93b431e15a7454c9538dd1466981c5c28ad45d91ff322939dbe8e",
+  "actual_external_requests_in_investigation": 2,
+  "first_actual_candidate_failed_durable_acquisition": true,
+  "browser_test_replays_recorded_candidate": true,
+  "first_browser_reply_is_scripted_negative": true,
+  "no_external_requests_in_tests": true
+}
