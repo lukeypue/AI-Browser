@@ -8,7 +8,7 @@ import com.appgate.brain.planner.*
 import java.io.File
 
 /** Lab-only bridge: generated Chromium pages, no live site or external model access. */
-private class BrowserClinicRenderer : Renderer {
+internal class BrowserClinicRenderer : Renderer {
     private val input = System.`in`.bufferedReader()
     private var sequence = 0
     private var url = "https://teacher-browser.fixture.invalid/"

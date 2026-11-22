@@ -22,7 +22,9 @@ object SemanticDiagnostics {
         .also { data->ledger.neutralScrollOnly?.let{data.put("neutral_scroll_only",if(it)1 else 0)} }
     fun host(url: String): String = runCatching { java.net.URI(url).host?.lowercase()?.take(253).orEmpty() }.getOrDefault("")
 
-    private fun page(sps: SemanticPageState): JsonObject = JsonObject()
+    private fun page(sps: SemanticPageState): JsonObject {
+        val scroll=sps.scrollContext
+        return JsonObject()
         .put("host", host(sps.url)).put("page_type", sps.pageType.name).put("items", sps.resultKeys.size)
         .put("controls", sps.affordances.count { it.visible && it.enabled })
         .put("search_boxes", sps.byRole(Role.SEARCH_BOX).size).put("result_links", sps.byRole(Role.RESULT_ITEM).size)
@@ -42,9 +44,13 @@ object SemanticDiagnostics {
         .put("next_controls", sps.byRole(Role.PAGE_NEXT).size).put("load_more_controls", sps.byRole(Role.LOAD_MORE).size)
         .put("detail_controls",sps.affordances.count{it.visible && it.role in setOf(Role.DETAIL_TITLE,Role.EXPAND_TEXT)})
         .put("dialog_open",if(sps.dialogOpen)1 else 0)
-        .put("scroll_y", sps.scrollY).put("scroll_height", sps.scrollHeight).put("viewport_height", sps.viewportHeight)
+        .put("scroll_y", if(scroll==null)sps.scrollY else if(scroll.valid)scroll.y else 0)
+        .put("scroll_height", if(scroll==null)sps.scrollHeight else if(scroll.valid)scroll.extent else 0)
+        .put("viewport_height", if(scroll==null)sps.viewportHeight else if(scroll.valid)scroll.height else 0)
         .put("closers", sps.byRole(Role.CLOSE).size).put("dialog", sps.dialogOpen)
         .put("auth_wall", sps.authWall).put("challenge", sps.challenge).put("settle", sps.settle.name)
+        .also { if(scroll!=null)it.put("scroll_context",scroll.publicJson()) }
+    }
 
     fun learningRecheck(site: SiteModel, sps: SemanticPageState?, now: Long): JsonObject = JsonObject()
         .put("available", false).put("human_hold", site.learningNeedsHuman)

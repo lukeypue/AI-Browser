@@ -200,7 +200,8 @@ data class SemanticPageState(
     val scrollHeight: Int = 0,
     val scrollY: Int = 0,
     val capturedAt: Long = 0L,
-    val siteVersion: String = ""
+    val siteVersion: String = "",
+    val scrollContext: ScrollContext? = null
 ) {
     val results: Collection? get() = collections.firstOrNull { it.role == "results" }
     val resultKeys: Set<String> get() = results?.itemKeys?.toSet() ?: emptySet()
@@ -219,6 +220,7 @@ data class SemanticPageState(
             .put("page_type", pageType.name)
             .put("settle", settle.name)
             .put("dialog_open", dialogOpen)
+        scrollContext?.let { o.put("scroll_context", it.publicJson()) }
         val aff = JsonArray()
         affordances.filter { it.visible }
             .sortedByDescending { it.roleScore }

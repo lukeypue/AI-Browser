@@ -11,6 +11,7 @@ import com.appgate.brain.model.Region
 import com.appgate.brain.model.RegionRole
 import com.appgate.brain.model.Role
 import com.appgate.brain.model.SemanticPageState
+import com.appgate.brain.model.ScrollContext
 import com.appgate.brain.model.Settle
 import com.appgate.brain.util.Hashing
 import com.appgate.brain.util.Text
@@ -116,7 +117,8 @@ class SpsParser(private val siteFacetVocabulary: Map<String, String> = emptyMap(
             scrollHeight = viewport.optInt("scrollH"),
             scrollY = viewport.optInt("scrollY"),
             capturedAt = now,
-            siteVersion = siteVersion
+            siteVersion = siteVersion,
+            scrollContext = if ("scrollContext" in o.keys) ScrollContext.parse(o["scrollContext"],viewport.optInt("scrollY"),viewport.optInt("h"),viewport.optInt("scrollH")) else null
         )
     }
 

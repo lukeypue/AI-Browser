@@ -51,7 +51,8 @@ object FailedStrategies {
             fun ordered(p: Postcondition): Boolean = p == Postcondition.ResultOrderChanged ||
                 p is Postcondition.AnyOf && p.alternatives.any { child -> ordered(child) }
             val contract = if (capability == "sort_results" && it.expect.any(::ordered)) ":order-v1" else ""
-            "${it.kind}:${it.role}:${facet(f)}:${it.submit}:${it.optional}$movement$contract"
+            val surface=if(it.kind==StepKind.SCROLL && sps.scrollContext?.let{c->c.valid && c.kind==ScrollTarget.RESULTS_CONTAINER}==true)":results-container-v1" else ""
+            "${it.kind}:${it.role}:${facet(f)}:${it.submit}:${it.optional}$movement$contract$surface"
         } ?: "planner"
         // Target-specific failures must not blacklist every listing. Only the final
         // opaque digest is retained, never names, queries, URLs, item IDs or page text.
@@ -62,7 +63,8 @@ object FailedStrategies {
             val identity = explicit ?: if (sps.pageType == PageType.DETAIL) sps.url else sps.resultKeys.sorted().joinToString("|")
             "|target:" + Hashing.short(identity)
         } else ""
-        return Hashing.short("${sps.pageType}|${sps.dialogOpen}|${sps.resultKeys.isNotEmpty()}|$controls|$capability|$procedure$target")
+        val repairSurface=if(capability=="scroll_results" && steps.isNullOrEmpty() && sps.scrollContext?.let{it.valid && it.kind==ScrollTarget.RESULTS_CONTAINER}==true)":results-container-v1" else ""
+        return Hashing.short("${sps.pageType}|${sps.dialogOpen}|${sps.resultKeys.isNotEmpty()}|$controls|$capability|$procedure$target$repairSurface")
     }
 
     /** A definite rejected facet SELECT stays held across program aliases. Only the

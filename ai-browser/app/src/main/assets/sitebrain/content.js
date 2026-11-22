@@ -476,6 +476,41 @@
   let lastElements = new Map();
   let lastListingLinks = new Map();
   const idOf = new WeakMap();
+  const scrollIds = new WeakMap();
+  let nextScrollId = 0;
+  let lastScrollTarget = null;
+  let lastScrollKind = "ROOT";
+
+  // The observed canonical results, not an unrelated large sidebar, own scrolling.
+  function primaryResultsScroller() {
+    const entries = Array.from(lastListingLinks.entries()).filter(([id, href]) => {
+      const el = lastElements.get(id);
+      return el && el.isConnected && el.tagName === "A" && el.href === href && visible(el) &&
+        !el.disabled && el.getAttribute("aria-disabled") !== "true";
+    });
+    if (new Set(entries.map(([, href]) => href)).size < 2) return null;
+    const links = entries.map(([id]) => lastElements.get(id));
+    for (let node = links[0].parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      if (!links.every(link => node.contains(link)) || !visible(node)) continue;
+      const style = window.getComputedStyle(node), rect = node.getBoundingClientRect();
+      if (!/(auto|scroll)/.test(style.overflowY) || node.clientHeight < 200 || node.scrollHeight <= node.clientHeight + 50) continue;
+      if (!inViewport(rect)) continue;
+      return node; // Innermost common ancestor of the one observed results group.
+    }
+    return null;
+  }
+
+  function scrollObservation(target) {
+    if (target && !scrollIds.has(target)) scrollIds.set(target, ++nextScrollId);
+    const kind = target ? "RESULTS_CONTAINER" : "ROOT";
+    const id = documentId + (target ? ":scroll-" + scrollIds.get(target) : ":root");
+    const y = Math.round(target ? target.scrollTop : window.scrollY);
+    const height = Math.round(target ? target.clientHeight : window.innerHeight);
+    const extent = Math.max(height, Math.round(target ? target.scrollHeight : Math.max(document.documentElement.scrollHeight || 0, document.body ? document.body.scrollHeight : 0)));
+    if (![y, height, extent].every(v => Number.isSafeInteger(v) && v >= 0 && v <= 10000000) || height < 1 || y > extent - height + 1)
+      return {kind:"UNKNOWN", id:documentId+":unknown", y:0, height:0, extent:0};
+    return {kind, id, y:Math.min(y, extent-height), height, extent};
+  }
 
   function observe() {
     const { regions, map, dialogs } = buildRegions();
@@ -587,11 +622,15 @@
     const items = authOrChallenge ? [] : cardInfos.map((c) => ({ key: c.key, title: c.title, price: c.price, href: c.href, text: c.text, aff: c.link && idOf.get(c.link) ? idOf.get(c.link) : null }));
     // Only the actual listing anchors from this observation qualify for same-tab training.
     lastListingLinks = new Map(authOrChallenge ? [] : elements.filter(e => e.itemKey && e.href && e.sameSite).map(e => [e.id, e.href]));
+    lastScrollTarget = !authOrChallenge && signals.resultsHint ? primaryResultsScroller() : null;
+    const scrollContext = scrollObservation(lastScrollTarget);
+    lastScrollKind = scrollContext.kind;
     const scripts = Array.from(document.scripts).map((s) => s.src).filter(Boolean).map((s) => s.replace(/^https?:\/\/[^/]+/, "").split("?")[0]).filter((p) => /\.(m?js)$/.test(p)).slice(0, 25);
     const detailText = signals.detailHint && !authOrChallenge ? redact(primaryText(detailScope(dialogs), cards, DETAIL_TEXT_MAX), DETAIL_TEXT_MAX) : "";
     return {
       v: 3,
       documentId,
+      scrollContext,
       url: location.href,
       host: location.host.toLowerCase(),
       title: authOrChallenge ? "" : redact(document.title || "", 120),
@@ -821,6 +860,16 @@
   }
 
   function scrollBy(dy) {
+    const selected = primaryResultsScroller();
+    if (lastScrollKind === "UNKNOWN") return {ok:false, detail:"SCROLL_CONTEXT_UNAVAILABLE"};
+    if (lastScrollKind === "RESULTS_CONTAINER") {
+      if (!lastScrollTarget || !lastScrollTarget.isConnected || selected !== lastScrollTarget)
+        return {ok:false, detail:"STALE_TARGET"};
+      lastScrollTarget.scrollBy({top:dy, behavior:"instant"});
+      fire(lastScrollTarget, "scroll");
+      return {ok:true, detail:"scrolled results container"};
+    }
+    if (selected) return {ok:false, detail:"STALE_TARGET"};
     const before = window.scrollY;
     // Prefer scrolling an inner results container when the document itself does not scroll.
     const docScrollable = (document.documentElement.scrollHeight || 0) > window.innerHeight + 10;

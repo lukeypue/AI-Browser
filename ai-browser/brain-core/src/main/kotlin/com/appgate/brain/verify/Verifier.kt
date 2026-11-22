@@ -72,7 +72,10 @@ object Verifier {
         is Postcondition.EndOfResults -> {
             val noNew = after.resultKeys.isNotEmpty() && after.resultKeys.all { it in before.resultKeys || it in visited }
             val noMore = !after.has(Role.LOAD_MORE) && !after.has(Role.PAGE_NEXT)
-            val atBottom = after.scrollHeight <= 0 || after.scrollY + after.viewportHeight >= after.scrollHeight - 80
+            val scroll = after.scrollContext
+            val atBottom = matchingScroll(before,after) && if(scroll==null)
+                after.scrollHeight <= 0 || after.scrollY + after.viewportHeight >= after.scrollHeight - 80
+                else scroll.y + scroll.height >= scroll.extent - 80
             val ok = noNew && noMore && atBottom
             if (ok) evidence += "end of results (no new keys, no next/load-more, at bottom)"
             ok
@@ -103,8 +106,10 @@ object Verifier {
             ok
         }
         is Postcondition.ScrolledDown -> {
-            val ok = after.scrollY > before.scrollY + 100 || after.resultKeys.any { it !in before.resultKeys }
-            if (ok) evidence += "scrolled (${before.scrollY} -> ${after.scrollY})"
+            val beforeY=before.scrollContext?.y?:before.scrollY
+            val afterY=after.scrollContext?.y?:after.scrollY
+            val ok = matchingScroll(before,after) && afterY > beforeY + 100 || after.resultKeys.any { it !in before.resultKeys }
+            if (ok) evidence += "scrolled ($beforeY -> $afterY)"
             ok
         }
         is Postcondition.PageTypeIs -> {
@@ -199,6 +204,11 @@ object Verifier {
     }
 
     /** Default expectations for an action when its author gave none (used by exploration). */
+    private fun matchingScroll(before:SemanticPageState,after:SemanticPageState):Boolean {
+        val a=before.scrollContext;val b=after.scrollContext
+        return if(a==null && b==null)true else a!=null && b!=null && a.valid && b.valid && a.kind==b.kind && a.id==b.id
+    }
+
     fun defaultExpectations(action: Action, before: SemanticPageState): List<Postcondition> {
         val role = action.target?.role
         return when (action.kind) {
