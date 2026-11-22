@@ -480,6 +480,7 @@
   let nextScrollId = 0;
   let lastScrollTarget = null;
   let lastScrollKind = "ROOT";
+  let lastResultsScrollEligible = false;
 
   // The observed canonical results, not an unrelated large sidebar, own scrolling.
   function primaryResultsScroller() {
@@ -622,7 +623,8 @@
     const items = authOrChallenge ? [] : cardInfos.map((c) => ({ key: c.key, title: c.title, price: c.price, href: c.href, text: c.text, aff: c.link && idOf.get(c.link) ? idOf.get(c.link) : null }));
     // Only the actual listing anchors from this observation qualify for same-tab training.
     lastListingLinks = new Map(authOrChallenge ? [] : elements.filter(e => e.itemKey && e.href && e.sameSite).map(e => [e.id, e.href]));
-    lastScrollTarget = !authOrChallenge && signals.resultsHint ? primaryResultsScroller() : null;
+    lastResultsScrollEligible = !authOrChallenge && signals.resultsHint;
+    lastScrollTarget = lastResultsScrollEligible ? primaryResultsScroller() : null;
     const scrollContext = scrollObservation(lastScrollTarget);
     lastScrollKind = scrollContext.kind;
     const scripts = Array.from(document.scripts).map((s) => s.src).filter(Boolean).map((s) => s.replace(/^https?:\/\/[^/]+/, "").split("?")[0]).filter((p) => /\.(m?js)$/.test(p)).slice(0, 25);
@@ -860,7 +862,7 @@
   }
 
   function scrollBy(dy) {
-    const selected = primaryResultsScroller();
+    const selected = lastResultsScrollEligible ? primaryResultsScroller() : null;
     if (lastScrollKind === "UNKNOWN") return {ok:false, detail:"SCROLL_CONTEXT_UNAVAILABLE"};
     if (lastScrollKind === "RESULTS_CONTAINER") {
       if (!lastScrollTarget || !lastScrollTarget.isConnected || selected !== lastScrollTarget)

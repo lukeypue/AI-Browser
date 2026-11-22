@@ -13,7 +13,7 @@ Old ROOTfailure identities remain byte-compatible. A RESULTS_CONTAINER SCROLL ge
 Bridge version advances3.1.10→3.1.11 so retained Gecko profiles refresh the reader. Android version is still allocated by the existing release automation. Signing and workflows are untouched.
 
 ## Test-first evidence
-- Browser RED:2expected failures/3tests on old actual reader, then3/3GREEN; extended7/7 including real newitems, root/sidebar isolation, stale document/panel and no-op negatives.
+- Browser RED:2expected failures/3tests on old actual reader, then3/3GREEN; extended8/8 including real newitems, root/sidebar isolation, stale document/panel, detail-description scrolling and no-op negatives. Added detail-related-card RED (1expected falseSTALE assertion) then fixed cached results eligibility before any publication; all8cases passed.
 - Typed RED:8tests,7expected assertion failures/errors0; GREEN8/8. Additional diagnostic RED:11tests,1expected assertion failure because targety280 was incorrectly logged as root0; updated projection passed focused semantic/phone-export tests.
 - Whole-engine Chromium test: existing old-root failure retained; training produced genuinely new item identities, completed the scrolling lesson in1action with0teacher calls, and saved it. Two freshJVM/layout replays retained the completed lesson and verified newitems in1action each, no newlesson falsely claimed during reuse. Old-root failure count stayed1before/after everypositivecase. Root/sidebar offsets stayed0.
 - End/no-op/human negatives earned0newlessons; human0actions. These use independent DOM new-item state and actual file-backed reload, not command acknowledgment as reward.
