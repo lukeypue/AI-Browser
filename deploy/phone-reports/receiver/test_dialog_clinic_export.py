@@ -62,3 +62,20 @@ class NonmodalBannerCorpusMigrationTests(unittest.TestCase):
             for field,value in [('extractor_sha256','ee94cc45c607b37c1026fde1fed80053fb6fdaea7027fd826b8ba26a42bec309'),('manifest_sha256','a'*64)]:
                 new=clinic();new.update(fixture_sha256='bad789306e28b8b39dd268d1011efa9f2bb6f772a4a1d69ff3030414b57a88b1',extractor_sha256='e65bf1fb6ee2999e9324a6f091071d88a9a0b5fe3f4d40ee2aa6589edf78c55e');new[field]=value
                 with self.assertRaises(ValueError):sanitize(new)
+
+class ResultsScrollCorpusMigrationTests(unittest.TestCase):
+    sanitizers=DialogClinicProvenanceMigrationTests.sanitizers
+    def updated(self):
+        value=clinic();value.update(fixture_sha256='a3afe134ee055738b40b795446b6c0d58db0662db2b41a65b385da09c49935c9',extractor_sha256='988cf5c332e7f192c31d422815dd8ccae9adb4369836caf2b4db9b8614ef0d2f');return value
+    def test_actual_recaptured_dialog_corpus_is_supported_by_all_validators(self):
+        for sanitize in self.sanitizers():self.assertEqual(self.updated(),sanitize(self.updated()))
+    def test_updated_capture_cannot_mix_old_extractor_or_changed_manifest(self):
+        for sanitize in self.sanitizers():
+            for field,value in [('extractor_sha256','e65bf1fb6ee2999e9324a6f091071d88a9a0b5fe3f4d40ee2aa6589edf78c55e'),('manifest_sha256','a'*64),('fixture_sha256','bad789306e28b8b39dd268d1011efa9f2bb6f772a4a1d69ff3030414b57a88b1')]:
+                changed=self.updated();changed[field]=value
+                with self.assertRaises(ValueError):sanitize(changed)
+    def test_updated_capture_still_rejects_false_mastery_and_human_actions(self):
+        for sanitize in self.sanitizers():
+            for change in [lambda c:c['after'][4].update(verified=True),lambda c:c['after'][-1].update(actions=1),lambda c:c.update(behavior_passes=9)]:
+                changed=self.updated();change(changed)
+                with self.assertRaises(ValueError):sanitize(changed)
