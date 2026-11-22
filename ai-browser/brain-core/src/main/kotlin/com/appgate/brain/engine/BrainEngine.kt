@@ -16,6 +16,7 @@ import com.appgate.brain.model.LedgerStep
 import com.appgate.brain.model.PageType
 import com.appgate.brain.model.Postcondition
 import com.appgate.brain.model.Role
+import com.appgate.brain.model.ScrollContext
 import com.appgate.brain.model.SemanticPageState
 import com.appgate.brain.model.SiteModel
 import com.appgate.brain.model.Skill
@@ -835,7 +836,17 @@ class BrainEngine(
                     }
                     if (grounded.action.kind == ActionKind.SCROLL) ledger.scrollRoundsWithoutNew++   // exploration, not a failure
                     else { ledger.consecutiveFailures++; recordFailureMemory(site, before, grounded.step, "unverified") }
-                    finishProgram(ledger, after, site, success = false, rememberFailure = result.status == VerifyStatus.FAILED && before.settle == com.appgate.brain.model.Settle.IDLE && after.settle == com.appgate.brain.model.Settle.IDLE)
+                    val scrollDelta=if(grounded.action.kind==ActionKind.SCROLL)ScrollContext.delta(before,after) else 0L
+                    val paginationExpectation=grounded.action.expect.isNotEmpty() &&
+                        grounded.action.expect.all{Verifier.isScrollPostcondition(it)}
+                    val paginationAction=grounded.action.kind==ActionKind.SCROLL ||
+                        grounded.step.role==Role.LOAD_MORE || grounded.step.role==Role.PAGE_NEXT
+                    val observedEnd=paginationAction && Verifier.holds(Postcondition.EndOfResults,grounded.action,before,after,ledger.visited,mutableListOf())
+                    // Partial movement, an incomparable surface, and an independently observed end
+                    // do not prove a broken pagination procedure or earn a new-results lesson.
+                    val neutralPagination=paginationExpectation && (observedEnd ||
+                        (grounded.action.kind==ActionKind.SCROLL && (scrollDelta==null || scrollDelta>0L)))
+                    finishProgram(ledger, after, site, success = false, rememberFailure = result.status == VerifyStatus.FAILED && before.settle == com.appgate.brain.model.Settle.IDLE && after.settle == com.appgate.brain.model.Settle.IDLE && !neutralPagination)
                 }
                 memory.saveLedger(ledger)
             }
@@ -920,6 +931,13 @@ class BrainEngine(
                 Verifier.holds(it, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
             }
         val verified = programEvidence && capabilityHolds
+        val paginationScroll=ledger.programCapability in setOf("load_more","scroll_results","next_page") &&
+            ledger.currentProgram.any{it.kind==StepKind.SCROLL} && ledger.programPost.isNotEmpty() &&
+            ledger.programPost.all{Verifier.isScrollPostcondition(it)}
+        val scrollDelta=before?.let{ScrollContext.delta(it,sps)}
+        // A failed unrelated action still records its failure; only a successful
+        // scroll procedure with an unconfirmed pagination outcome is deferred.
+        val canRememberFailure=rememberFailure && !(success && !verified && before!=null && paginationScroll && scrollDelta==null)
         // A verified end-of-list is useful navigation, but no evidence that this
         // program loaded new listings. Neither award mastery nor punish a valid
         // learned procedure for reaching the ordinary end of a collection.
@@ -930,14 +948,14 @@ class BrainEngine(
             Verifier.holds(Postcondition.EndOfResults, Action(ActionKind.WAIT), before, sps, emptySet(), mutableListOf())
         // Moving toward a footer is useful exploration, not proof of loading or failure.
         // Transport uncertainty and interlock refusals cannot quarantine sound learned skills.
-        val advancingScroll = success && before != null && ledger.programCapability == "scroll_results" && sps.scrollY > before.scrollY
+        val advancingScroll = success && before != null && paginationScroll && (scrollDelta?:0L)>0L
         // Repeating an already applied query with identical listings proves no new
         // search capability, but cannot blacklist a working form for future queries.
         val unchangedSearch = ledger.programCapability == "search" && before != null &&
             before.pageType == PageType.RESULTS && sps.pageType == PageType.RESULTS &&
             before.resultKeys.isNotEmpty() && before.resultKeys == sps.resultKeys &&
             committedQueryMatches(ledger.goal, before) && committedQueryMatches(ledger.goal, sps)
-        val neutral = unchangedSearch || terminalEnd || !verified && (!rememberFailure || advancingScroll)
+        val neutral = unchangedSearch || terminalEnd || !verified && (!canRememberFailure || advancingScroll)
         if (ledger.goal.intent == GoalIntent.LEARN_SITE && ledger.lesson == "scroll_results" &&
             ledger.programCapability == "scroll_results" && !verified && !ledger.blocked) {
             // Transport uncertainty and real failures are not evidence of useful movement.
@@ -953,7 +971,7 @@ class BrainEngine(
         val programPresent = ledger.currentProgram.isNotEmpty()
         val sourceEligible = source.startsWith("skill:") || source in setOf("planner", "local")
         if (before != null && ledger.currentProgram.isNotEmpty() && !ledger.blocked && !neutral &&
-            (verified || rememberFailure) && (source.startsWith("skill:") || source in setOf("planner", "local"))) {
+            (verified || canRememberFailure) && (source.startsWith("skill:") || source in setOf("planner", "local"))) {
             FailedStrategies.record(site, strategyKey!!, verified, clock(),
                 if(!verified) FailedStrategies.approach(before, savedCapability, ledger.currentProgram, skillParams(ledger)) else null)
             memoryCode = if (verified) "STRATEGY_SUCCESS_SAVED" else "STRATEGY_FAILURE_SAVED"
@@ -1003,7 +1021,7 @@ class BrainEngine(
             .put("strategy_prior_failures", priorFailures)
             .put("strategy_current_failures", strategyKey?.let { site.strategyFailures[it]?.count } ?: 0)
             .put("outcome_verified", if (verified) 1 else 0).put("outcome_neutral", if (neutral) 1 else 0)
-            .put("outcome_rememberable", if (rememberFailure) 1 else 0)
+            .put("outcome_rememberable", if (canRememberFailure) 1 else 0)
             .put("before_results", if (before?.pageType == PageType.RESULTS) 1 else 0)
             .put("after_dialog", if (sps.dialogOpen) 1 else 0)
             .put("dialog_detail_controls", sps.affordances.count { it.visible &&

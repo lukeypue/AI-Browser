@@ -56,4 +56,29 @@ class ResultsScrollContextTest {
   val key=FailedStrategies.key(legacy,"scroll_results",body);assertEquals("6e2ef3aa61eeb766",key);assertEquals(key,FailedStrategies.key(root(0),"scroll_results",body))
   assertTrue(holds(Postcondition.ScrolledDown,root(0),root(280)));assertFalse(holds(Postcondition.ScrolledDown,root(0),page(280)))
  }
+
+ @Test fun changedMissingOrInvalidSurfaceIsAmbiguousRatherThanBroken(){
+  val action=Action(ActionKind.SCROLL,amount=280,expect=listOf(Postcondition.anyOf(Postcondition.ScrolledDown,Postcondition.EndOfResults,Postcondition.NewResults)))
+  val states=listOf(page(280,id="doc-1:scroll-2"),SpsParser().parse(raw().remove("scrollContext")),SpsParser().parse(raw().put("scrollContext",JsonString("unavailable"))))
+  for(after in states)assertEquals(VerifyStatus.AMBIGUOUS,Verifier.verify(action,page(),after).status)
+ }
+ @Test fun independentlyVerifiedNewResultsRemainPositiveWhenSurfaceChanges(){
+  val before=page();val after=page(280,id="doc-1:scroll-2").copy(collections=listOf(Collection("results",listOf("fresh-key"),1)))
+  val action=Action(ActionKind.SCROLL,expect=listOf(Postcondition.anyOf(Postcondition.ScrolledDown,Postcondition.EndOfResults,Postcondition.NewResults)))
+  assertEquals(VerifyStatus.VERIFIED,Verifier.verify(action,before,after).status)
+ }
+ @Test fun comparableNoOpStillFailsAndUnrelatedMissingExpectationIsNotExcused(){
+  assertEquals(VerifyStatus.FAILED,Verifier.verify(Action(ActionKind.SCROLL,expect=listOf(Postcondition.ScrolledDown)),page(),page()).status)
+  assertEquals(VerifyStatus.FAILED,Verifier.verify(Action(ActionKind.SCROLL,expect=listOf(Postcondition.ConstraintApplied("price_max","100"))),page(),page(id="doc-1:scroll-2")).status)
+ }
+
+ @Test fun newResultsOnlyScrollIsUnconfirmedWhenItsSurfaceChanges(){
+  assertEquals(VerifyStatus.AMBIGUOUS,Verifier.verify(Action(ActionKind.SCROLL,expect=listOf(Postcondition.NewResults)),page(),page(id="doc-1:scroll-2")).status)
+ }
+
+ @Test fun paginationClickWithUnknownEndGeometryIsAmbiguousButDefiniteNoNewItemsClickFails(){
+  val before=page();val after=page(id="doc-1:scroll-2");val ref=AffordanceRef(Role.LOAD_MORE)
+  assertEquals(VerifyStatus.AMBIGUOUS,Verifier.verify(Action(ActionKind.CLICK,ref,expect=listOf(Postcondition.anyOf(Postcondition.NewResults,Postcondition.EndOfResults))),before,after).status)
+  assertEquals(VerifyStatus.FAILED,Verifier.verify(Action(ActionKind.CLICK,ref,expect=listOf(Postcondition.NewResults)),before,after).status)
+ }
 }

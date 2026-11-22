@@ -6,6 +6,7 @@ import com.appgate.brain.model.PageType
 import com.appgate.brain.model.Postcondition
 import com.appgate.brain.model.Role
 import com.appgate.brain.model.SemanticPageState
+import com.appgate.brain.model.ScrollContext
 import com.appgate.brain.model.Settle
 import com.appgate.brain.model.VerifierResult
 import com.appgate.brain.model.VerifyStatus
@@ -34,6 +35,16 @@ object Verifier {
             if (holds(p, action, before, after, visited, evidence)) satisfied += p else unsatisfied += p
         }
         if (unsatisfied.isEmpty()) return VerifierResult(VerifyStatus.VERIFIED, evidence, satisfied, unsatisfied)
+        fun unconfirmed(p:Postcondition):Boolean=when(p) {
+            Postcondition.ScrolledDown,Postcondition.EndOfResults->true
+            Postcondition.NewResults,Postcondition.ResultsChanged->action.kind==ActionKind.SCROLL
+            is Postcondition.AnyOf->p.alternatives.any(::unconfirmed)
+            else->false
+        }
+        if(ScrollContext.delta(before,after)==null && unsatisfied.all(::unconfirmed)) {
+            evidence += "scroll surface unavailable or changed; verdict ambiguous"
+            return VerifierResult(VerifyStatus.AMBIGUOUS,evidence,satisfied,unsatisfied)
+        }
         val stillLoading = after.settle != Settle.IDLE
         if (satisfied.isEmpty() && stillLoading) {
             evidence += "page not settled; verdict ambiguous"
@@ -73,7 +84,7 @@ object Verifier {
             val noNew = after.resultKeys.isNotEmpty() && after.resultKeys.all { it in before.resultKeys || it in visited }
             val noMore = !after.has(Role.LOAD_MORE) && !after.has(Role.PAGE_NEXT)
             val scroll = after.scrollContext
-            val atBottom = matchingScroll(before,after) && if(scroll==null)
+            val atBottom = (ScrollContext.delta(before,after)!=null) && if(scroll==null)
                 after.scrollHeight <= 0 || after.scrollY + after.viewportHeight >= after.scrollHeight - 80
                 else scroll.y + scroll.height >= scroll.extent - 80
             val ok = noNew && noMore && atBottom
@@ -108,8 +119,9 @@ object Verifier {
         is Postcondition.ScrolledDown -> {
             val beforeY=before.scrollContext?.y?:before.scrollY
             val afterY=after.scrollContext?.y?:after.scrollY
-            val ok = matchingScroll(before,after) && afterY > beforeY + 100 || after.resultKeys.any { it !in before.resultKeys }
-            if (ok) evidence += "scrolled ($beforeY -> $afterY)"
+            val delta=ScrollContext.delta(before,after)
+            val ok = (delta?.let{it>100L}==true) || after.resultKeys.any { it !in before.resultKeys }
+            if (ok) evidence += if(delta!=null) "scrolled ($beforeY -> $afterY)" else "new result keys after scrolling"
             ok
         }
         is Postcondition.PageTypeIs -> {
@@ -204,9 +216,10 @@ object Verifier {
     }
 
     /** Default expectations for an action when its author gave none (used by exploration). */
-    private fun matchingScroll(before:SemanticPageState,after:SemanticPageState):Boolean {
-        val a=before.scrollContext;val b=after.scrollContext
-        return if(a==null && b==null)true else a!=null && b!=null && a.valid && b.valid && a.kind==b.kind && a.id==b.id
+    internal fun isScrollPostcondition(p:Postcondition):Boolean=when(p) {
+        Postcondition.ScrolledDown,Postcondition.EndOfResults,Postcondition.NewResults,Postcondition.ResultsChanged->true
+        is Postcondition.AnyOf->p.alternatives.isNotEmpty() && p.alternatives.all(::isScrollPostcondition)
+        else->false
     }
 
     fun defaultExpectations(action: Action, before: SemanticPageState): List<Postcondition> {

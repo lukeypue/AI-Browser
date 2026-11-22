@@ -16,6 +16,14 @@ data class ScrollContext(val kind: ScrollTarget, val id: String, val y: Int, val
         private const val LIMIT=10_000_000
         private val idPattern=Regex("[A-Za-z0-9-]{1,64}:(root|scroll-[1-9][0-9]{0,6})")
         val INVALID=ScrollContext(ScrollTarget.UNKNOWN,"",0,0,0)
+        /** Null means the two observations cannot measure the same scroll surface. */
+        fun delta(before:SemanticPageState,after:SemanticPageState):Long? {
+            val a=before.scrollContext;val b=after.scrollContext
+            if(a==null && b==null)return after.scrollY.toLong()-before.scrollY.toLong()
+            if(a==null || b==null || !a.valid || !b.valid || a.kind!=b.kind || a.id!=b.id)return null
+            return b.y.toLong()-a.y.toLong()
+        }
+
         fun parse(raw: JsonValue?, rootY:Int, rootHeight:Int, rootExtent:Int):ScrollContext {
             val row=raw as? JsonObject ?: return INVALID
             if(row.keys!=setOf("kind","id","y","height","extent"))return INVALID
