@@ -57,10 +57,14 @@
     const method = (details.method || "GET").toUpperCase();
     if (method === "GET" || method === "HEAD" || method === "OPTIONS") return { cls: "READ", key: method + " " + pathTemplate(details.url) };
     const key = method + " " + pathTemplate(details.url);
+    let requestPath;
+    try { requestPath = new URL(details.url).pathname; }
+    catch (_) { return { cls: "UNKNOWN_MUTATION", key, op: "" }; }
     const op = bodyOperation(details);
     if (commitEndpoints.includes(key) || commitEndpoints.some((e) => op && e.endsWith("#" + op))) return { cls: "COMMIT", key, op };
     if (readAllowlist.includes(key) || readAllowlist.some((e) => op && e.endsWith("#" + op))) return { cls: "READ", key, op };
-    const commitByPath = commitPathRe.test(details.url.split("?")[0]);
+    // Hosts and query values are not action paths.
+    const commitByPath = commitPathRe.test(requestPath);
     const commitByOp = op && commitOpRe.test(op) && !readOpRe.test(op);
     const readByOp = op && readOpRe.test(op) && !/(send|message|create|delete|purchase|order|bid|offer|follow|save|report)/i.test(op);
     if (commitByPath || commitByOp) return { cls: "COMMIT_HEURISTIC", key, op };
