@@ -24,7 +24,9 @@ class ServerLabInstrumentation : Instrumentation() {
     @Volatile private var faultStartedAt = 0L
     private val faultRecorded = AtomicBoolean(false)
     private var startupTrace: ServerLabStartupTrace? = null
+    private val observedStage = AtomicReference(ServerLabThreadSampler.Stage.GUARD)
     private fun enterStage(value: ServerLabStartupTrace.Stage) {
+        observedStage.set(runCatching { ServerLabThreadSampler.Stage.valueOf(value.name) }.getOrDefault(ServerLabThreadSampler.Stage.UNKNOWN))
         stage = value.name
         startupTrace?.record(value)
     }
@@ -69,7 +71,6 @@ class ServerLabInstrumentation : Instrumentation() {
         start()
     }
     override fun onStart() {
-        startupTrace?.record(ServerLabStartupTrace.Stage.ON_START)
         val command=args.getString("command") ?: "smoke"
         val rawId=args.getString("cycle_id") ?: UUID.randomUUID().toString()
         // Reject arbitrary paths before creating a file.
@@ -80,6 +81,11 @@ class ServerLabInstrumentation : Instrumentation() {
             finish(Activity.RESULT_CANCELED,Bundle().apply { putString("result","INVALID_COMMAND") }); return
         }
         if(command=="anr_probe") { inspectOwnAnr(id); return }
+        val threadSampler = if(BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB &&
+            targetContext.packageName == "com.aibrowser.universal.serverlab")
+            ServerLabThreadSampler(File(targetContext.filesDir,"serverlab"),id,BuildConfig.DIAGNOSTICS_REVISION,
+                BuildConfig.VERSION_CODE,SystemClock::elapsedRealtime,{observedStage.get()},Looper.getMainLooper().thread,Thread.currentThread()).also {it.start()} else null
+        enterStage(ServerLabStartupTrace.Stage.ON_START)
         var service:BrainService?=null
         var bound=false
         val ready=CountDownLatch(1)
@@ -94,7 +100,7 @@ class ServerLabInstrumentation : Instrumentation() {
         enterStage(ServerLabStartupTrace.Stage.GUARD)
         var startupWait:ServerLabStartupWait?=null
         val connection=object:ServiceConnection {
-            override fun onServiceConnected(name:ComponentName,binder:IBinder) { service=(binder as BrainService.LocalBinder).service; ready.countDown() }
+            override fun onServiceConnected(name:ComponentName,binder:IBinder) { observedStage.set(ServerLabThreadSampler.Stage.BOUND_CALLBACK); service=(binder as BrainService.LocalBinder).service; ready.countDown() }
             override fun onServiceDisconnected(name:ComponentName) {}
         }
         try {
@@ -118,14 +124,22 @@ class ServerLabInstrumentation : Instrumentation() {
             val startup=ServerLabStartupWait(SystemClock::elapsedRealtime, SystemClock::sleep) { enterStage(ServerLabStartupTrace.Stage.valueOf(it.name)) }
             startupWait=startup
             check(startup.awaitBinding(requestBind={
+                observedStage.set(ServerLabThreadSampler.Stage.BEFORE_MAIN_DISPATCH)
                 runOnMainSync {
+                    observedStage.set(ServerLabThreadSampler.Stage.MAIN_BIND_ENTERED)
+                    observedStage.set(ServerLabThreadSampler.Stage.BEFORE_SERVICE_START)
                     BrainService.start(targetContext)
+                    observedStage.set(ServerLabThreadSampler.Stage.AFTER_SERVICE_START)
+                    observedStage.set(ServerLabThreadSampler.Stage.BEFORE_BIND_CALL)
                     bound=targetContext.bindService(Intent(targetContext,BrainService::class.java),connection,Context.BIND_AUTO_CREATE)
+                    observedStage.set(ServerLabThreadSampler.Stage.AFTER_BIND_CALL)
                 }
                 bound
             }, awaitBound={ timeout -> ready.await(timeout,TimeUnit.MILLISECONDS) }))
             val s=service ?: run { enterStage(ServerLabStartupTrace.Stage.SERVICE_UNAVAILABLE); error("SERVICE_UNAVAILABLE") }
             check(startup.awaitEngineReady { s.state.engineReady })
+            observedStage.set(ServerLabThreadSampler.Stage.READY)
+            threadSampler?.close()
             engineReady=true
             waitForIdleSync()
             enterStage(ServerLabStartupTrace.Stage.MEMORY_BEFORE)
@@ -168,6 +182,7 @@ class ServerLabInstrumentation : Instrumentation() {
             // No exception messages, page content, logs or preferences leave this runner.
             status="FAILED"; end="RUNTIME_FAILED"
         } finally {
+            threadSampler?.close()
             ServerLabRuntime.detach()
             if(bound) runCatching { runOnMainSync { targetContext.unbindService(connection) } }
         }
