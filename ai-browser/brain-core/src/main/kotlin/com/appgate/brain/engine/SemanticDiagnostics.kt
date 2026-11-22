@@ -70,6 +70,7 @@ object SemanticDiagnostics {
         .put("source", when { ledger.programSource.startsWith("skill:") -> "skill"; ledger.programSource == "planner" -> "planner"; else -> "engine" })
         .put("capability", capability(ledger.programCapability)).put("lesson", capability(ledger.lesson))
         .put("kind", step?.kind?.name).put("role", step?.role?.name).put("facet", FailedStrategies.facet(step?.facetKey))
+        .also { data->step?.let { data.put("action_kind",it.kind.name).put("target_class",VerificationDiagnostics.targetClass(it.role)).put("optional_step",if(it.optional)1 else 0) } }
         .put("expected_host", host("https://${ledger.host}/"))
         .put("before", page(before)).put("after", after?.let { page(it) })
         .put("new_items", after?.resultKeys?.count { it !in before.resultKeys })

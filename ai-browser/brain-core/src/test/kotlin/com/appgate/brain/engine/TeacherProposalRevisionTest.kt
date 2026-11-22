@@ -11,6 +11,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.nio.file.Files
 class TeacherProposalRevisionTest {
+ private val evidence=mutableListOf<JsonObject>()
  private val now=1_800_000_000_000L
  private val config=EngineConfig(pacingOverrideMs=0,plannerCooldownMs=0,ambiguousRecheckMs=0,idleSleepMs=0)
  private val repaired="""{"steps":[{"kind":"WAIT","optional":true},{"kind":"CLICK","role":"RESULT_ITEM","arg":"${'$'}item","expect":["PAGE_IS_DETAIL"]}],"confidence":0.99}"""
@@ -36,7 +37,7 @@ class TeacherProposalRevisionTest {
    })
    val generated=Curriculum.nextGoal(site,SiteProfiles.generic(fake.host),0,page,"open_item")
    val goal=generated.copy(rawText="practice",query="Ford",budget=generated.budget.copy(llmCalls=budget?:generated.budget.llmCalls,wallMs=10000))
-   val out=BrainEngine(fake,memory,{planner},object:EngineEvents{},config){now}.runTask(TaskLedger("revision",goal,fake.host,fake.url).apply{lesson="open_item"})
+   val out=BrainEngine(fake,memory,{planner},object:EngineEvents{override fun diagnostic(host:String,kind:String,data:JsonObject){if(kind=="planner_outcome")evidence+=data}},config){now}.runTask(TaskLedger("revision",goal,fake.host,fake.url).apply{lesson="open_item"})
    check(out,requests,Memory(FileBrainStorage(dir)){now},fake)
   }finally{dir.deleteRecursively()}
  }
@@ -71,6 +72,7 @@ class TeacherProposalRevisionTest {
   scenario(listOf(bad,repaired)){out,requests,_,_->
    assertEquals(2,requests.size);assertEquals("INCOMPATIBLE",requests[1].optObject("task")!!.optArray("proposal_rejections")!!.objects().single().optString("reason"))
    assertEquals(TaskStatus.DONE,out.status)
+   assertTrue("specific rejection must reach diagnostics",evidence.any{it.optString("proposal_rejection")=="INCOMPATIBLE"})
   }
  }
 }

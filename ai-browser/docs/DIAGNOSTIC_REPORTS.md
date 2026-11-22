@@ -36,3 +36,22 @@ Optional schema2 planner_failure and planner_provider are closed enums. Provider
 Completed phone summary failure counters are captured by the timed-test owner before trimming and freeze with it. Authentication, permission, rate, server, transport(includingtimeout), response, budget and other errors partition ERROR events; refusal is a separate planner outcome. Missing totals in old/interrupted reports remain unknown. These counts locate failed repair requests, not failed website logins or erased memory. The completion screen points to the selected AI planner connection after an authentication rejection. Changing credentials still requires secure owner action; no secret is read or transmitted by diagnostics.
 
 City retains the first planner error and first item-opening action in at most6 event rows with internal callback ordinals, preserving repeated identical callbacks and chronology. The optional unscored planner_clinic runs the real engine against fake clients for401/403/429/503/timeout/invalidresponse/unknown/returned controls. Its8 rows are independently allowlisted; external_requests is0. A true diagnostic_expectation_met records correct identification of the injected outcome, not successful navigation or learned mastery. A false control remains a reportable finding. Frozen exams/manifests/scores, schedules and request budgets are unchanged. Independent receiver/publisher validators and the separately pinned Android-cycle validator must be deployed before app rollout.
+
+
+## Verification and teacher rejection evidence
+Optional schema2 fields distinguish action kind, abstract target class, first expectation kind,
+verification reason and closed proposal rejection reason. No expectation arguments, target IDs,
+text, URLs, queries, hashes of website content or teacher responses are exported.
+Counters describe expected/satisfied/unmet top-level checks, optional steps, at most two
+observation rechecks, unreadable rechecks, verified text expansion, semantic/route changes,
+and visible actionable controls for the target role before/after. An unreadable recheck or
+unconfirmed deferred identity remains ambiguous; satisfied checks alone do not establish success.
+The text-expansion flag identifies a directly satisfied top-level TEXT_EXPANDED check; it does not infer the winning branch of ANY_OF. An optional WAIT without expectations reports NO_EXPECTATIONS and never claims a failed item click.
+PROPOSAL_REJECTED carries GIVE_UP/EMPTY/LOW_CONFIDENCE/INCOMPATIBLE/WRONG_TARGET/
+HELD_PROCEDURE/DUPLICATE separately from provider transport errors. These are diagnostic
+observations of existing policy; they do not grant success, lift holds or trigger extra requests.
+City separately protects its first rejection, first provider error and first item outcome within the existing six-row trace. Dropped event
+counts remain explicit. Existing legacy reports,1MiB trimming, queues and retention are unchanged.
+Deploy independently validating receiver/publisher code and the pinned native validator before
+promoting an app that emits these optional fields. New physical-phone evidence is required to
+explain actual expansion failures; a diagnostics improvement is not measured marketplace learning.

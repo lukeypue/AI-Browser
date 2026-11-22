@@ -64,4 +64,27 @@ class CityDiagnosticsTest {
   }
   assertEquals("sample different failure causes",3,CityDiagnostics.report(mapOf("baseline" to rows)).optArray("samples")!!.size)
  }
+ @Test fun rejectedTeacherEvidenceSurvivesTraceTrimming(){
+  val d=CityDiagnostics()
+  repeat(10){d.diagnostic("private","task_lifecycle",com.appgate.brain.json.Json.obj("status" to "RUNNING"))}
+  d.diagnostic("private","planner_outcome",com.appgate.brain.json.Json.obj("planner_outcome" to "PROPOSAL_REJECTED","proposal_rejection" to "WRONG_TARGET"))
+  repeat(10){d.diagnostic("private","task_lifecycle",com.appgate.brain.json.Json.obj("status" to "PARTIAL"))}
+  val out=d.toJson();assertTrue(out.optArray("trace")!!.objects().any{it.optString("proposal_rejection")=="WRONG_TARGET"});assertTrue(out.optArray("trace")!!.size<=6)
+ }
+ @Test fun providerErrorAndProposalRejectionBothSurviveInEitherOrder(){
+  for(errorFirst in listOf(true,false)){
+   val d=CityDiagnostics()
+   fun error(){d.diagnostic("private","planner_outcome",com.appgate.brain.json.Json.obj("planner_outcome" to "ERROR","planner_failure" to "AUTHENTICATION"))}
+   fun rejection(){d.diagnostic("private","planner_outcome",com.appgate.brain.json.Json.obj("planner_outcome" to "PROPOSAL_REJECTED","proposal_rejection" to "INCOMPATIBLE"))}
+   repeat(10){d.diagnostic("private","task_lifecycle",com.appgate.brain.json.Json.obj("status" to "RUNNING"))}
+   if(errorFirst)error()else rejection()
+   d.diagnostic("private","action_outcome",com.appgate.brain.json.Json.obj("capability" to "open_item","status" to "FAILED"))
+   if(errorFirst)rejection()else error()
+   repeat(10){d.diagnostic("private","task_lifecycle",com.appgate.brain.json.Json.obj("status" to "PARTIAL"))}
+   val out=d.toJson();val rows=out.optArray("trace")!!.objects();assertEquals(6,rows.size)
+   assertTrue("provider error must survive",rows.any{it.optString("planner_failure")=="AUTHENTICATION"})
+   assertTrue("proposal rejection must survive",rows.any{it.optString("proposal_rejection")=="INCOMPATIBLE"})
+   assertTrue(rows.any{it.optString("capability")=="open_item"});assertEquals(out.optInt("events_seen")-6,out.optInt("events_dropped"))
+  }
+ }
 }

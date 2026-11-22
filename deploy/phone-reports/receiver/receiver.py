@@ -36,6 +36,18 @@ JOURNEY_ENUMS={
 SUMMARY_V2={'planner_auth_errors','planner_permission_errors','planner_rate_errors','planner_server_errors','planner_transport_errors','planner_response_errors','planner_budget_errors','planner_other_errors','new_lessons','neutral_programs','held_programs','planner_errors','diagnostic_events'}
 COUNTERS_V2|={'http_status','planner_elapsed_ms','task_sequence','program_sequence','action_sequence','rehearsal','neutral_scroll_only','prerequisite_only','lesson_attempted','lesson_done','no_progress_retries','cooldown_remaining_ms','strategy_key_same','detail_controls','dialog_open','scroll_y','scroll_height','viewport_height'}
 
+
+# Closed verification evidence; no action arguments, element IDs, text or response bodies.
+JOURNEY_ENUMS.update({
+ 'action_kind':{'CLICK','TYPE','SELECT','SCROLL','NAVIGATE','BACK','WAIT','DISMISS','SET_RANGE','UNKNOWN'},
+ 'target_class':{'ITEM','TEXT_EXPANDER','SEARCH','FILTER','PAGINATION','DIALOG','OTHER','NONE','UNKNOWN'},
+ 'primary_expectation':{'RESULTS_CHANGED','RESULT_ORDER_CHANGED','NEW_RESULTS','END_OF_RESULTS','TEXT_EXPANDED','DIALOG_CLOSED','DIALOG_OPENED','URL_CHANGED','COMPOSER_READY','SCROLLED_DOWN','PAGE_TYPE_IS','CONSTRAINT_APPLIED','DETAIL_MATCHES','URL_QUERY_HAS','ROLE_APPEARED','VALUE_IS','ANY_OF','NONE','UNKNOWN'},
+ 'verification_reason':{'VERIFIED','HUMAN_REQUIRED','NO_EXPECTATIONS','RECHECK_UNREADABLE','ITEM_IDENTITY_UNCONFIRMED','PAGE_UNSETTLED','NO_SEMANTIC_CHANGE','EXPECTATION_UNMET','UNKNOWN'},
+ 'proposal_rejection':{'GIVE_UP','EMPTY','LOW_CONFIDENCE','INCOMPATIBLE','WRONG_TARGET','HELD_PROCEDURE','DUPLICATE','UNKNOWN'}})
+JOURNEY_ENUMS['planner_outcome'].add('PROPOSAL_REJECTED')
+VERIFICATION_FLAGS={'optional_step','observation_read_failed','text_expansion_verified','semantic_changed','route_changed'}
+COUNTERS_V2|=VERIFICATION_FLAGS|{'expected_checks','satisfied_checks','unmet_checks','observation_rechecks','target_controls_before','target_controls_after'}
+
 class Failure(Exception):
  def __init__(self,status=400):self.status=status
 
@@ -81,8 +93,9 @@ def validate(r):
         for key,allowed in [('code',CODES_V2 if version==2 else CODES),('site',SITES),('page_type',PAGES),('status',STATUSES_V2 if version==2 else STATUSES),('phase',PHASES),('diagnostic_code',DIAGNOSTICS_V2 if version==2 else DIAGNOSTICS)]:check(type(event[key]) is str and event[key] in allowed)
         integer(event['elapsed_ms'],r['elapsed_ms']);check(event['elapsed_ms']>=previous);previous=event['elapsed_ms']
         check(type(event['counters']) is dict and set(event['counters'])<=(COUNTERS_V2 if version==2 else COUNTERS))
+        if 'observation_rechecks' in event['counters']:integer(event['counters']['observation_rechecks'],2)
         if 'http_status' in event['counters']:check(type(event['counters']['http_status']) is int and 100<=event['counters']['http_status']<=599)
-        for key,value in event['counters'].items():integer(value,1 if key in {'rehearsal','neutral_scroll_only','prerequisite_only','lesson_attempted','lesson_done','strategy_key_same','dialog_open'} else 1000000)
+        for key,value in event['counters'].items():integer(value,1 if key in VERIFICATION_FLAGS|{'rehearsal','neutral_scroll_only','prerequisite_only','lesson_attempted','lesson_done','strategy_key_same','dialog_open'} else 1000000)
     check(len(canonical(r))<=LIMIT,413)
     return r
 

@@ -10,6 +10,7 @@ class CityDiagnostics:EngineEvents {
  private val last=java.util.ArrayDeque<Pair<Int,JsonObject>>()
  private var opening:Pair<Int,JsonObject>?=null
  private var plannerFailure:Pair<Int,JsonObject>?=null
+ private var plannerRejection:Pair<Int,JsonObject>?=null
  private val counts=KEYS.associateWith{0}.toMutableMap()
  override fun diagnostic(host:String,kind:String,data:JsonObject) {
   val e=PhoneReportExporter.projectEvent(kind,data)?:return
@@ -18,6 +19,7 @@ class CityDiagnostics:EngineEvents {
   inc("events_seen")
   val row=counts.getValue("events_seen") to e
   if(kind=="planner_outcome" && e.optString("planner_outcome")=="ERROR" && plannerFailure==null)plannerFailure=row
+  if(kind=="planner_outcome" && e.optString("proposal_rejection").let{it.isNotBlank() && it!="UNKNOWN"} && plannerRejection==null)plannerRejection=row
   if(kind=="action_outcome" && e.optString("capability")=="open_item" && opening==null)opening=row
   if(kind=="action_outcome")when(e.optString("status")){"VERIFIED"->inc("action_verified");"FAILED"->inc("action_failed")}
   if(kind=="memory_checkpoint") {
@@ -29,7 +31,7 @@ class CityDiagnostics:EngineEvents {
   if(first.size<3)first+=row else {last.addLast(row);if(last.size>3)last.removeFirst()}
  }
  fun toJson():JsonObject {
-  val protectedRows=(listOfNotNull(opening,plannerFailure)+last.toList()).distinctBy{it.first}
+  val protectedRows=(listOfNotNull(opening,plannerFailure,plannerRejection)+last.toList()).distinctBy{it.first}
   val protectedOrdinals=protectedRows.map{it.first}.toSet()
   val trace=(protectedRows+first.filter{it.first !in protectedOrdinals}.take((6-protectedRows.size).coerceAtLeast(0))).sortedBy{it.first}.map{it.second}
   val out=JsonObject()

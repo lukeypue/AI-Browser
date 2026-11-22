@@ -15,6 +15,7 @@ class DelayedItemOutcomeTest {
   val memory=Memory(InMemoryStorage())
   var reads=0;var clicks=0
   var onRead:((Int)->Unit)?=null
+  val diagnostics=mutableListOf<JsonObject>()
   val timeouts=mutableListOf<Long>()
   override fun observe(timeoutMs:Long):String {
    val raw=Json.parseObject(fake.observe(timeoutMs))
@@ -49,7 +50,7 @@ class DelayedItemOutcomeTest {
   val renderer=Delayed(states);val memory=renderer.memory
   val goal=GoalParser.parse("synthetic vehicle",Budget(actions=4,llmCalls=0,wallMs=wallMs)).copy(intent=GoalIntent.LEARN_SITE)
   val ledger=TaskLedger("delayed",goal,renderer.fake.host,renderer.fake.url).apply{lesson="open_item"}
-  val engine=BrainEngine(renderer,memory,{null},object:EngineEvents{},EngineConfig(pacingOverrideMs=0,ambiguousRecheckMs=0,plannerCooldownMs=0))
+  val engine=BrainEngine(renderer,memory,{null},object:EngineEvents{override fun diagnostic(host:String,kind:String,data:JsonObject){if(kind=="action_outcome")renderer.diagnostics+=com.appgate.brain.diagnostics.PhoneReportExporter.projectEvent(kind,data)!!}},EngineConfig(pacingOverrideMs=0,ambiguousRecheckMs=0,plannerCooldownMs=0))
   renderer.onRead=callback
   if(pageTypeContract){ledger.currentProgram=listOf(Step(StepKind.CLICK,Role.RESULT_ITEM,arg="k1",expect=listOf(Postcondition.PageTypeIs(PageType.DETAIL))));ledger.programSource="planner";ledger.programCapability="open_item";ledger.programPost=listOf(Postcondition.PageTypeIs(PageType.DETAIL))}
   if(stopAfterRead)renderer.onRead={if(it==1)engine.requestStop()}
@@ -88,6 +89,7 @@ class DelayedItemOutcomeTest {
  @Test fun unreadableRecheckDoesNotPersistAConcreteFailure(){
   val(r,l)=run(listOf("DIALOG","TIMEOUT"))
   assertTrue(l.successfulSkills.isEmpty());assertTrue("unknown delayed outcome must not blacklist the procedure",r.memory.site(r.fake.host).strategyFailures.isEmpty())
+  val e=r.diagnostics.last();assertEquals("RECHECK_UNREADABLE",e.optString("verification_reason"));assertEquals("AMBIGUOUS",e.optString("status"));assertEquals(1,e.optObject("counters")!!.optInt("observation_read_failed"));assertEquals(1,e.optObject("counters")!!.optInt("observation_rechecks"));assertEquals(0,e.optObject("counters")!!.optInt("text_expansion_verified"))
  }
  @Test fun interruptionIsNotSwallowedByTheRecheck(){
   val(r,l)=run(listOf("DIALOG","INTERRUPTED"))
@@ -98,6 +100,7 @@ class DelayedItemOutcomeTest {
    val(r,l)=run(listOf("DIALOG","WRONG"),pageTypeContract=pageTypeContract)
    assertFalse("unrelated detail is not the requested item", "open_item" in l.successfulSkills)
    assertEquals(0,r.memory.site(r.fake.host).verifiedActions)
+   val e=r.diagnostics.last();assertEquals("ITEM_IDENTITY_UNCONFIRMED",e.optString("verification_reason"));assertEquals("AMBIGUOUS",e.optString("status"));assertEquals(0,e.optObject("counters")!!.optInt("observation_read_failed"));assertEquals(0,e.optObject("counters")!!.optInt("text_expansion_verified"))
   }
  }
  @Test fun expiredObservationCannotChangeBindingOrActionStatistics(){

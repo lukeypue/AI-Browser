@@ -753,6 +753,9 @@ class BrainEngine(
                     return true
                 }
                 if (itemDeadlineExpired()) return
+                var observationRechecks = 0
+                var observationReadFailed = false
+                var identityUnconfirmed = false
                 var unreadableRecheck = false
                 var deferredItem = false
                 val rechecks = if (openingItem) 2 else if (result.status == VerifyStatus.AMBIGUOUS) 1 else 0
@@ -764,9 +767,11 @@ class BrainEngine(
                     Thread.sleep(delay)
                     if (stopRequested.get()) break
                     if (itemDeadlineExpired()) return
+                    observationRechecks++
                     val again = try { executor.observe(clock(), if (openingItem) remainingWallMs().coerceAtLeast(1L) else Long.MAX_VALUE) }
                     catch (interrupted: InterruptedException) { throw interrupted }
                     catch (_: Exception) {
+                        observationReadFailed = true
                         unreadableRecheck = openingItem
                         result = result.copy(status = VerifyStatus.AMBIGUOUS)
                         break
@@ -777,6 +782,7 @@ class BrainEngine(
                     result = Verifier.verify(action, before, after, ledger.visited)
                     if (itemDeadlineExpired()) return
                     if (deferredItem && result.status == VerifyStatus.VERIFIED && !Verifier.deferredItemMatches(action, before, after)) {
+                        identityUnconfirmed = true
                         unreadableRecheck = true
                         result = result.copy(status = VerifyStatus.AMBIGUOUS,
                             evidence = listOf("deferred item identity not confirmed"))
@@ -792,7 +798,7 @@ class BrainEngine(
                     VerifyStatus.HUMAN_NEEDED -> if (after.challenge) DiagnosticCode.CHALLENGE else DiagnosticCode.AUTH_WALL
                     VerifyStatus.AMBIGUOUS -> if (after.settle != com.appgate.brain.model.Settle.IDLE) DiagnosticCode.PAGE_UNSETTLED else DiagnosticCode.UNMET_EXPECTATION
                     else -> DiagnosticCode.UNMET_EXPECTATION
-                })
+                }, VerificationDiagnostics.observed(action,before,after,result,observationRechecks,observationReadFailed,identityUnconfirmed))
                 if (result.status == VerifyStatus.HUMAN_NEEDED) {
                     ledger.record(LedgerStep(clock(), ledger.phase, before.hash, stepDesc, VerifyStatus.HUMAN_NEEDED, result.evidence.joinToString("; "), ledger.programSource))
                     if (after.challenge) site.recordChallenge(clock())
@@ -1347,8 +1353,10 @@ class BrainEngine(
         events.diagnostic(ledger.host, "memory_checkpoint", data)
     }
 
-    private fun diagnostic(ledger: TaskLedger, before: SemanticPageState, after: SemanticPageState?, step: Step?, status: VerifyStatus?, code: DiagnosticCode) {
-        events.diagnostic(ledger.host, "action_outcome", SemanticDiagnostics.action(ledger, before, after, step, status, code))
+    private fun diagnostic(ledger: TaskLedger, before: SemanticPageState, after: SemanticPageState?, step: Step?, status: VerifyStatus?, code: DiagnosticCode, details: JsonObject? = null) {
+        val data=SemanticDiagnostics.action(ledger, before, after, step, status, code)
+        details?.keys?.forEach { data.put(it,details[it]) }
+        events.diagnostic(ledger.host, "action_outcome", data)
     }
 
     private fun verifiedChange(action: Action, before: SemanticPageState, after: SemanticPageState): Boolean {
@@ -1401,6 +1409,7 @@ class BrainEngine(
         capability: String, params: Map<String,String>, program: com.appgate.brain.planner.PlannerProgram,
         reservation: com.appgate.brain.model.StrategyFailure?, reason: ProposalRejectionReason): Boolean {
         ledger.note("teacher proposal rejected: ${reason.name}")
+        plannerOutcome(ledger,capability,"PROPOSAL_REJECTED",JsonObject().put("proposal_rejection",reason.name))
         if (ledger.goal.intent != GoalIntent.LEARN_SITE) return false
         val quotaKey=FailedStrategies.key(page,capability)
         val quota=reservation ?: return false
