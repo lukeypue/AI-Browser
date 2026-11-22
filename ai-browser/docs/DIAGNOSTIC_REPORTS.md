@@ -55,3 +55,9 @@ counts remain explicit. Existing legacy reports,1MiB trimming, queues and retent
 Deploy independently validating receiver/publisher code and the pinned native validator before
 promoting an app that emits these optional fields. New physical-phone evidence is required to
 explain actual expansion failures; a diagnostics improvement is not measured marketplace learning.
+
+### Synthetic server startup evidence
+
+Debug serverlab maintenance keeps the existing ANR classification object unchanged (`status`, `main_state`, `observed_frames`). A separate optional `<diagnostic UUID>.anr-collection.json` sidecar records only correlated cycle/source/version, the exact selected event timestamp, event-match flag, and closed collection/cleanup enums. It distinguishes a null stream, opening/read failure, byte limit, parsed result, deadline/cancellation and worker failure. Cleanup errors never erase a completed parse or promote malformed evidence. `PARSED` means parsing ran; classification may still be `UNKNOWN`. `DEFERRED` means cleanup completion was not observed before the deadline. Raw traces, exception messages and private paths are never exported. Sidecar failure cannot remove the classification.
+
+The debug thread sampler starts in instrumentation `onCreate`, before instrumentation-thread registration at `onStart`. Earlier samples explicitly report `NOT_REGISTERED`, rather than pretending that the main thread was the instrumentation thread. Main-thread setup constructs a path from `applicationInfo.dataDir` without calling `getFilesDir` or performing disk writes. The background worker samples the current atomic stage and stops after at most 60 samples even if `onStart` never arrives. Android installs content providers before instrumentation `onCreate`; this sampler does not cover that earlier stage. Missing/stale samples are unavailable evidence, not successful startup. These synthetic maintenance records do not establish phone-site learning.

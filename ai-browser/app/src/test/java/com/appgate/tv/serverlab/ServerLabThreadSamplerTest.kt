@@ -42,4 +42,26 @@ class ServerLabThreadSamplerTest {
   val file=Files.createTempFile("lab-watch-file","tmp").toFile()
   try {val s=ServerLabThreadSampler(file,id,rev,70,{0L},{ServerLabThreadSampler.Stage.GUARD},Thread.currentThread(),Thread.currentThread(),10L);s.start();Thread.sleep(30);s.close();assertTrue(file.isFile)}finally{file.delete()}
  }
+ @Test fun samplesBeforeInstrumentationRegistrationWithoutMainThreadDiskIo() {
+  val parent=Files.createTempDirectory("lab-early").toFile();val dir=File(parent,"not-created")
+  val stage=java.util.concurrent.atomic.AtomicReference(ServerLabThreadSampler.Stage.ON_CREATE)
+  val sampler=ServerLabThreadSampler(dir,id,rev,70,{10L},{stage.get()},Thread.currentThread(),null,10L)
+  try {
+   assertFalse(dir.exists());sampler.start()
+   val file=File(dir,"startup-threads.json");val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2)
+   while(!file.exists()&&System.nanoTime()<deadline)Thread.sleep(5)
+   val first=com.appgate.brain.json.Json.parseObject(file.readText())
+   assertEquals("ON_CREATE",first.optString("stage"))
+   assertEquals("NOT_REGISTERED",first.optObject("instrumentation")!!.optString("status"))
+   sampler.registerInstrumentation(Thread.currentThread());stage.set(ServerLabThreadSampler.Stage.ON_START)
+   while(!file.readText().contains("ON_START")&&System.nanoTime()<deadline)Thread.sleep(5)
+   val later=com.appgate.brain.json.Json.parseObject(file.readText())
+   assertEquals("ON_START",later.optString("stage"));assertFalse(later.optObject("instrumentation")!!.keys.contains("status"))
+  } finally {sampler.close();parent.deleteRecursively()}
+ }
+ @Test fun finiteSamplingStopsWithoutOnStartOrExplicitClose() {
+  val dir=Files.createTempDirectory("lab-finite").toFile()
+  val s=ServerLabThreadSampler(dir,id,rev,70,{0L},{ServerLabThreadSampler.Stage.GUARD},Thread.currentThread(),Thread.currentThread(),10L)
+  try {s.start();assertTrue("worker must end even if onStart never runs",s.awaitStopped(2500))}finally{s.close();dir.deleteRecursively()}
+ }
 }

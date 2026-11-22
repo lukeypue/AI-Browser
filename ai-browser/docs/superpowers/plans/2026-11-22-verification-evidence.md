@@ -23,3 +23,6 @@ No reward/policy/signing/auth changes, no secrets or page content, no new automa
 - [ ] Update independent validators before emitting release, run normal stable signed controller and verify artifact/allCI.
 - [ ] Update City using existing locked path and verify sanitized report delivery.
 - [ ] Qualify/pin native update through existing guard, retain memory, verify restart persistence and continuing loop. No phone installation or real-site claim.
+
+## Verified implementation and current rollout hold
+Source FFD passed 1,089 full source checks, independent review and City preflight. Public and native receiver validators were independently upgraded and verified while preserving uploader/City configuration. Warm candidate startup and retained memory passed. The first cold qualification failed with an ANR on 2026-11-22 at 21:20:01.011 UTC; that attempt is preserved and not retried or marked passed. Automatic recovery restored source39 and its memory, validated all pins, and resumed the existing native loop. No source FFD push, stable APK publication or phone installation occurred. A subsequent debug-only regression and closed collection/onCreate sampler improvements address evidence loss; they do not claim the underlying cold-start cause is fixed. Publication remains gated on actual source-bound cold qualification.

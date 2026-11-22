@@ -114,4 +114,40 @@ $frames
         assertEquals(ServerLabAnrTrace.Status.UNKNOWN,ServerLabAnrTrace.parse(bytes,0).status)
         assertEquals(ServerLabAnrTrace.Status.UNKNOWN,ServerLabAnrTrace.collect(0,100){throw AssertionError("must not open")}.status)
     }
+    @Test fun closeFailureCannotEraseAlreadyParsedOwnMainEvidence() {
+        val input=object:ByteArrayInputStream(trace().toByteArray()) {override fun close(){throw java.io.IOException("PRIVATE_CLOSE_MESSAGE")}}
+        val result=ServerLabAnrTrace.collect(123,1000){input}
+        assertEquals("close cleanup cannot erase an observed main stack",ServerLabAnrTrace.Status.OBSERVED,result.status)
+        assertEquals(setOf(ServerLabAnrTrace.Frame.BRAIN_RUNTIME_GET),result.frames)
+        assertFalse(result.toJson().toString().contains("PRIVATE"))
+    }
+    @Test fun collectionOutcomesDistinguishNullOpenReadParseAndCleanup() {
+        fun evidence(result:ServerLabAnrTrace.Result, outcome:String, cleanup:String) {
+            val row=result.collectionJson()
+            assertEquals(outcome,row.optString("outcome"));assertEquals(cleanup,row.optString("cleanup"))
+            assertEquals(setOf("outcome","cleanup"),row.keys)
+            assertEquals(setOf("status","main_state","observed_frames"),result.toJson().keys)
+            assertFalse(row.toString().contains("PRIVATE"))
+        }
+        evidence(ServerLabAnrTrace.collect(123,1000){null},"STREAM_NULL","NOT_OPENED")
+        evidence(ServerLabAnrTrace.collect(123,1000){throw java.io.IOException("PRIVATE_OPEN")},"OPEN_FAILED","NOT_OPENED")
+        evidence(ServerLabAnrTrace.collect(123,1000){object:InputStream(){override fun read():Int=throw java.io.IOException("PRIVATE_READ")}},"READ_FAILED","CLOSED")
+        evidence(ServerLabAnrTrace.collect(123,1000){ByteArrayInputStream(trace().toByteArray())},"PARSED","CLOSED")
+        evidence(ServerLabAnrTrace.collect(123,1000){object:ByteArrayInputStream(trace().toByteArray()){override fun close(){throw java.io.IOException("PRIVATE_CLOSE")}}},"PARSED","CLOSE_FAILED")
+        val invalid=ServerLabAnrTrace.collect(123,1000){object:ByteArrayInputStream("PRIVATE_INVALID".toByteArray()){override fun close(){throw java.io.IOException("PRIVATE_CLOSE")}}}
+        assertEquals(ServerLabAnrTrace.Status.UNKNOWN,invalid.status);evidence(invalid,"PARSED","CLOSE_FAILED")
+        evidence(ServerLabAnrTrace.collect(123,1000){ByteArrayInputStream(ByteArray(ServerLabAnrTrace.MAX_BYTES+1))},"SIZE_LIMIT","CLOSED")
+        evidence(ServerLabAnrTrace.collect(0,1000){throw AssertionError("must not open")},"INVALID_PID","NOT_OPENED")
+    }
+    @Test fun collectionDeadlineReportsDeferredCleanupWithoutExceptionText() {
+        val release=CountDownLatch(1)
+        val result=ServerLabAnrTrace.collect(123,50){object:InputStream(){
+            override fun read():Int {try {release.await(2,TimeUnit.SECONDS)}catch(_:InterruptedException){};return -1}
+            override fun close(){release.countDown()}
+        }}
+        assertEquals(ServerLabAnrTrace.Status.TIMEOUT,result.status)
+        assertEquals("DEADLINE",result.collectionJson().optString("outcome"))
+        assertEquals("DEFERRED",result.collectionJson().optString("cleanup"))
+        release.countDown()
+    }
 }

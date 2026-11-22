@@ -24,6 +24,7 @@ class ServerLabInstrumentation : Instrumentation() {
     @Volatile private var faultStartedAt = 0L
     private val faultRecorded = AtomicBoolean(false)
     private var startupTrace: ServerLabStartupTrace? = null
+    private var threadSampler: ServerLabThreadSampler? = null
     private val observedStage = AtomicReference(ServerLabThreadSampler.Stage.GUARD)
     private fun enterStage(value: ServerLabStartupTrace.Stage) {
         observedStage.set(runCatching { ServerLabThreadSampler.Stage.valueOf(value.name) }.getOrDefault(ServerLabThreadSampler.Stage.UNKNOWN))
@@ -61,16 +62,25 @@ class ServerLabInstrumentation : Instrumentation() {
         if (BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB &&
             targetContext.packageName == "com.aibrowser.universal.serverlab" &&
             (args.getString("command") ?: "smoke") in setOf("smoke", "cycle", "probe", "fault_probe")) {
-            startupTrace = runCatching {
-                ServerLabStartupTrace(File(targetContext.filesDir, "serverlab"),
-                    args.getString("cycle_id") ?: "", BuildConfig.DIAGNOSTICS_REVISION,
-                    BuildConfig.VERSION_CODE, SystemClock::elapsedRealtime)
-            }.getOrNull()
-            // Do not perform diagnostic disk I/O on Android's main thread.
+            val id=args.getString("cycle_id") ?: ""
+            if(runCatching {UUID.fromString(id).toString()==id}.getOrDefault(false)) {
+                faultId=id;faultStartedAt=SystemClock.elapsedRealtime();faultRecorded.set(false)
+                stage="ON_CREATE";observedStage.set(ServerLabThreadSampler.Stage.ON_CREATE)
+                // getFilesDir may create directories synchronously. Construct only a path on main.
+                val directory=File(File(targetContext.applicationInfo.dataDir,"files"),"serverlab")
+                startupTrace=ServerLabStartupTrace(directory,id,BuildConfig.DIAGNOSTICS_REVISION,
+                    BuildConfig.VERSION_CODE,SystemClock::elapsedRealtime)
+                threadSampler=ServerLabThreadSampler(directory,id,BuildConfig.DIAGNOSTICS_REVISION,
+                    BuildConfig.VERSION_CODE,SystemClock::elapsedRealtime,{observedStage.get()},
+                    Looper.getMainLooper().thread,null).also {it.start()}
+                // The worker reads the current atomic stage; no delayed ON_CREATE disk write.
+                // Providers run before instrumentation.onCreate and are outside this coverage.
+            }
         }
         start()
     }
     override fun onStart() {
+        threadSampler?.registerInstrumentation(Thread.currentThread())
         val command=args.getString("command") ?: "smoke"
         val rawId=args.getString("cycle_id") ?: UUID.randomUUID().toString()
         // Reject arbitrary paths before creating a file.
@@ -81,10 +91,6 @@ class ServerLabInstrumentation : Instrumentation() {
             finish(Activity.RESULT_CANCELED,Bundle().apply { putString("result","INVALID_COMMAND") }); return
         }
         if(command=="anr_probe") { inspectOwnAnr(id); return }
-        val threadSampler = if(BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB &&
-            targetContext.packageName == "com.aibrowser.universal.serverlab")
-            ServerLabThreadSampler(File(targetContext.filesDir,"serverlab"),id,BuildConfig.DIAGNOSTICS_REVISION,
-                BuildConfig.VERSION_CODE,SystemClock::elapsedRealtime,{observedStage.get()},Looper.getMainLooper().thread,Thread.currentThread()).also {it.start()} else null
         enterStage(ServerLabStartupTrace.Stage.ON_START)
         var service:BrainService?=null
         var bound=false
@@ -106,7 +112,6 @@ class ServerLabInstrumentation : Instrumentation() {
         try {
             check(BuildConfig.DEBUG && BuildConfig.SERVER_ANDROID_LAB)
             check(targetContext.packageName=="com.aibrowser.universal.serverlab")
-            faultId=id; faultStartedAt=SystemClock.elapsedRealtime(); faultRecorded.set(false)
             startupTrace?.record(ServerLabStartupTrace.Stage.RUNTIME_INSTALL)
             ServerLabRuntime.install(targetContext, ServerLabRuntime.ReportIdentityGate { r -> report.set(r); complete.countDown() })
             // Explicitly disable transports; this never reads a planner key.
@@ -247,6 +252,22 @@ class ServerLabInstrumentation : Instrumentation() {
             FileOutputStream(temporary).use {it.write(bytes);it.fd.sync()}
             check(!target.exists() && temporary.renameTo(target))
         } finally {temporary.delete()}
+        // Optional separate closed sidecar; its failure cannot erase the durable classification.
+        runCatching {
+            val extra=JsonObject().put("schema_version",1).put("cycle_id",id)
+                .put("source_revision",BuildConfig.DIAGNOSTICS_REVISION).put("version_code",BuildConfig.VERSION_CODE)
+                .put("expected_event_timestamp_ms",timestamp).put("event_matched",matched)
+                .put("synthetic_maintenance_only",true).put("collection",result.collectionJson())
+                .toString().toByteArray(Charsets.UTF_8)
+            check(extra.size<=1024)
+            val targetExtra=File(directory,"$id.anr-collection.json")
+            val tempExtra=File(directory,"$id.anr-collection.json.tmp")
+            check(!targetExtra.exists())
+            try {
+                FileOutputStream(tempExtra).use {it.write(extra);it.fd.sync()}
+                check(!targetExtra.exists() && tempExtra.renameTo(targetExtra))
+            } finally {tempExtra.delete()}
+        }
         finish(Activity.RESULT_OK,Bundle().apply {
             putString("result","ANR_EVIDENCE");putString("output","files/serverlab/$name")
         })

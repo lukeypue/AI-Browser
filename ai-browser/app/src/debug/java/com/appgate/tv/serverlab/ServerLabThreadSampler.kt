@@ -6,16 +6,18 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /** Debug-only observational samples. No raw stack/name/message is written; no fsync or main-thread I/O. */
 internal class ServerLabThreadSampler(
  private val directory: File, private val cycleId: String, private val revision: String,
  private val version: Int, private val clock: () -> Long, private val stage: () -> Stage,
- private val main: Thread, private val instrumentation: Thread, private val intervalMs: Long = 2000L
+ private val main: Thread, instrumentation: Thread?, private val intervalMs: Long = 2000L
 ) : AutoCloseable {
- enum class Stage { GUARD, ON_START, RUNTIME_INSTALL, SETTINGS, BIND_REQUESTED, BEFORE_MAIN_DISPATCH,
+ enum class Stage { GUARD, ON_CREATE, ON_START, RUNTIME_INSTALL, SETTINGS, BIND_REQUESTED, BEFORE_MAIN_DISPATCH,
   MAIN_BIND_ENTERED, BEFORE_SERVICE_START, AFTER_SERVICE_START, BEFORE_BIND_CALL, AFTER_BIND_CALL,
   BOUND_CALLBACK, WAIT_BOUND, ENGINE_READY, READY, CLEANUP, UNKNOWN }
+ private val instrumentation=AtomicReference<Thread?>(instrumentation)
  private val started=clock()
  private val closed=AtomicBoolean(false)
  private val launched=AtomicBoolean(false)
@@ -28,8 +30,15 @@ internal class ServerLabThreadSampler(
   if(closed.get() || !launched.compareAndSet(false,true))return
   var count=0
   worker.scheduleWithFixedDelay({
-   if(!closed.get() && count++<60)sample()
+   if(!closed.get() && count<60) {count++;sample()}
+   // A lost onStart must not leave an immortal diagnostic worker.
+   if(closed.get() || count>=60)worker.shutdown()
   },intervalMs,intervalMs,TimeUnit.MILLISECONDS)
+ }
+ fun registerInstrumentation(thread: Thread) { instrumentation.compareAndSet(null,thread) }
+ fun awaitStopped(timeoutMs: Long): Boolean {
+  require(timeoutMs in 1..5000)
+  return worker.awaitTermination(timeoutMs,TimeUnit.MILLISECONDS)
  }
  private fun sample() {
   val temporary=File(directory,"startup-threads.json.tmp")
@@ -38,7 +47,8 @@ internal class ServerLabThreadSampler(
     .put("version_code",version).put("stage",stage().name)
     .put("elapsed_ms",(clock()-started).coerceIn(0L,7200000L))
     .put("main",classify(main.stackTrace,main.state))
-    .put("instrumentation",classify(instrumentation.stackTrace,instrumentation.state))
+    .put("instrumentation",instrumentation.get()?.let {classify(it.stackTrace,it.state)}
+     ?: JsonObject().put("state","NEW").putStrings("frames",emptyList()).put("status","NOT_REGISTERED"))
    val bytes=row.toString().toByteArray(Charsets.UTF_8)
    check(bytes.size<=4096)
    if(closed.get())return
@@ -52,7 +62,7 @@ internal class ServerLabThreadSampler(
  override fun close() {
   if(!closed.compareAndSet(false,true))return
   worker.shutdownNow()
-  try {worker.awaitTermination(2,TimeUnit.SECONDS)}catch(_:InterruptedException){Thread.currentThread().interrupt()}
+  try {awaitStopped(2000)}catch(_:InterruptedException){Thread.currentThread().interrupt()}
  }
  companion object {
   private val known=mapOf(

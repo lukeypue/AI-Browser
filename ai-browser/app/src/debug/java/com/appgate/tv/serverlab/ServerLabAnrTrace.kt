@@ -17,7 +17,14 @@ internal object ServerLabAnrTrace {
     enum class MainState { NATIVE, RUNNABLE, WAITING, TIMED_WAITING, BLOCKED, UNKNOWN }
     enum class Frame { BRAIN_RUNTIME_GET, BRAIN_RUNTIME_INIT, BRAIN_SERVICE_CREATE,
         GECKO_RUNTIME_CREATE, GECKO_SESSION_OPEN, OFFSCREEN_ATTACH, BINDER_TRANSACT, MESSAGE_QUEUE_POLL, OBJECT_WAIT, THREAD_SLEEP }
-    data class Result(val status: Status, val mainState: MainState = MainState.UNKNOWN, val frames: Set<Frame> = emptySet()) {
+    enum class Collection { NOT_COLLECTED, INVALID_PID, STREAM_NULL, OPEN_FAILED, READ_FAILED,
+        PARSED, SIZE_LIMIT, CANCELLED, DEADLINE, WORKER_FAILED }
+    enum class Cleanup { NOT_OPENED, CLOSED, CLOSE_FAILED, DEFERRED }
+    data class Result(val status: Status, val mainState: MainState = MainState.UNKNOWN,
+        val frames: Set<Frame> = emptySet(), val collection: Collection = Collection.NOT_COLLECTED,
+        val cleanup: Cleanup = Cleanup.NOT_OPENED) {
+        // Separate sidecar: the existing three-field classification wire remains unchanged.
+        fun collectionJson() = JsonObject().put("outcome",collection.name).put("cleanup",cleanup.name)
         fun toJson() = JsonObject().put("status",status.name).put("main_state",mainState.name)
             .putStrings("observed_frames",frames.map { it.name }.sorted())
     }
@@ -72,32 +79,44 @@ internal object ServerLabAnrTrace {
         }
         return Result(Status.OBSERVED,state,observed)
     }
-    /** Deadline includes stream opening. A late opener/read closes itself; no raw bytes escape. */
+    /** Deadline includes stream opening and cleanup. Raw bytes never leave bounded RAM. */
     fun collect(pid: Int, timeoutMs: Long = 3000, open: () -> InputStream?): Result {
         require(timeoutMs in 1..5000)
-        if(pid<=0) return Result(Status.UNKNOWN)
+        if(pid<=0) return Result(Status.UNKNOWN,collection=Collection.INVALID_PID)
         val active=AtomicReference<InputStream?>()
         val cancelled=AtomicBoolean(false)
         val pool=Executors.newSingleThreadExecutor { work -> Thread(work,"lab-anr-reader").apply { isDaemon=true } }
         val future=pool.submit<Result> {
-            try {
-                val stream=open() ?: return@submit Result(Status.UNAVAILABLE)
-                active.set(stream)
-                stream.use {
-                    if(cancelled.get() || Thread.currentThread().isInterrupted) return@submit Result(Status.TIMEOUT)
+            val stream=try { open() } catch(_:Exception) {
+                return@submit Result(Status.UNAVAILABLE,collection=Collection.OPEN_FAILED)
+            } ?: return@submit Result(Status.UNAVAILABLE,collection=Collection.STREAM_NULL)
+            active.set(stream)
+            var cleanup=Cleanup.CLOSED
+            val result=try {
+                if(cancelled.get() || Thread.currentThread().isInterrupted)
+                    Result(Status.TIMEOUT,collection=Collection.CANCELLED)
+                else {
                     val out=ByteArrayOutputStream();val buffer=ByteArray(4096)
-                    while(true) {
-                        if(cancelled.get() || Thread.currentThread().isInterrupted) return@submit Result(Status.TIMEOUT)
-                        val n=it.read(buffer,0,minOf(buffer.size,MAX_BYTES+1-out.size()))
-                        if(n<0) break
-                        if(n==0) continue
-                        out.write(buffer,0,n)
-                        if(out.size()>MAX_BYTES) return@submit Result(Status.LIMIT)
+                    var terminal: Result?=null
+                    while(terminal==null) {
+                        if(cancelled.get() || Thread.currentThread().isInterrupted) {
+                            terminal=Result(Status.TIMEOUT,collection=Collection.CANCELLED);break
+                        }
+                        val count=stream.read(buffer,0,minOf(buffer.size,MAX_BYTES+1-out.size()))
+                        if(count<0) {terminal=parse(out.toByteArray(),pid).copy(collection=Collection.PARSED);break}
+                        if(count==0) continue
+                        out.write(buffer,0,count)
+                        if(out.size()>MAX_BYTES) terminal=Result(Status.LIMIT,collection=Collection.SIZE_LIMIT)
                     }
-                    parse(out.toByteArray(),pid)
+                    checkNotNull(terminal)
                 }
-            } catch(_:Exception) { Result(Status.UNAVAILABLE) }
-            finally { active.set(null) }
+            } catch(_:Exception) { Result(Status.UNAVAILABLE,collection=Collection.READ_FAILED) }
+            finally {
+                // A close exception cannot erase or promote the primary read/parse result.
+                try {stream.close()} catch(_:Exception) {cleanup=Cleanup.CLOSE_FAILED}
+                active.compareAndSet(stream,null)
+            }
+            result.copy(cleanup=cleanup)
         }
         fun cancelAndClose() {
             cancelled.set(true)
@@ -105,8 +124,8 @@ internal object ServerLabAnrTrace {
             active.get()?.let { stream -> Thread({try {stream.close()}catch(_:Exception){}},"lab-anr-close").apply {isDaemon=true;start()} }
         }
         return try { future.get(timeoutMs,TimeUnit.MILLISECONDS) }
-        catch(_:TimeoutException) { cancelAndClose();Result(Status.TIMEOUT) }
-        catch(_:Exception) { cancelAndClose();Result(Status.UNAVAILABLE) }
+        catch(_:TimeoutException) { cancelAndClose();Result(Status.TIMEOUT,collection=Collection.DEADLINE,cleanup=Cleanup.DEFERRED) }
+        catch(_:Exception) { cancelAndClose();Result(Status.UNAVAILABLE,collection=Collection.WORKER_FAILED,cleanup=Cleanup.DEFERRED) }
         finally { pool.shutdownNow() }
     }
 }
